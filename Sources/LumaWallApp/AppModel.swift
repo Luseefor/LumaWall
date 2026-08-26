@@ -22,6 +22,7 @@ final class AppModel {
 
     var section: Section = .home
     var assets: [WallpaperAsset] = []
+    var previewAsset: WallpaperAsset?
     var searchText = ""
     var isImporting = false
     var alertTitle = ""

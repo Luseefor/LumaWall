@@ -31,6 +31,7 @@ private struct ContentView: View {
         .searchable(text: $model.searchText, prompt: "Search your wallpapers")
         .dropDestination(for: URL.self) { urls, _ in model.importVideos(urls); return true }
         .alert(model.alertTitle, isPresented: $model.showsAlert) { Button("OK", role: .cancel) {} } message: { Text(model.alertMessage) }
+        .sheet(item: $model.previewAsset) { asset in WallpaperPreview(asset: asset) }
         .overlay {
             if model.isImporting {
                 ZStack {
@@ -72,7 +73,9 @@ private struct ContentView: View {
                     .frame(maxWidth: .infinity, minHeight: 380)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 250, maximum: 360), spacing: 18)], spacing: 20) {
-                        ForEach(model.filteredAssets) { asset in WallpaperCard(asset: asset) { model.remove(asset) } }
+                        ForEach(model.filteredAssets) { asset in
+                            WallpaperCard(asset: asset, preview: { model.previewAsset = asset }) { model.remove(asset) }
+                        }
                     }
                 }
             }.padding(28)
@@ -86,6 +89,7 @@ private struct ContentView: View {
 
 private struct WallpaperCard: View {
     let asset: WallpaperAsset
+    let preview: () -> Void
     let remove: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -94,6 +98,10 @@ private struct WallpaperCard: View {
                 else { Rectangle().fill(.white.opacity(0.06)).overlay(Image(systemName: "film")) }
             }
             .aspectRatio(16 / 10, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 15))
+            .overlay(alignment: .bottomTrailing) {
+                Button(action: preview) { Image(systemName: "play.fill").frame(width: 32, height: 32) }
+                    .buttonStyle(.borderedProminent).buttonBorderShape(.circle).padding(9)
+            }
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(asset.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
@@ -107,5 +115,30 @@ private struct WallpaperCard: View {
         }
         .padding(12).background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 19))
         .overlay(RoundedRectangle(cornerRadius: 19).stroke(.white.opacity(0.09)))
+    }
+}
+
+private struct WallpaperPreview: View {
+    let asset: WallpaperAsset
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LoopingVideoView(url: asset.mediaURL)
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .background(.black)
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(asset.name).font(.title2.bold())
+                    Text("\(Int(asset.pixelSize.width))×\(Int(asset.pixelSize.height)) · \(asset.framesPerSecond.formatted(.number.precision(.fractionLength(0)))) FPS · silent")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done", action: dismiss.callAsFunction).keyboardShortcut(.cancelAction)
+            }
+            .padding(18)
+        }
+        .frame(width: 920, height: 600)
+        .preferredColorScheme(.dark)
     }
 }
