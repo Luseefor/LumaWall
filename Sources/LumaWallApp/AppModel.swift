@@ -7,11 +7,12 @@ import UniformTypeIdentifiers
 @Observable
 final class AppModel {
     enum Section: String, CaseIterable, Identifiable {
-        case home = "Home", library = "Library", displays = "Displays", playlists = "Playlists", settings = "Settings"
+        case home = "Home", explore = "Explore", library = "Library", displays = "Displays", playlists = "Playlists", settings = "Settings"
         var id: String { rawValue }
         var symbol: String {
             switch self {
             case .home: "house.fill"
+            case .explore: "safari.fill"
             case .library: "square.grid.2x2.fill"
             case .displays: "display.2"
             case .playlists: "rectangle.stack.fill"
