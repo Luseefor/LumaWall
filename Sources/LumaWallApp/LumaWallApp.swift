@@ -63,9 +63,9 @@ private struct TopBar: View {
             }.buttonStyle(.plain).focusable(false).frame(width: 165, alignment: .leading)
 
             HStack(spacing: 3) {
-                ForEach(AppModel.Section.allCases) { item in
+                ForEach([AppModel.Section.home, .explore, .library]) { item in
                     Button {
-                        withAnimation(.snappy(duration: 0.22)) { model.section = item }
+                        model.section = item
                     } label: {
                         Text(item.rawValue).font(.system(size: 12, weight: model.section == item ? .semibold : .medium))
                             .padding(.horizontal, 12).frame(height: 34)
@@ -75,17 +75,24 @@ private struct TopBar: View {
                 }
             }.padding(4).background(.black.opacity(0.25), in: Capsule()).overlay(Capsule().stroke(Theme.line))
             Spacer(minLength: 8)
-            HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search library", text: $model.searchText).textFieldStyle(.plain).frame(width: 120).onSubmit { model.section = .explore }
-                if !model.searchText.isEmpty {
-                    Button { model.searchText = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.secondary)
-                }
-            }.padding(.horizontal, 12).frame(height: 36).background(.white.opacity(0.06), in: Capsule()).overlay(Capsule().stroke(Theme.line))
+            utilityButton(.displays, symbol: "display.2")
+            utilityButton(.playlists, symbol: "rectangle.stack.fill")
+            utilityButton(.settings, symbol: "gearshape.fill")
+            Button { model.section = .explore } label: {
+                Image(systemName: "magnifyingglass").frame(width: 36, height: 36).background(.white.opacity(0.08), in: Circle())
+            }.buttonStyle(.plain).focusable(false).help("Search")
             Button(action: model.chooseVideos) {
                 Image(systemName: "plus").font(.system(size: 14, weight: .semibold)).frame(width: 36, height: 36).background(.white.opacity(0.1), in: Circle())
             }.buttonStyle(.plain).focusable(false).help("Import videos")
         }.padding(.horizontal, 22).frame(height: 66).background(.black.opacity(0.14))
+    }
+
+    private func utilityButton(_ section: AppModel.Section, symbol: String) -> some View {
+        Button { model.section = section } label: {
+            Image(systemName: symbol).frame(width: 36, height: 36)
+                .background(model.section == section ? .white : .white.opacity(0.08), in: Circle())
+                .foregroundStyle(model.section == section ? .black : .white.opacity(0.72))
+        }.buttonStyle(.plain).focusable(false).help(section.rawValue)
     }
 }
 
@@ -95,13 +102,14 @@ private struct Home: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 Hero(asset: model.assets.last, preview: { if let asset = model.assets.last { model.previewAsset = asset } }, importAction: model.chooseVideos)
+                    .padding(.horizontal, -28).padding(.top, -28)
                 SectionTitle(title: "Recently added", subtitle: "Your newest wallpapers, ready offline") { model.section = .library }
                 if model.assets.isEmpty { EmptyStrip(action: model.chooseVideos) }
                 else {
                     ScrollView(.horizontal) {
                         HStack(spacing: 16) {
                             ForEach(model.assets.reversed()) { asset in
-                                WallpaperCard(asset: asset, preview: { model.previewAsset = asset }) { model.remove(asset) }.frame(width: 270)
+                                WallpaperCard(asset: asset, favorite: model.isFavorite(asset), preview: { model.previewAsset = asset }, toggleFavorite: { model.toggleFavorite(asset) }) { model.remove(asset) }.frame(width: 270)
                             }
                         }
                     }.scrollIndicators(.hidden)
@@ -154,7 +162,7 @@ private struct Collection: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                if explore { ExploreBanner() }
+                if explore { ExploreBanner(model: model) }
                 else {
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 5) { Text("Library").font(.system(size: 32, weight: .bold, design: .rounded)); Text("Everything installed on this Mac").foregroundStyle(.secondary) }
@@ -163,16 +171,20 @@ private struct Collection: View {
                     }
                 }
                 HStack(spacing: 9) {
-                    FilterPill(title: "All", symbol: "square.grid.2x2.fill", selected: true)
-                    FilterPill(title: "Favorites", symbol: "heart.fill", selected: false)
-                    FilterPill(title: "4K", symbol: "4k.tv.fill", selected: false)
+                    ForEach(AppModel.LibraryFilter.allCases) { filter in
+                        FilterPill(title: filter.rawValue, symbol: filter.symbol, selected: model.libraryFilter == filter) {
+                            withAnimation(.snappy(duration: 0.2)) { model.libraryFilter = filter }
+                        }
+                    }
                     Spacer(); Text("Newest first").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                 }
                 SectionTitle(title: explore ? "Explore your collection" : "Your wallpapers", subtitle: resultText)
                 if model.filteredAssets.isEmpty { EmptyStrip(action: model.chooseVideos).frame(minHeight: 280) }
                 else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 245, maximum: 360), spacing: 18)], spacing: 20) {
-                        ForEach(model.filteredAssets) { asset in WallpaperCard(asset: asset, preview: { model.previewAsset = asset }) { model.remove(asset) } }
+                        ForEach(model.filteredAssets) { asset in
+                            WallpaperCard(asset: asset, favorite: model.isFavorite(asset), preview: { model.previewAsset = asset }, toggleFavorite: { model.toggleFavorite(asset) }) { model.remove(asset) }
+                        }
                     }
                 }
             }.padding(28)
@@ -182,20 +194,31 @@ private struct Collection: View {
 }
 
 private struct ExploreBanner: View {
+    @Bindable var model: AppModel
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color.teal.opacity(0.38), Color.indigo.opacity(0.42)], startPoint: .leading, endPoint: .trailing)
             HStack {
-                VStack(alignment: .leading, spacing: 7) { Text("Explore").font(.system(size: 34, weight: .bold, design: .rounded)); Text("Search your private collection. Nothing leaves this Mac.").foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Explore").font(.system(size: 34, weight: .bold, design: .rounded))
+                    Text("Search your private collection. Nothing leaves this Mac.").foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search wallpapers", text: $model.searchText).textFieldStyle(.plain)
+                        if !model.searchText.isEmpty { Button { model.searchText = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.secondary) }
+                    }.padding(.horizontal, 13).frame(width: 310, height: 36).background(.black.opacity(0.25), in: Capsule()).overlay(Capsule().stroke(Theme.line))
+                }
                 Spacer(); Image(systemName: "sparkles.rectangle.stack.fill").font(.system(size: 68)).foregroundStyle(.white.opacity(0.14))
             }.padding(30)
-        }.frame(height: 145).clipShape(RoundedRectangle(cornerRadius: 22)).overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.line))
+        }.frame(height: 175).clipShape(RoundedRectangle(cornerRadius: 22)).overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.line))
     }
 }
 
 private struct WallpaperCard: View {
     let asset: WallpaperAsset
+    let favorite: Bool
     let preview: () -> Void
+    let toggleFavorite: () -> Void
     let remove: () -> Void
     @State private var hovering = false
     var body: some View {
@@ -204,14 +227,24 @@ private struct WallpaperCard: View {
                 if let url = asset.posterURL, let image = NSImage(contentsOf: url) { Image(nsImage: image).resizable().scaledToFill() }
                 else { Rectangle().fill(.white.opacity(0.06)).overlay(Image(systemName: "film")) }
                 if hovering { Color.black.opacity(0.25); Button(action: preview) { Image(systemName: "play.fill").font(.title3).frame(width: 44, height: 44).background(.white, in: Circle()).foregroundStyle(.black) }.buttonStyle(.plain) }
-                VStack { Spacer(); HStack { Text("LOCAL").font(.system(size: 9, weight: .bold)).padding(.horizontal, 7).frame(height: 22).background(.black.opacity(0.62), in: Capsule()); Spacer() } }.padding(10)
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button(action: toggleFavorite) {
+                            Image(systemName: favorite ? "heart.fill" : "heart").foregroundStyle(favorite ? .pink : .white)
+                                .frame(width: 30, height: 30).background(.black.opacity(0.48), in: Circle())
+                        }.buttonStyle(.plain)
+                    }
+                    Spacer()
+                    HStack { Text("LOCAL").font(.system(size: 9, weight: .bold)).padding(.horizontal, 7).frame(height: 22).background(.black.opacity(0.62), in: Capsule()); Spacer() }
+                }.padding(10)
             }.aspectRatio(16 / 10, contentMode: .fit).clipped().clipShape(RoundedRectangle(cornerRadius: 15)).onHover { hovering = $0 }
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(asset.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
                     Text("\(Int(asset.pixelSize.width))×\(Int(asset.pixelSize.height)) · \(asset.framesPerSecond.formatted(.number.precision(.fractionLength(0)))) FPS").font(.system(size: 10.5)).foregroundStyle(.secondary)
                 }
-                Spacer(); Menu { Button("Preview", systemImage: "play.fill", action: preview); Divider(); Button("Remove", systemImage: "trash", role: .destructive, action: remove) } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton)
+                Spacer(); Menu { Button("Preview", systemImage: "play.fill", action: preview); Button(favorite ? "Remove Favorite" : "Favorite", systemImage: favorite ? "heart.slash" : "heart", action: toggleFavorite); Divider(); Button("Remove", systemImage: "trash", role: .destructive, action: remove) } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton)
             }
         }.padding(12).background(Theme.panel, in: RoundedRectangle(cornerRadius: 19)).overlay(RoundedRectangle(cornerRadius: 19).stroke(Theme.line)).contentShape(RoundedRectangle(cornerRadius: 19)).onTapGesture(perform: preview)
     }
@@ -274,7 +307,12 @@ private struct SectionTitle: View {
 private struct FilterPill: View {
     let title, symbol: String
     let selected: Bool
-    var body: some View { Label(title, systemImage: symbol).font(.system(size: 12, weight: .semibold)).padding(.horizontal, 13).frame(height: 34).background(selected ? .white : .white.opacity(0.06), in: Capsule()).foregroundStyle(selected ? .black : .white.opacity(0.72)) }
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol).font(.system(size: 12, weight: .semibold)).padding(.horizontal, 13).frame(height: 34).background(selected ? .white : .white.opacity(0.06), in: Capsule()).foregroundStyle(selected ? .black : .white.opacity(0.72))
+        }.buttonStyle(.plain)
+    }
 }
 
 private struct Stat: View {

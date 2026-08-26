@@ -6,6 +6,20 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class AppModel {
+    enum LibraryFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case favorites = "Favorites"
+        case fourK = "4K"
+        var id: String { rawValue }
+        var symbol: String {
+            switch self {
+            case .all: "square.grid.2x2.fill"
+            case .favorites: "heart.fill"
+            case .fourK: "4k.tv.fill"
+            }
+        }
+    }
+
     enum Section: String, CaseIterable, Identifiable {
         case home = "Home", explore = "Explore", library = "Library", displays = "Displays", playlists = "Playlists", settings = "Settings"
         var id: String { rawValue }
@@ -25,6 +39,8 @@ final class AppModel {
     var assets: [WallpaperAsset] = []
     var previewAsset: WallpaperAsset?
     var searchText = ""
+    var libraryFilter: LibraryFilter = .all
+    private(set) var favoriteIDs: Set<WallpaperID> = []
     var isImporting = false
     var alertTitle = ""
     var alertMessage = ""
@@ -33,6 +49,11 @@ final class AppModel {
     private let importer: MediaImporter
 
     init() {
+        favoriteIDs = Set(
+            UserDefaults.standard.stringArray(forKey: "lumawall.favoriteIDs")?.compactMap(UUID.init(uuidString:)).map {
+                WallpaperID(rawValue: $0)
+            } ?? []
+        )
         do {
             let store = try LibraryStore()
             self.store = store
@@ -42,7 +63,22 @@ final class AppModel {
     }
 
     var filteredAssets: [WallpaperAsset] {
-        searchText.isEmpty ? assets : assets.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        assets.filter { asset in
+            let matchesSearch = searchText.isEmpty || asset.name.localizedCaseInsensitiveContains(searchText)
+            let matchesFilter = switch libraryFilter {
+            case .all: true
+            case .favorites: favoriteIDs.contains(asset.id)
+            case .fourK: asset.pixelSize.width >= 3_840 || asset.pixelSize.height >= 2_160
+            }
+            return matchesSearch && matchesFilter
+        }
+    }
+
+    func isFavorite(_ asset: WallpaperAsset) -> Bool { favoriteIDs.contains(asset.id) }
+
+    func toggleFavorite(_ asset: WallpaperAsset) {
+        if favoriteIDs.contains(asset.id) { favoriteIDs.remove(asset.id) } else { favoriteIDs.insert(asset.id) }
+        UserDefaults.standard.set(favoriteIDs.map { $0.rawValue.uuidString }, forKey: "lumawall.favoriteIDs")
     }
 
     func chooseVideos() {
