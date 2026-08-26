@@ -71,20 +71,3 @@ public actor LibraryStore {
         try data.write(to: indexURL, options: [.atomic, .completeFileProtectionUnlessOpen])
     }
 }
-
-private extension JSONEncoder {
-    static var lumaWall: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return encoder
-    }
-}
-
-private extension JSONDecoder {
-    static var lumaWall: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }
-}
