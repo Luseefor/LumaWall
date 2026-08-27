@@ -3,11 +3,21 @@ import SwiftUI
 
 enum Brand {
     static var iconImage: NSImage {
-        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
-           let image = NSImage(contentsOf: url) {
-            return image
+        for bundle in resourceBundles {
+            if let url = bundle.url(forResource: "AppIcon", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                return image
+            }
         }
         return NSImage(size: NSSize(width: 128, height: 128))
+    }
+
+    private static var resourceBundles: [Bundle] {
+        #if SWIFT_PACKAGE
+        [Bundle.module, Bundle.main]
+        #else
+        [Bundle.main]
+        #endif
     }
 }
 

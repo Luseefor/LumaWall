@@ -35,11 +35,24 @@ public actor AssignmentStore {
     }
 
     public func upsert(_ assignment: DisplayAssignment) throws {
-        if let index = snapshot.assignments.firstIndex(where: { $0.displayID == assignment.displayID }) {
-            snapshot.assignments[index] = assignment
-        } else {
-            snapshot.assignments.append(assignment)
+        try upsert([assignment])
+    }
+
+    /// Persists a topology-wide assignment change with one atomic file replace.
+    /// Readers therefore see either the old complete layout or the new one.
+    public func upsert(_ assignments: [DisplayAssignment]) throws {
+        guard !assignments.isEmpty else { return }
+        var values = Dictionary(uniqueKeysWithValues: snapshot.assignments.map { ($0.displayID, $0) })
+        for assignment in assignments {
+            values[assignment.displayID] = assignment
         }
+        snapshot.assignments = values.values.sorted { $0.displayID.rawValue < $1.displayID.rawValue }
+        snapshot.updatedAt = .now
+        try persist()
+    }
+
+    public func replaceAll(with assignments: [DisplayAssignment]) throws {
+        snapshot.assignments = assignments.sorted { $0.displayID.rawValue < $1.displayID.rawValue }
         snapshot.updatedAt = .now
         try persist()
     }

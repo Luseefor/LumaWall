@@ -8,7 +8,7 @@ struct LumaWallApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup("LumaWall") {
+        WindowGroup("LumaWall", id: "main") {
             RootView(model: model)
                 .frame(minWidth: 1_080, minHeight: 700)
         }
@@ -26,7 +26,15 @@ struct LumaWallApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        DispatchQueue.main.async { sender.setActivationPolicy(.accessory) }
+        return false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        sender.setActivationPolicy(.regular)
+        return true
+    }
 }
 
 private struct RootView: View {
@@ -64,6 +72,10 @@ private struct RootView: View {
             }
         }
         .onAppear { model.refreshDisplays() }
+        .onAppear {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.keyWindow?.identifier = NSUserInterfaceItemIdentifier("LumaWallMainWindow")
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -432,21 +444,132 @@ private struct FeaturedHero: View {
 
 private struct LibraryPage: View {
     @Bindable var model: AppModel
+    @State private var mode: LibraryMode = .wallpapers
+    @State private var selectedID: WallpaperID?
+
+    private enum LibraryMode: String, CaseIterable, Identifiable {
+        case wallpapers = "Wallpapers"
+        case playlists = "Playlists"
+        case automations = "Automations"
+        var id: String { rawValue }
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                PageHeader(title: "Library", subtitle: "Playlists, schedules, and saved videos") {
+        VStack(alignment: .leading, spacing: 18) {
+            PageHeader(title: "Library", subtitle: "Organize, inspect, and apply your local wallpapers") {
+                HStack(spacing: 10) {
+                    Picker("Library section", selection: $mode) {
+                        ForEach(LibraryMode.allCases) { item in Text(item.rawValue).tag(item) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 330)
                     PrimaryButton("Import", symbol: "plus", action: model.chooseVideos)
                 }
-
-                playlistSection
-                dayNightSection
-                appearanceSection
-                savedSection
             }
-            .padding(28)
+
+            switch mode {
+            case .wallpapers:
+                wallpaperWorkspace
+            case .playlists:
+                ScrollView { playlistSection.padding(.bottom, 28) }
+            case .automations:
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        dayNightSection
+                        appearanceSection
+                    }
+                    .padding(.bottom, 28)
+                }
+            }
         }
+        .padding(.horizontal, 28)
+        .padding(.top, 28)
+        .onAppear { validateSelection() }
+        .onChange(of: model.filteredAssets.map(\.id)) { _, _ in validateSelection() }
+    }
+
+    private var wallpaperWorkspace: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            libraryToolbar
+            if model.assets.isEmpty {
+                EmptyInvite(action: model.chooseVideos)
+                    .frame(maxHeight: .infinity)
+            } else if model.filteredAssets.isEmpty {
+                ContentUnavailableView(
+                    "No Matching Wallpapers",
+                    systemImage: "rectangle.stack.badge.minus",
+                    description: Text("Clear a filter or try a different search.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HSplitView {
+                    ScrollView {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: 14)],
+                            spacing: 16
+                        ) {
+                            ForEach(model.filteredAssets) { asset in
+                                LibrarySelectionTile(
+                                    model: model,
+                                    asset: asset,
+                                    isSelected: selectedID == asset.id
+                                ) { selectedID = asset.id }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                        .padding(.trailing, 12)
+                    }
+                    .frame(minWidth: 430)
+
+                    LibraryInspector(model: model, asset: selectedAsset)
+                        .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
+                }
+            }
+        }
+    }
+
+    private var selectedAsset: WallpaperAsset? {
+        guard let selectedID else { return nil }
+        return model.assets.first { $0.id == selectedID }
+    }
+
+    private var libraryToolbar: some View {
+        HStack(spacing: 10) {
+            TextField("Search your library", text: $model.searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 180, maxWidth: 320)
+            Picker("Resolution", selection: $model.resolutionFilter) {
+                ForEach(ResolutionFilter.allCases) { Text($0.title).tag($0) }
+            }
+            .frame(width: 130)
+            Picker("Category", selection: $model.categoryFilter) {
+                Text("All categories").tag(Optional<WallpaperCategory>.none)
+                ForEach(WallpaperCategory.allCases) { Text($0.title).tag(Optional($0)) }
+            }
+            .frame(width: 150)
+            Picker("Sort", selection: Binding(
+                get: { model.librarySort },
+                set: { model.setSort($0) }
+            )) {
+                ForEach(LibrarySort.allCases) { Text($0.title).tag($0) }
+            }
+            .frame(width: 125)
+            Toggle(isOn: $model.favoritesOnly) {
+                Label("Favorites", systemImage: "heart.fill")
+            }
+            .toggleStyle(.button)
+            Spacer(minLength: 8)
+            Text("\(model.filteredAssets.count) of \(model.assets.count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Theme.textDim)
+        }
+        .controlSize(.small)
+    }
+
+    private func validateSelection() {
+        if let selectedID, model.filteredAssets.contains(where: { $0.id == selectedID }) { return }
+        selectedID = model.filteredAssets.first?.id
     }
 
     private var playlistSection: some View {
@@ -557,7 +680,7 @@ private struct LibraryPage: View {
                         symbol: "sun.max.fill",
                         title: "Day",
                         detail: "Choose wallpaper",
-                        footnote: "From 6:00 AM",
+                        footnote: "From \(formattedHour(model.automations.dayStartHour))",
                         asset: model.asset(for: model.automations.dayWallpaperID)
                     ) {
                         model.automationPickSlot = .day
@@ -566,14 +689,53 @@ private struct LibraryPage: View {
                         symbol: "moon.fill",
                         title: "Night",
                         detail: "Choose wallpaper",
-                        footnote: "From 6:00 PM",
+                        footnote: "From \(formattedHour(model.automations.nightStartHour))",
                         asset: model.asset(for: model.automations.nightWallpaperID)
                     ) {
                         model.automationPickSlot = .night
                     }
                 }
+                HStack(spacing: 14) {
+                    schedulePicker(
+                        "Day begins",
+                        selection: Binding(
+                            get: { model.automations.dayStartHour },
+                            set: { model.setDayStartHour($0) }
+                        )
+                    )
+                    schedulePicker(
+                        "Night begins",
+                        selection: Binding(
+                            get: { model.automations.nightStartHour },
+                            set: { model.setNightStartHour($0) }
+                        )
+                    )
+                }
             }
         }
+    }
+
+    private func schedulePicker(_ title: String, selection: Binding<Int>) -> some View {
+        HStack {
+            Text(title).font(.system(size: 12, weight: .semibold))
+            Spacer()
+            Picker(title, selection: selection) {
+                ForEach(0..<24, id: \.self) { hour in
+                    Text(formattedHour(hour)).tag(hour)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 120)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+    }
+
+    private func formattedHour(_ hour: Int) -> String {
+        let date = Calendar.current.date(from: DateComponents(hour: hour)) ?? .now
+        return date.formatted(date: .omitted, time: .shortened)
     }
 
     private var appearanceSection: some View {
@@ -681,6 +843,215 @@ private struct LibraryPage: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+private struct LibrarySelectionTile: View {
+    @Bindable var model: AppModel
+    let asset: WallpaperAsset
+    let isSelected: Bool
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(alignment: .leading, spacing: 9) {
+                ZStack(alignment: .topLeading) {
+                    Group {
+                        if let url = asset.posterURL, let image = NSImage(contentsOf: url) {
+                            Image(nsImage: image).resizable().scaledToFill()
+                        } else {
+                            Theme.panelStrong
+                        }
+                    }
+                    .aspectRatio(16 / 10, contentMode: .fill)
+                    .clipped()
+
+                    HStack(spacing: 6) {
+                        if model.isActive(asset) {
+                            Text("IN USE")
+                                .foregroundStyle(.black)
+                                .background(Theme.accent, in: Capsule())
+                        }
+                        if model.isFavorite(asset) {
+                            Image(systemName: "heart.fill")
+                                .foregroundStyle(.pink)
+                                .background(.black.opacity(0.55), in: Circle())
+                        }
+                    }
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(9)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+                Text(asset.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Text("\(asset.resolutionLabel) · \(Int(asset.framesPerSecond)) FPS · \(asset.category.title)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textDim)
+                    .lineLimit(1)
+            }
+            .padding(8)
+            .background(
+                isSelected ? Theme.accent.opacity(0.13) : Theme.panel,
+                in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .stroke(isSelected ? Theme.accent : Theme.line, lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Preview") { model.previewAsset = asset }
+            Button("Use on Main Display") { model.apply(asset) }
+            Button("Use on All Displays") { model.applyToAll(asset) }
+            Button(model.isFavorite(asset) ? "Remove Favorite" : "Add Favorite") {
+                model.toggleFavorite(asset)
+            }
+            Divider()
+            Button("Remove from Library", role: .destructive) { model.remove(asset) }
+        }
+        .accessibilityLabel("\(asset.name), \(asset.resolutionLabel), \(Int(asset.framesPerSecond)) frames per second")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct LibraryInspector: View {
+    @Bindable var model: AppModel
+    let asset: WallpaperAsset?
+    @State private var draftName = ""
+
+    var body: some View {
+        Group {
+            if let asset {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        poster(asset)
+                        TextField("Wallpaper name", text: $draftName)
+                            .font(.title3.weight(.semibold))
+                            .textFieldStyle(.plain)
+                            .onSubmit { commitName(asset) }
+                        metadata(asset)
+                        Divider().overlay(Theme.line)
+                        Picker("Category", selection: Binding(
+                            get: { asset.category },
+                            set: { model.setCategory($0, for: asset) }
+                        )) {
+                            ForEach(WallpaperCategory.allCases) { category in
+                                Label(category.title, systemImage: category.symbol).tag(category)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        if !model.displaysUsing(asset).isEmpty {
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("Currently displayed on")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.textDim)
+                                ForEach(model.displaysUsing(asset)) { display in
+                                    Label(display.name, systemImage: "display")
+                                        .font(.subheadline)
+                                }
+                            }
+                        }
+
+                        Menu {
+                            Button("Main Display") { model.apply(asset) }
+                            Button("All Displays") { model.applyToAll(asset) }
+                            if model.displays.count > 1 {
+                                Button("Span Across Displays") { model.spanAcrossAllDisplays(asset) }
+                            }
+                            Divider()
+                            ForEach(model.displays) { display in
+                                Button(display.name) { model.apply(asset, to: display.displayID) }
+                            }
+                        } label: {
+                            Label("Use as Wallpaper", systemImage: "display")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .padding(.vertical, 9)
+                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .foregroundStyle(.black)
+
+                        HStack {
+                            GhostButton("Preview", symbol: "play.fill") { model.previewAsset = asset }
+                            GhostButton(
+                                model.isFavorite(asset) ? "Favorited" : "Favorite",
+                                symbol: model.isFavorite(asset) ? "heart.fill" : "heart"
+                            ) { model.toggleFavorite(asset) }
+                        }
+                        Button("Remove from Library", role: .destructive) { model.remove(asset) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.red.opacity(0.9))
+                    }
+                    .padding(18)
+                }
+                .onAppear { draftName = asset.name }
+                .onChange(of: asset.id) { _, _ in draftName = asset.name }
+            } else {
+                ContentUnavailableView(
+                    "Select a Wallpaper",
+                    systemImage: "rectangle.stack",
+                    description: Text("Its details and display controls will appear here.")
+                )
+            }
+        }
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.line))
+    }
+
+    private func poster(_ asset: WallpaperAsset) -> some View {
+        Group {
+            if let url = asset.posterURL, let image = NSImage(contentsOf: url) {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                Theme.panelStrong
+            }
+        }
+        .aspectRatio(16 / 10, contentMode: .fill)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay(alignment: .bottomLeading) {
+            if model.isActive(asset) {
+                Text("PLAYING")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 9)
+                    .frame(height: 22)
+                    .background(Theme.accent, in: Capsule())
+                    .padding(10)
+            }
+        }
+    }
+
+    private func metadata(_ asset: WallpaperAsset) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+            inspectorRow("Resolution", "\(Int(asset.pixelSize.width)) × \(Int(asset.pixelSize.height))")
+            inspectorRow("Frame rate", "\(Int(asset.framesPerSecond)) FPS")
+            inspectorRow("Duration", asset.duration.formatted(.number.precision(.fractionLength(1))) + " sec")
+            inspectorRow("Added", asset.createdAt.formatted(date: .abbreviated, time: .omitted))
+            inspectorRow("Used", "\(asset.applyCount) time\(asset.applyCount == 1 ? "" : "s")")
+            inspectorRow("Audio", asset.containsAudio ? "Present" : "Removed")
+        }
+        .font(.system(size: 11))
+    }
+
+    private func inspectorRow(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(Theme.textDim)
+            Text(value).monospacedDigit()
+        }
+    }
+
+    private func commitName(_ asset: WallpaperAsset) {
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != asset.name else {
+            draftName = asset.name
+            return
+        }
+        model.rename(asset, to: trimmed)
     }
 }
 
@@ -1006,6 +1377,18 @@ private struct SettingsPage: View {
                         .foregroundStyle(Theme.textDim)
                 }
 
+                settingsGroup(title: "Wallpaper host", symbol: "rectangle.on.rectangle.angled") {
+                    settingsRow(
+                        title: model.wallpaperHostMode == .native ? "System wallpaper (macOS 26)" : "Desktop overlay",
+                        detail: model.wallpaperHostMode == .native
+                            ? "Uses WallpaperExtensionKit through the LumaWall wallpaper extension."
+                            : "Uses the poster plus live overlay. Native host needs macOS 26 and an app build that embeds the wallpaper extension.",
+                        symbol: model.wallpaperHostMode == .native ? "checkmark.seal.fill" : "square.stack.3d.up"
+                    ) {
+                        EmptyView()
+                    }
+                }
+
                 settingsGroup(title: "Playback & energy", symbol: "leaf.fill") {
                     VStack(spacing: 0) {
                         ForEach(PowerProfile.allCases, id: \.self) { profile in
@@ -1059,7 +1442,9 @@ private struct SettingsPage: View {
                         Divider().overlay(Theme.line)
                         settingsRow(
                             title: "Still desktop only",
-                            detail: "Hides the live overlay. System Settings still has the poster. Video cannot play on the lock screen without a wallpaper extension.",
+                            detail: model.wallpaperHostMode == .native
+                                ? "Asks the wallpaper extension to keep the desktop still while the system host stays assigned."
+                                : "Hides the live overlay. System Settings still has the poster.",
                             symbol: "photo"
                         ) {
                             Toggle("", isOn: Binding(
@@ -1363,6 +1748,9 @@ private struct LibraryCard: View {
                 Menu {
                     Button("Main Display") { model.apply(asset) }
                     Button("All Displays") { model.applyToAll(asset) }
+                    if model.displays.count > 1 {
+                        Button("Span Across Displays") { model.spanAcrossAllDisplays(asset) }
+                    }
                     Divider()
                     ForEach(model.displays) { display in
                         Button(display.name) { model.apply(asset, to: display.displayID) }
@@ -1586,6 +1974,7 @@ private struct PreviewSheet: View {
 
 private struct MenuBarRoot: View {
     @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1599,18 +1988,86 @@ private struct MenuBarRoot: View {
                 }
             }
 
-            HStack {
-                Button(model.isPaused ? "Resume" : "Pause", action: model.togglePause)
+            HStack(spacing: 8) {
+                Button(model.isPaused ? "Resume All" : "Pause All", action: model.togglePause)
+                    .buttonStyle(.borderedProminent)
                 Button("Reapply") { model.reapplyActive() }
                     .disabled(model.featured == nil)
             }
 
-            if model.activePlaylistID != nil {
-                HStack {
-                    Button("Previous") { model.stepPlaylist(-1) }
-                    Button("Next") { model.stepPlaylist(1) }
+            if !model.displays.isEmpty {
+                Divider()
+                Text("Displays").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(model.displays) { display in
+                    HStack(spacing: 8) {
+                        Image(systemName: display.isMain ? "display" : "rectangle.connected.to.line.below")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(display.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                            Text(model.activeName(on: display) ?? "Not assigned")
+                                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        if model.activeByDisplay[display.displayID] != nil {
+                            Button(model.pausedDisplayIDs.contains(display.displayID) ? "Resume" : "Pause") {
+                                model.togglePause(on: display)
+                            }
+                            .controlSize(.small)
+                        }
+                    }
                 }
             }
+
+            Divider()
+            Picker("Power", selection: Binding(
+                get: { model.powerProfile },
+                set: { model.setPowerProfile($0) }
+            )) {
+                Text("Automatic").tag(PowerProfile.automatic)
+                Text("Full Quality").tag(PowerProfile.fullQuality)
+                Text("Battery Saver").tag(PowerProfile.batterySaver)
+                Text("Static on Battery").tag(PowerProfile.staticOnBattery)
+            }
+            .pickerStyle(.menu)
+
+            if !model.playlists.isEmpty {
+                Menu {
+                    ForEach(model.playlists) { playlist in
+                        Button {
+                            model.applyPlaylist(playlist)
+                        } label: {
+                            if model.activePlaylistID == playlist.id {
+                                Label(playlist.name, systemImage: "checkmark")
+                            } else {
+                                Text(playlist.name)
+                            }
+                        }
+                    }
+                    if model.activePlaylistID != nil {
+                        Divider()
+                        Button("Previous") { model.stepPlaylist(-1) }
+                        Button("Next") { model.stepPlaylist(1) }
+                        Button("Stop Playlist", role: .destructive) { model.stopPlaylistRotation() }
+                    }
+                } label: {
+                    Label(activePlaylistName, systemImage: "list.bullet")
+                }
+                .menuStyle(.borderlessButton)
+            }
+
+            Menu {
+                Toggle("Day / Night", isOn: Binding(
+                    get: { model.automations.dayNightEnabled },
+                    set: { model.setDayNightEnabled($0) }
+                ))
+                Toggle("Light / Dark", isOn: Binding(
+                    get: { model.automations.appearanceEnabled },
+                    set: { model.setAppearanceEnabled($0) }
+                ))
+            } label: {
+                Label(automationStatus, systemImage: "clock.arrow.trianglehead.2.counterclockwise.rotate.90")
+            }
+            .menuStyle(.borderlessButton)
 
             if model.recentAssets.isEmpty {
                 Text("No recent wallpapers").foregroundStyle(.secondary)
@@ -1632,11 +2089,14 @@ private struct MenuBarRoot: View {
                 model.section = .home
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "main")
                 for window in NSApp.windows where window.canBecomeKey || window.isMiniaturized {
                     window.makeKeyAndOrderFront(nil)
                 }
             }
             Button("Import…", action: model.chooseVideos)
+            Divider()
+            Button("Quit LumaWall") { NSApp.terminate(nil) }
         }
         .padding(14)
         .frame(width: 300)
@@ -1649,6 +2109,18 @@ private struct MenuBarRoot: View {
         if model.playbackStopped { return "Paused · \(cpu)% CPU · \(ram) MB" }
         if model.activeByDisplay.isEmpty { return "Idle · \(cpu)% CPU · \(ram) MB" }
         return "Live · \(cpu)% CPU · \(ram) MB"
+    }
+
+    private var activePlaylistName: String {
+        guard let id = model.activePlaylistID,
+              let playlist = model.playlists.first(where: { $0.id == id }) else { return "Playlists" }
+        return playlist.name
+    }
+
+    private var automationStatus: String {
+        if model.automations.dayNightEnabled { return "Day / Night Active" }
+        if model.automations.appearanceEnabled { return "Light / Dark Active" }
+        return "Automations"
     }
 
     @ViewBuilder

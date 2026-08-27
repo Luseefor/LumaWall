@@ -4,11 +4,12 @@ import LumaWallCore
 import QuartzCore
 
 @MainActor
-final class WallpaperEngine {
+final class OverlayWallpaperEngine {
     private let displays: DisplayCoordinator
     private let assignments: AssignmentStore
     private var sessions: [DisplayID: DesktopVideoSession] = [:]
     private var tiers: [DisplayID: PlaybackTier] = [:]
+    private var recoveryWorkItems: [DispatchWorkItem] = []
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
         self.displays = displays
@@ -61,6 +62,13 @@ final class WallpaperEngine {
     }
 
     func apply(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition = .init()) async throws {
+        try activate(asset, on: displayID, composition: composition)
+        try await assignments.upsert(
+            DisplayAssignment(displayID: displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
+        )
+    }
+
+    private func activate(_ asset: WallpaperAsset, on displayID: DisplayID, composition: DisplayComposition) throws {
         guard let screen = displays.screen(for: displayID),
               let connected = displays.display(id: displayID) else {
             throw EngineError.missingDisplay
@@ -75,15 +83,42 @@ final class WallpaperEngine {
             session.show()
         }
         apply(tier: tiers[displayID] ?? .full, to: displayID)
-
-        try await assignments.upsert(
-            DisplayAssignment(displayID: displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
-        )
     }
 
     func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
-        for display in displays.refresh() {
-            try await apply(asset, to: display.displayID, composition: composition)
+        let connected = displays.refresh()
+        guard !connected.isEmpty else { throw EngineError.missingDisplay }
+        for display in connected {
+            try activate(asset, on: display.displayID, composition: composition)
+        }
+        try await assignments.upsert(connected.map {
+            DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
+        })
+        synchronize(displayIDs: connected.map(\.displayID))
+    }
+
+    func applySpanning(_ asset: WallpaperAsset) async throws {
+        let connected = displays.refresh()
+        guard !connected.isEmpty else { throw EngineError.missingDisplay }
+        guard let canvas = SpanningGeometry.canvas(for: connected.map(\.frame)) else {
+            throw EngineError.missingDisplay
+        }
+        let composition = DisplayComposition(contentMode: .fill, spanningCanvas: canvas)
+        for display in connected {
+            try activate(asset, on: display.displayID, composition: composition)
+        }
+        try await assignments.upsert(connected.map {
+            DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
+        })
+        synchronize(displayIDs: connected.map(\.displayID))
+    }
+
+    private func synchronize(displayIDs: [DisplayID]) {
+        let clock = CMClockGetHostTimeClock()
+        let now = CMClockGetTime(clock)
+        let start = CMTimeAdd(now, CMTime(seconds: 0.25, preferredTimescale: 1_000_000_000))
+        for id in displayIDs where tiers[id] == .full || tiers[id] == .reduced {
+            sessions[id]?.synchronize(atHostTime: start, tier: tiers[id] ?? .full)
         }
     }
 
@@ -102,6 +137,7 @@ final class WallpaperEngine {
     }
 
     func apply(tier: PlaybackTier, to displayID: DisplayID) {
+        guard tiers[displayID] != tier else { return }
         tiers[displayID] = tier
         sessions[displayID]?.apply(tier: tier)
     }
@@ -109,10 +145,47 @@ final class WallpaperEngine {
     func restore(using library: [WallpaperAsset]) async {
         let snapshot = await assignments.current()
         let byID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
-        for assignment in snapshot.assignments where assignment.isEnabled {
+        let connectedByID = Dictionary(uniqueKeysWithValues: displays.refresh().map { ($0.displayID, $0) })
+        var restoredAssignments = snapshot.assignments
+        var topologyChanged = false
+
+        // A spanning canvas is derived from the screens that are currently part
+        // of that wallpaper group. Recalculate it after docking, rotation, or a
+        // resolution change while retaining assignments for disconnected screens.
+        let spanningWallpaperIDs = Set(restoredAssignments.compactMap { assignment in
+            assignment.composition.spanningCanvas == nil ? nil : assignment.wallpaperID
+        })
+        for wallpaperID in spanningWallpaperIDs {
+            let indices = restoredAssignments.indices.filter { index in
+                restoredAssignments[index].wallpaperID == wallpaperID
+                    && restoredAssignments[index].composition.spanningCanvas != nil
+                    && connectedByID[restoredAssignments[index].displayID] != nil
+            }
+            let frames = indices.compactMap { connectedByID[restoredAssignments[$0].displayID]?.frame }
+            guard let canvas = SpanningGeometry.canvas(for: frames) else { continue }
+            for index in indices where restoredAssignments[index].composition.spanningCanvas != canvas {
+                restoredAssignments[index].composition.spanningCanvas = canvas
+                topologyChanged = true
+            }
+        }
+        if topologyChanged {
+            try? await assignments.replaceAll(with: restoredAssignments)
+        }
+
+        var synchronizedGroups: [WallpaperID: [DisplayID]] = [:]
+        for assignment in restoredAssignments where assignment.isEnabled {
             guard let wallpaperID = assignment.wallpaperID, let asset = byID[wallpaperID] else { continue }
-            if sessions[assignment.displayID]?.asset.id == wallpaperID { continue }
-            try? await apply(asset, to: assignment.displayID, composition: assignment.composition)
+            guard connectedByID[assignment.displayID] != nil else { continue }
+            synchronizedGroups[wallpaperID, default: []].append(assignment.displayID)
+            if let session = sessions[assignment.displayID],
+               session.asset.id == wallpaperID,
+               session.currentComposition == assignment.composition {
+                continue
+            }
+            try? activate(asset, on: assignment.displayID, composition: assignment.composition)
+        }
+        for ids in synchronizedGroups.values where ids.count > 1 {
+            synchronize(displayIDs: ids)
         }
     }
 
@@ -129,19 +202,21 @@ final class WallpaperEngine {
     }
 
     private func reassertAll() {
-        for (id, session) in sessions {
-            let tier = tiers[id] ?? .full
-            if tier == .staticFrame || tier == .minimal { continue }
+        for session in sessions.values {
             session.reassert()
         }
     }
 
     private func scheduleSurfaceRecovery() {
+        recoveryWorkItems.forEach { $0.cancel() }
+        recoveryWorkItems.removeAll(keepingCapacity: true)
         reassertAll()
-        for delay in [0.08, 0.35] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.reassertAll()
-            }
+        // Dock finishes changing Space ownership asynchronously. Keep retries short
+        // enough that a surface is never absent for a visible fraction of a second.
+        for delay in [0.016, 0.08, 0.20] {
+            let work = DispatchWorkItem { [weak self] in self?.reassertAll() }
+            recoveryWorkItems.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
     }
 
@@ -177,20 +252,24 @@ final class WallpaperEngine {
 final class DesktopVideoSession {
     private(set) var asset: WallpaperAsset
     private var composition: DisplayComposition
-    private let window: NSPanel
+    private let window: DesktopSurfaceWindow
     private let root = SessionRootView()
     private var player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private var decoderReleaseWorkItem: DispatchWorkItem?
     private var decoderIsLoaded = false
+    private var readinessObservation: NSKeyValueObservation?
+    private var requestedTier: PlaybackTier = .full
+    private var displayPixelSize = CGSize.zero
     var currentComposition: DisplayComposition { composition }
 
     init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
         self.asset = asset
         self.composition = composition
-        window = NSPanel(
+        displayPixelSize = connected.pixelSize
+        window = DesktopSurfaceWindow(
             contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -202,8 +281,19 @@ final class DesktopVideoSession {
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
+        window.canHide = false
+        window.isExcludedFromWindowsMenu = true
+        window.sharingType = .none
         window.animationBehavior = .none
         window.contentView = root
+        readinessObservation = root.playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+            let isReady = layer.isReadyForDisplay
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                root.setVideoVisible(isReady && requestedTier.showsMotion)
+            }
+        }
+        root.apply(composition: composition, poster: asset.posterURL, displayFrame: connected.frame)
         configurePlayer(url: asset.mediaURL)
         relayout(screen: screen, connected: connected)
     }
@@ -216,57 +306,61 @@ final class DesktopVideoSession {
     func replace(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
         self.asset = asset
         self.composition = composition
-        configurePlayer(url: asset.mediaURL)
         relayout(screen: screen, connected: connected)
-        player.play()
+        configurePlayer(url: asset.mediaURL)
+        apply(tier: requestedTier)
         reassert()
     }
 
     func relayout(screen: NSScreen, connected: ConnectedDisplay) {
+        displayPixelSize = connected.pixelSize
         let frame = screen.frame
         window.setFrame(frame, display: true)
         root.bounds = CGRect(origin: .zero, size: frame.size)
-        root.apply(composition: composition, poster: asset.posterURL)
-        root.playerLayer.frame = root.bounds
+        root.apply(composition: composition, poster: asset.posterURL, displayFrame: connected.frame)
     }
 
     func reassert() {
-        window.orderFrontRegardless()
         window.level = NSWindow.Level(Int(CGWindowLevelForKey(.desktopIconWindow)) - 1)
+        window.orderFrontRegardless()
+        window.displayIfNeeded()
     }
 
     func apply(tier: PlaybackTier) {
+        requestedTier = tier
         decoderReleaseWorkItem?.cancel()
         decoderReleaseWorkItem = nil
         switch tier {
         case .full:
             ensureDecoder()
-            setBitRate(0)
-            root.playerLayer.isHidden = false
-            window.orderFrontRegardless()
+            configureDecodeBudget(bitRate: 0, maximumResolution: .zero)
+            root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+            reassert()
             player.rate = 1
             player.play()
         case .reduced:
             ensureDecoder()
-            setBitRate(2_000_000)
-            root.playerLayer.isHidden = false
-            window.orderFrontRegardless()
+            configureDecodeBudget(bitRate: 2_000_000, maximumResolution: reducedResolution)
+            root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+            reassert()
             player.rate = 1
             player.play()
         case .minimal, .staticFrame:
             player.pause()
-            root.playerLayer.isHidden = true
-            window.orderOut(nil)
-            scheduleDecoderRelease(after: 12)
+            root.setVideoVisible(false)
+            reassert()
+            scheduleDecoderRelease(after: 2)
         case .paused:
             player.pause()
-            root.playerLayer.isHidden = false
-            scheduleDecoderRelease(after: 30)
+            root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+            reassert()
+            scheduleDecoderRelease(after: 10)
         }
     }
 
     func tearDown() {
         decoderReleaseWorkItem?.cancel()
+        readinessObservation?.invalidate()
         player.pause()
         looper = nil
         root.playerLayer.player = nil
@@ -275,19 +369,43 @@ final class DesktopVideoSession {
         decoderIsLoaded = false
     }
 
-    private func setBitRate(_ bits: Double) {
-        player.currentItem?.preferredPeakBitRate = bits
+    func synchronize(atHostTime hostTime: CMTime, tier: PlaybackTier) {
+        decoderReleaseWorkItem?.cancel()
+        ensureDecoder()
+        requestedTier = tier
+        configureDecodeBudget(
+            bitRate: tier == .reduced ? 2_000_000 : 0,
+            maximumResolution: tier == .reduced ? reducedResolution : .zero
+        )
+        root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+        reassert()
+        player.setRate(1, time: .zero, atHostTime: hostTime)
+    }
+
+    private var reducedResolution: CGSize {
+        let landscape = displayPixelSize.width >= displayPixelSize.height
+        return landscape ? CGSize(width: 1_920, height: 1_080) : CGSize(width: 1_080, height: 1_920)
+    }
+
+    private func configureDecodeBudget(bitRate: Double, maximumResolution: CGSize) {
+        for item in player.items() {
+            item.preferredPeakBitRate = bitRate
+            item.preferredMaximumResolution = maximumResolution
+        }
     }
 
     private func configurePlayer(url: URL) {
         decoderReleaseWorkItem?.cancel()
+        root.setVideoVisible(false)
         player.pause()
         looper = nil
         player = AVQueuePlayer()
         player.isMuted = true
         player.actionAtItemEnd = .none
         player.automaticallyWaitsToMinimizeStalling = false
-        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 1
+        looper = AVPlayerLooper(player: player, templateItem: item)
         root.playerLayer.player = player
         root.playerLayer.videoGravity = gravity(for: composition.contentMode)
         decoderIsLoaded = true
@@ -304,7 +422,7 @@ final class DesktopVideoSession {
             player.pause()
             looper = nil
             root.playerLayer.player = nil
-            root.playerLayer.isHidden = true
+            root.setVideoVisible(false)
             player = AVQueuePlayer()
             player.isMuted = true
             decoderIsLoaded = false
@@ -322,19 +440,41 @@ final class DesktopVideoSession {
     }
 }
 
+private extension PlaybackTier {
+    var showsMotion: Bool {
+        switch self {
+        case .full, .reduced, .paused: true
+        case .minimal, .staticFrame: false
+        }
+    }
+}
+
+/// A wallpaper surface must never participate in normal app activation, window
+/// cycling, hiding, or focus. Its lifetime is owned by the engine, not AppKit's
+/// ordinary document-window lifecycle.
+private final class DesktopSurfaceWindow: NSWindow {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 private final class SessionRootView: NSView {
     let playerLayer = AVPlayerLayer()
     private let posterLayer = CALayer()
     private var composition = DisplayComposition()
+    private var displayFrame = CGRect.zero
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer = CALayer()
+        layer?.masksToBounds = true
         layer?.backgroundColor = NSColor.black.cgColor
+        posterLayer.actions = Self.disabledActions
         posterLayer.contentsGravity = .resizeAspectFill
         layer?.addSublayer(posterLayer)
+        playerLayer.actions = Self.disabledActions
         playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.isHidden = true
         layer?.addSublayer(playerLayer)
     }
 
@@ -342,13 +482,15 @@ private final class SessionRootView: NSView {
 
     override func layout() {
         super.layout()
-        posterLayer.frame = bounds
-        playerLayer.frame = bounds
+        let frame = mediaFrame
+        posterLayer.frame = frame
+        playerLayer.frame = frame
         applyTransform()
     }
 
-    func apply(composition: DisplayComposition, poster: URL?) {
+    func apply(composition: DisplayComposition, poster: URL?, displayFrame: CGRect) {
         self.composition = composition
+        self.displayFrame = displayFrame
         if let poster, let image = NSImage(contentsOf: poster) {
             posterLayer.contents = image
         } else {
@@ -362,15 +504,28 @@ private final class SessionRootView: NSView {
         applyTransform()
     }
 
+    func setVideoVisible(_ visible: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer.isHidden = !visible
+        CATransaction.commit()
+    }
+
+    private var mediaFrame: CGRect {
+        guard let canvas = composition.spanningCanvas else { return bounds }
+        return SpanningGeometry.mediaFrame(canvas: canvas, on: displayFrame)
+    }
+
     private func applyTransform() {
+        let frame = mediaFrame
         let focal = CGPoint(
             x: min(max(composition.focalPoint.x, 0), 1),
             y: min(max(composition.focalPoint.y, 0), 1)
         )
         let anchor = CGPoint(x: focal.x, y: focal.y)
         let position = CGPoint(
-            x: bounds.width * focal.x + composition.offset.x,
-            y: bounds.height * focal.y + composition.offset.y
+            x: frame.minX + frame.width * focal.x + composition.offset.x,
+            y: frame.minY + frame.height * focal.y + composition.offset.y
         )
         let radians = CGFloat(composition.rotationDegrees * .pi / 180)
         let scale = CGFloat(min(max(composition.scale, 0.25), 4))
@@ -382,4 +537,13 @@ private final class SessionRootView: NSView {
             layer.setAffineTransform(transform)
         }
     }
+
+    private static let disabledActions: [String: CAAction] = [
+        "bounds": NSNull(),
+        "contents": NSNull(),
+        "hidden": NSNull(),
+        "position": NSNull(),
+        "sublayers": NSNull(),
+        "transform": NSNull()
+    ]
 }

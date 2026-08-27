@@ -74,24 +74,30 @@ final class AppModel {
     private let importer: MediaImporter
     private let assignmentStore: AssignmentStore
     private let playlistStore: PlaylistStore
+    private let playlistPlaybackStore: PlaylistPlaybackStore
     private let recentsStore: RecentsStore
     private let automationStore: AutomationStore
     let displayCoordinator: DisplayCoordinator
     private let engine: WallpaperEngine
+    var wallpaperHostMode: WallpaperHostMode { engine.mode }
     private var playlistTimer: Timer?
     private var playlistCursor = 0
+    private var playlistNextAdvanceAt: Date?
     private var statsTimer: Timer?
     private var dayNightTimer: Timer?
     private var lastAutomationWallpaperID: WallpaperID?
     private var appearanceObserver: NSObjectProtocol?
+    private var automationObservers: [NSObjectProtocol] = []
     private var screenObserver: NSObjectProtocol?
     private var coverageObservers: [NSObjectProtocol] = []
     private var coverageTimer: Timer?
     private var lockObservers: [NSObjectProtocol] = []
+    private var powerObservers: [NSObjectProtocol] = []
     private var sessionLocked = false
     private var displaysAsleep = false
     private var cpuSampler = CPUSampler()
     private var playlistIDs: [WallpaperID] = []
+    private var statsTick = 0
 
     struct PlaylistEditorState: Identifiable {
         var id: PlaylistID
@@ -141,6 +147,7 @@ final class AppModel {
             let store = try LibraryStore()
             let assignments = try AssignmentStore()
             let playlists = try PlaylistStore()
+            let playlistPlayback = try PlaylistPlaybackStore()
             let recents = try RecentsStore()
             let automations = try AutomationStore()
             let displays = DisplayCoordinator()
@@ -148,6 +155,7 @@ final class AppModel {
             self.importer = MediaImporter(store: store)
             self.assignmentStore = assignments
             self.playlistStore = playlists
+            self.playlistPlaybackStore = playlistPlayback
             self.recentsStore = recents
             self.automationStore = automations
             self.displayCoordinator = displays
@@ -157,9 +165,11 @@ final class AppModel {
             Task { await bootstrap() }
             startStatsPolling()
             observeAppearanceChanges()
+            observeAutomationClockChanges()
             observeScreenChanges()
             observeDesktopCoverage()
             observeLockAndSleep()
+            observePowerChanges()
         } catch {
             fatalError("Unable to initialize LumaWall: \(error)")
         }
@@ -349,6 +359,23 @@ final class AppModel {
         }
     }
 
+    func spanAcrossAllDisplays(_ asset: WallpaperAsset) {
+        isApplying = true
+        stopPlaylistRotation()
+        Task {
+            do {
+                try await engine.applySpanning(asset)
+                try? await store.recordApply(id: asset.id)
+                try? await recentsStore.push(asset.id)
+                await reload()
+                applyPlaybackPolicy()
+            } catch {
+                present("Couldn’t span wallpaper", error.localizedDescription)
+            }
+            isApplying = false
+        }
+    }
+
     func reapplyActive() {
         engine.reapplyAssignments()
         applyPlaybackPolicy()
@@ -526,6 +553,7 @@ final class AppModel {
     func stepPlaylist(_ delta: Int) {
         guard !playlistIDs.isEmpty else { return }
         playlistCursor = (playlistCursor + delta + playlistIDs.count) % playlistIDs.count
+        persistPlaylistPlaybackState()
         let nextID = playlistIDs[playlistCursor]
         guard let asset = assets.first(where: { $0.id == nextID }) else { return }
         applyToAll(asset, continuingPlaylist: true)
@@ -536,6 +564,8 @@ final class AppModel {
         playlistTimer = nil
         activePlaylistID = nil
         playlistIDs = []
+        playlistNextAdvanceAt = nil
+        Task { try? await playlistPlaybackStore.clear() }
     }
 
     func refreshDisplays() {
@@ -548,13 +578,73 @@ final class AppModel {
         }
     }
 
-    private func startPlaylistRotation(ids: [WallpaperID], intervalMinutes: Int) {
+    private func startPlaylistRotation(
+        ids: [WallpaperID],
+        intervalMinutes: Int,
+        nextAdvanceAt: Date? = nil
+    ) {
         playlistIDs = ids
         playlistTimer?.invalidate()
         let seconds = TimeInterval(max(1, intervalMinutes) * 60)
-        playlistTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.stepPlaylist(1) }
+        let fireDate = max(nextAdvanceAt ?? Date().addingTimeInterval(seconds), Date().addingTimeInterval(0.25))
+        playlistNextAdvanceAt = fireDate
+        let timer = Timer(fire: fireDate, interval: 0, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let playlistID = self.activePlaylistID,
+                      let playlist = self.playlists.first(where: { $0.id == playlistID }) else { return }
+                self.stepPlaylist(1)
+                self.startPlaylistRotation(ids: self.playlistIDs, intervalMinutes: playlist.intervalMinutes)
+            }
         }
+        timer.tolerance = min(2, seconds * 0.02)
+        RunLoop.main.add(timer, forMode: .common)
+        playlistTimer = timer
+        persistPlaylistPlaybackState()
+    }
+
+    private func persistPlaylistPlaybackState() {
+        guard let activePlaylistID else { return }
+        let state = PlaylistPlaybackState(
+            playlistID: activePlaylistID,
+            orderedIDs: playlistIDs,
+            cursor: playlistCursor,
+            nextAdvanceAt: playlistNextAdvanceAt
+        )
+        Task { try? await playlistPlaybackStore.save(state) }
+    }
+
+    private func restorePlaylistPlaybackState() async {
+        guard let saved = await playlistPlaybackStore.current(),
+              let playlist = playlists.first(where: { $0.id == saved.playlistID }) else {
+            try? await playlistPlaybackStore.clear()
+            return
+        }
+        let ids = Set(saved.orderedIDs) == Set(playlist.wallpaperIDs)
+            ? saved.orderedIDs
+            : (playlist.shuffled ? playlist.wallpaperIDs.shuffled() : playlist.wallpaperIDs)
+        guard !ids.isEmpty else {
+            try? await playlistPlaybackStore.clear()
+            return
+        }
+        activePlaylistID = playlist.id
+        playlistIDs = ids
+        playlistCursor = min(max(saved.cursor, 0), ids.count - 1)
+        guard let schedule = PlaylistSchedule.resume(
+            nextAdvanceAt: saved.nextAdvanceAt,
+            intervalMinutes: playlist.intervalMinutes,
+            cursor: playlistCursor,
+            itemCount: ids.count
+        ) else { return }
+        playlistCursor = schedule.cursor
+        if playlistCursor != saved.cursor,
+           let asset = assets.first(where: { $0.id == ids[playlistCursor] }) {
+            try? await engine.applyToAll(asset)
+        }
+        startPlaylistRotation(
+            ids: ids,
+            intervalMinutes: playlist.intervalMinutes,
+            nextAdvanceAt: schedule.nextAdvanceAt
+        )
     }
 
     func displaysUsing(_ asset: WallpaperAsset) -> [ConnectedDisplay] {
@@ -583,6 +673,20 @@ final class AppModel {
             stopPlaylistRotation()
         }
         persistAutomations()
+        evaluateAutomations(force: true)
+    }
+
+    func setDayStartHour(_ hour: Int) {
+        automations.dayStartHour = min(max(hour, 0), 23)
+        persistAutomations()
+        syncDayNightTimer()
+        evaluateAutomations(force: true)
+    }
+
+    func setNightStartHour(_ hour: Int) {
+        automations.nightStartHour = min(max(hour, 0), 23)
+        persistAutomations()
+        syncDayNightTimer()
         evaluateAutomations(force: true)
     }
 
@@ -617,9 +721,29 @@ final class AppModel {
         dayNightTimer?.invalidate()
         dayNightTimer = nil
         guard automations.dayNightEnabled else { return }
-        dayNightTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.evaluateAutomations(force: false) }
+        let now = Date()
+        let calendar = Calendar.autoupdatingCurrent
+        let nextDay = calendar.nextDate(
+            after: now,
+            matching: DateComponents(hour: automations.dayStartHour, minute: 0, second: 0),
+            matchingPolicy: .nextTime
+        )
+        let nextNight = calendar.nextDate(
+            after: now,
+            matching: DateComponents(hour: automations.nightStartHour, minute: 0, second: 0),
+            matchingPolicy: .nextTime
+        )
+        guard let fireDate = [nextDay, nextNight].compactMap({ $0 }).min() else { return }
+        let interval = max(1, fireDate.timeIntervalSince(now))
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.evaluateAutomations(force: false)
+                self?.syncDayNightTimer()
+            }
         }
+        timer.tolerance = min(30, interval * 0.01)
+        RunLoop.main.add(timer, forMode: .common)
+        dayNightTimer = timer
     }
 
     private func observeAppearanceChanges() {
@@ -632,6 +756,24 @@ final class AppModel {
                 try? await Task.sleep(for: .milliseconds(150))
                 self?.evaluateAutomations(force: false)
             }
+        }
+    }
+
+    private func observeAutomationClockChanges() {
+        let center = NotificationCenter.default
+        for name in [
+            NSNotification.Name.NSSystemClockDidChange,
+            NSNotification.Name.NSSystemTimeZoneDidChange,
+            NSApplication.didBecomeActiveNotification
+        ] {
+            automationObservers.append(
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor in
+                        self?.syncDayNightTimer()
+                        self?.evaluateAutomations(force: false)
+                    }
+                }
+            )
         }
     }
 
@@ -677,6 +819,7 @@ final class AppModel {
     private func bootstrap() async {
         await reload()
         playlists = await playlistStore.all()
+        await restorePlaylistPlaybackState()
         automations = await automationStore.current()
         displays = displayCoordinator.refresh()
         await engine.restore(using: assets)
@@ -703,15 +846,16 @@ final class AppModel {
     }
 
     private func startStatsPolling() {
-        refreshStats()
-        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+        refreshStats(includeDiskUsage: true)
+        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshStats() }
         }
+        timer.tolerance = 3
         RunLoop.main.add(timer, forMode: .common)
         statsTimer = timer
     }
 
-    func refreshStats() {
+    func refreshStats(includeDiskUsage: Bool = false) {
         var info = mach_task_basic_info()
         var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
         let result = withUnsafeMutablePointer(to: &info) {
@@ -725,12 +869,19 @@ final class AppModel {
         let cpu = cpuSampler.sample()
         processCPUPercent = cpu.process
         systemCPUPercent = cpu.system
+        let previousPower = PowerStatus(isOnBattery: isOnBattery, percent: batteryPercent)
         let power = PowerStatus.current()
         batteryPercent = power.percent
         isOnBattery = power.isOnBattery
-        Task { @MainActor in
-            let bytes = await store.diskUsageBytes()
-            libraryDiskMB = Double(bytes) / 1_048_576
+        if power != previousPower {
+            applyPlaybackPolicy()
+        }
+        statsTick += 1
+        if includeDiskUsage || statsTick.isMultiple(of: 4) {
+            Task { @MainActor in
+                let bytes = await store.diskUsageBytes()
+                libraryDiskMB = Double(bytes) / 1_048_576
+            }
         }
     }
 
@@ -771,6 +922,20 @@ final class AppModel {
         )
     }
 
+    private func observePowerChanges() {
+        let center = NotificationCenter.default
+        for name in [
+            ProcessInfo.thermalStateDidChangeNotification,
+            Notification.Name.NSProcessInfoPowerStateDidChange
+        ] {
+            powerObservers.append(
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor in self?.applyPlaybackPolicy() }
+                }
+            )
+        }
+    }
+
     private func observeDesktopCoverage() {
         let center = NSWorkspace.shared.notificationCenter
         let names: [NSNotification.Name] = [
@@ -787,9 +952,10 @@ final class AppModel {
         }
         // Workspace/Space notifications handle normal transitions. This slow fallback
         // catches apps that resize opaque windows without publishing a workspace event.
-        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.applyPlaybackPolicy() }
         }
+        timer.tolerance = 8
         RunLoop.main.add(timer, forMode: .common)
         coverageTimer = timer
         applyPlaybackPolicy()

@@ -97,19 +97,24 @@ public struct DisplayComposition: Codable, Equatable, Sendable {
     public var scale: Double
     public var rotationDegrees: Double
     public var offset: CGPoint
+    /// Global Cocoa-coordinate canvas shared by multiple displays. When present,
+    /// each display renders only the portion of this canvas intersecting its frame.
+    public var spanningCanvas: CGRect?
 
     public init(
         contentMode: ContentMode = .fill,
         focalPoint: CGPoint = CGPoint(x: 0.5, y: 0.5),
         scale: Double = 1,
         rotationDegrees: Double = 0,
-        offset: CGPoint = .zero
+        offset: CGPoint = .zero,
+        spanningCanvas: CGRect? = nil
     ) {
         self.contentMode = contentMode
         self.focalPoint = focalPoint
         self.scale = scale
         self.rotationDegrees = rotationDegrees
         self.offset = offset
+        self.spanningCanvas = spanningCanvas
     }
 }
 
