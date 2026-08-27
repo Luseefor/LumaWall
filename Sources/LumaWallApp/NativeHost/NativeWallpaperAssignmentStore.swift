@@ -70,7 +70,10 @@ enum NativeWallpaperAssignmentStore {
             "Files": [["relative": videoURL.absoluteString]],
             "Provider": WallpaperHostCapabilities.extensionBundleID,
         ]]
-        content["Shuffle"] = NSNull()
+        // Apple's wallpaper store uses the literal sentinel "$null". NSNull is
+        // not a property-list value and makes PropertyListSerialization fail
+        // with the misleading "error in the destination for the data" message.
+        content["Shuffle"] = "$null"
         let now = Date()
         surface["LastSet"] = now
         surface["LastUse"] = now
