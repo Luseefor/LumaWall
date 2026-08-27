@@ -116,6 +116,17 @@ public struct DisplayComposition: Codable, Equatable, Sendable {
         self.offset = offset
         self.spanningCanvas = spanningCanvas
     }
+
+    /// True when crop/scale/rotation match defaults (spanning canvas may still be set).
+    public var usesDefaultCrop: Bool {
+        contentMode == .fill
+            && abs(focalPoint.x - 0.5) < 0.001
+            && abs(focalPoint.y - 0.5) < 0.001
+            && abs(scale - 1) < 0.001
+            && abs(rotationDegrees) < 0.001
+            && abs(offset.x) < 0.001
+            && abs(offset.y) < 0.001
+    }
 }
 
 public struct DisplayAssignment: Codable, Equatable, Sendable, Identifiable {
