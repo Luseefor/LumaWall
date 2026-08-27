@@ -116,6 +116,18 @@ final class WallpaperEngine {
         }
     }
 
+    func reapplyAssignments() {
+        displays.refresh()
+        for (id, session) in sessions {
+            guard let screen = displays.screen(for: id),
+                  let connected = displays.display(id: id) else { continue }
+            installSystemPoster(session.asset.posterURL ?? session.asset.mediaURL, on: screen)
+            session.relayout(screen: screen, connected: connected)
+            session.apply(tier: tiers[id] ?? .full)
+            session.reassert()
+        }
+    }
+
     private func reassertAll() {
         for (id, session) in sessions {
             let tier = tiers[id] ?? .full

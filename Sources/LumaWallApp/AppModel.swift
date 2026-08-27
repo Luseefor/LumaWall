@@ -350,8 +350,8 @@ final class AppModel {
     }
 
     func reapplyActive() {
-        guard let featured else { return }
-        applyToAll(featured)
+        engine.reapplyAssignments()
+        applyPlaybackPolicy()
     }
 
     func clearDisplay(_ display: ConnectedDisplay) {
