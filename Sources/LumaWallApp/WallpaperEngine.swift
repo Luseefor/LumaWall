@@ -83,6 +83,7 @@ final class OverlayWallpaperEngine {
             session.show()
         }
         apply(tier: tiers[displayID] ?? .full, to: displayID)
+        reconcileSharedDecoders()
     }
 
     func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
@@ -126,6 +127,7 @@ final class OverlayWallpaperEngine {
         sessions.removeValue(forKey: displayID)?.tearDown()
         tiers.removeValue(forKey: displayID)
         try await assignments.clear(displayID: displayID)
+        reconcileSharedDecoders()
     }
 
     func clearAll() async throws {
@@ -142,6 +144,37 @@ final class OverlayWallpaperEngine {
         sessions[displayID]?.apply(tier: tier)
     }
 
+    func reconcileSharedDecoders() {
+        for session in sessions.values {
+            session.detachSharedHub()
+        }
+        var groups: [String: [DesktopVideoSession]] = [:]
+        for session in sessions.values {
+            groups[session.mediaKey, default: []].append(session)
+        }
+        for (_, group) in groups {
+            if group.count >= 2, let url = group.first?.asset.mediaURL {
+                let hub = SharedPlaybackHub.acquire(url: url)
+                for _ in 1..<group.count {
+                    _ = SharedPlaybackHub.acquire(url: url)
+                }
+                for session in group {
+                    session.attachSharedHub(hub)
+                }
+            } else {
+                group.first?.usePrivatePlayer()
+            }
+        }
+        for (id, session) in sessions {
+            session.apply(tier: tiers[id] ?? .full)
+        }
+    }
+
+    var activeDecoderCount: Int {
+        let privateCount = sessions.values.filter { !$0.usesSharedDecoder }.count
+        return SharedPlaybackHub.activeDecoderCount + privateCount
+    }
+
     func restore(using library: [WallpaperAsset]) async {
         let snapshot = await assignments.current()
         let byID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
@@ -149,9 +182,6 @@ final class OverlayWallpaperEngine {
         var restoredAssignments = snapshot.assignments
         var topologyChanged = false
 
-        // A spanning canvas is derived from the screens that are currently part
-        // of that wallpaper group. Recalculate it after docking, rotation, or a
-        // resolution change while retaining assignments for disconnected screens.
         let spanningWallpaperIDs = Set(restoredAssignments.compactMap { assignment in
             assignment.composition.spanningCanvas == nil ? nil : assignment.wallpaperID
         })
@@ -201,6 +231,12 @@ final class OverlayWallpaperEngine {
         }
     }
 
+    func releaseWorkingMemory() {
+        for session in sessions.values {
+            session.releaseDecoderNow()
+        }
+    }
+
     private func reassertAll() {
         for session in sessions.values {
             session.reassert()
@@ -211,8 +247,6 @@ final class OverlayWallpaperEngine {
         recoveryWorkItems.forEach { $0.cancel() }
         recoveryWorkItems.removeAll(keepingCapacity: true)
         reassertAll()
-        // Dock finishes changing Space ownership asynchronously. Keep retries short
-        // enough that a surface is never absent for a visible fraction of a second.
         for delay in [0.016, 0.08, 0.20] {
             let work = DispatchWorkItem { [weak self] in self?.reassertAll() }
             recoveryWorkItems.append(work)
@@ -256,12 +290,15 @@ final class DesktopVideoSession {
     private let root = SessionRootView()
     private var player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
+    private var sharedHub: SharedPlaybackHub?
     private var decoderReleaseWorkItem: DispatchWorkItem?
     private var decoderIsLoaded = false
     private var readinessObservation: NSKeyValueObservation?
     private var requestedTier: PlaybackTier = .full
     private var displayPixelSize = CGSize.zero
     var currentComposition: DisplayComposition { composition }
+    var mediaKey: String { asset.mediaURL.standardizedFileURL.path }
+    var usesSharedDecoder: Bool { sharedHub != nil }
 
     init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
         self.asset = asset
@@ -304,6 +341,7 @@ final class DesktopVideoSession {
     }
 
     func replace(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
+        detachSharedHub()
         self.asset = asset
         self.composition = composition
         relayout(screen: screen, connected: connected)
@@ -332,27 +370,41 @@ final class DesktopVideoSession {
         decoderReleaseWorkItem = nil
         switch tier {
         case .full:
-            ensureDecoder()
-            configureDecodeBudget(bitRate: 0, maximumResolution: .zero)
-            root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+            if let sharedHub {
+                sharedHub.setDecodeBudget(bitRate: 0, maximumResolution: .zero)
+                sharedHub.play()
+                root.setVideoVisible(true)
+            } else {
+                ensureDecoder()
+                configureDecodeBudget(bitRate: 0, maximumResolution: .zero)
+                root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+                player.rate = 1
+                player.play()
+            }
             reassert()
-            player.rate = 1
-            player.play()
         case .reduced:
-            ensureDecoder()
-            configureDecodeBudget(bitRate: 2_000_000, maximumResolution: reducedResolution)
-            root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+            if let sharedHub {
+                sharedHub.setDecodeBudget(bitRate: 2_000_000, maximumResolution: reducedResolution)
+                sharedHub.play()
+                root.setVideoVisible(true)
+            } else {
+                ensureDecoder(preferBatteryVariant: true)
+                configureDecodeBudget(bitRate: 2_000_000, maximumResolution: reducedResolution)
+                root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+                player.rate = 1
+                player.play()
+            }
             reassert()
-            player.rate = 1
-            player.play()
         case .minimal, .staticFrame:
+            sharedHub?.pause()
             player.pause()
             root.setVideoVisible(false)
             reassert()
             scheduleDecoderRelease(after: 2)
         case .paused:
+            sharedHub?.pause()
             player.pause()
-            root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+            root.setVideoVisible(root.usesSharedFrames || root.playerLayer.isReadyForDisplay)
             reassert()
             scheduleDecoderRelease(after: 10)
         }
@@ -361,6 +413,7 @@ final class DesktopVideoSession {
     func tearDown() {
         decoderReleaseWorkItem?.cancel()
         readinessObservation?.invalidate()
+        detachSharedHub()
         player.pause()
         looper = nil
         root.playerLayer.player = nil
@@ -371,8 +424,18 @@ final class DesktopVideoSession {
 
     func synchronize(atHostTime hostTime: CMTime, tier: PlaybackTier) {
         decoderReleaseWorkItem?.cancel()
-        ensureDecoder()
         requestedTier = tier
+        if let sharedHub {
+            sharedHub.setDecodeBudget(
+                bitRate: tier == .reduced ? 2_000_000 : 0,
+                maximumResolution: tier == .reduced ? reducedResolution : .zero
+            )
+            sharedHub.synchronize(atHostTime: hostTime)
+            root.setVideoVisible(true)
+            reassert()
+            return
+        }
+        ensureDecoder()
         configureDecodeBudget(
             bitRate: tier == .reduced ? 2_000_000 : 0,
             maximumResolution: tier == .reduced ? reducedResolution : .zero
@@ -411,14 +474,70 @@ final class DesktopVideoSession {
         decoderIsLoaded = true
     }
 
-    private func ensureDecoder() {
+    private func ensureDecoder(preferBatteryVariant: Bool = false) {
+        if preferBatteryVariant {
+            Task { await BatteryMediaVariant.ensure(for: asset) }
+        }
         guard !decoderIsLoaded else { return }
-        configurePlayer(url: asset.mediaURL)
+        let url = BatteryMediaVariant.resolvedURL(
+            for: asset,
+            tier: preferBatteryVariant ? .reduced : .full
+        )
+        configurePlayer(url: url)
+    }
+
+    func releaseDecoderNow() {
+        decoderReleaseWorkItem?.cancel()
+        decoderReleaseWorkItem = nil
+        readinessObservation?.invalidate()
+        readinessObservation = nil
+        detachSharedHub()
+        player.pause()
+        looper = nil
+        root.playerLayer.player = nil
+        decoderIsLoaded = false
+    }
+
+    func attachSharedHub(_ hub: SharedPlaybackHub) {
+        if sharedHub === hub {
+            root.setUsesSharedFrames(true)
+            hub.attach(root.sharedVideoLayer)
+            decoderIsLoaded = hub.isLoaded
+            return
+        }
+        detachSharedHub()
+        sharedHub = hub
+        root.setUsesSharedFrames(true)
+        hub.attach(root.sharedVideoLayer)
+        decoderIsLoaded = hub.isLoaded
+        player.pause()
+        looper = nil
+        root.playerLayer.player = nil
+    }
+
+    func detachSharedHub() {
+        if let sharedHub {
+            sharedHub.detach(root.sharedVideoLayer)
+            sharedHub.release()
+        }
+        sharedHub = nil
+        root.setUsesSharedFrames(false)
+        root.sharedVideoLayer.contents = nil
+    }
+
+    func usePrivatePlayer() {
+        detachSharedHub()
+        ensureDecoder()
     }
 
     private func scheduleDecoderRelease(after delay: TimeInterval) {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            if let sharedHub {
+                sharedHub.unload()
+                decoderIsLoaded = false
+                return
+            }
             player.pause()
             looper = nil
             root.playerLayer.player = nil
@@ -449,9 +568,6 @@ private extension PlaybackTier {
     }
 }
 
-/// A wallpaper surface must never participate in normal app activation, window
-/// cycling, hiding, or focus. Its lifetime is owned by the engine, not AppKit's
-/// ordinary document-window lifecycle.
 private final class DesktopSurfaceWindow: NSWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -459,9 +575,11 @@ private final class DesktopSurfaceWindow: NSWindow {
 
 private final class SessionRootView: NSView {
     let playerLayer = AVPlayerLayer()
+    let sharedVideoLayer = CALayer()
     private let posterLayer = CALayer()
     private var composition = DisplayComposition()
     private var displayFrame = CGRect.zero
+    private(set) var usesSharedFrames = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -472,6 +590,10 @@ private final class SessionRootView: NSView {
         posterLayer.actions = Self.disabledActions
         posterLayer.contentsGravity = .resizeAspectFill
         layer?.addSublayer(posterLayer)
+        sharedVideoLayer.actions = Self.disabledActions
+        sharedVideoLayer.contentsGravity = .resizeAspectFill
+        sharedVideoLayer.isHidden = true
+        layer?.addSublayer(sharedVideoLayer)
         playerLayer.actions = Self.disabledActions
         playerLayer.videoGravity = .resizeAspectFill
         playerLayer.isHidden = true
@@ -485,6 +607,7 @@ private final class SessionRootView: NSView {
         let frame = mediaFrame
         posterLayer.frame = frame
         playerLayer.frame = frame
+        sharedVideoLayer.frame = frame
         applyTransform()
     }
 
@@ -497,17 +620,40 @@ private final class SessionRootView: NSView {
             posterLayer.contents = nil
         }
         switch composition.contentMode {
-        case .fill: playerLayer.videoGravity = .resizeAspectFill
-        case .fit: playerLayer.videoGravity = .resizeAspect
-        case .stretch: playerLayer.videoGravity = .resize
+        case .fill:
+            playerLayer.videoGravity = .resizeAspectFill
+            sharedVideoLayer.contentsGravity = .resizeAspectFill
+        case .fit:
+            playerLayer.videoGravity = .resizeAspect
+            sharedVideoLayer.contentsGravity = .resizeAspect
+        case .stretch:
+            playerLayer.videoGravity = .resize
+            sharedVideoLayer.contentsGravity = .resize
         }
         applyTransform()
+    }
+
+    func setUsesSharedFrames(_ shared: Bool) {
+        usesSharedFrames = shared
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if shared {
+            playerLayer.player = nil
+            playerLayer.isHidden = true
+        }
+        CATransaction.commit()
     }
 
     func setVideoVisible(_ visible: Bool) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        playerLayer.isHidden = !visible
+        if usesSharedFrames {
+            sharedVideoLayer.isHidden = !visible
+            playerLayer.isHidden = true
+        } else {
+            playerLayer.isHidden = !visible
+            sharedVideoLayer.isHidden = true
+        }
         CATransaction.commit()
     }
 
@@ -531,7 +677,7 @@ private final class SessionRootView: NSView {
         let scale = CGFloat(min(max(composition.scale, 0.25), 4))
         var transform = CGAffineTransform(rotationAngle: radians)
         transform = transform.scaledBy(x: scale, y: scale)
-        for layer in [posterLayer, playerLayer] {
+        for layer in [posterLayer, playerLayer, sharedVideoLayer] {
             layer.anchorPoint = anchor
             layer.position = position
             layer.setAffineTransform(transform)
