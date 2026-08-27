@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 enum WallpaperHostMode: String, Sendable {
@@ -15,7 +16,9 @@ enum WallpaperHostCapabilities {
             return .overlay
         }
         guard #available(macOS 26, *) else { return .overlay }
-        guard FileManager.default.fileExists(atPath: frameworkPath) else { return .overlay }
+        // The framework binary lives in the dyld shared cache, not on disk, so
+        // a file-existence check always fails. Preflight loadability instead.
+        guard dlopen_preflight(frameworkPath) else { return .overlay }
         guard hasEmbeddedWallpaperExtension || UserDefaults.standard.bool(forKey: "lumawall.forceNative") else {
             return .overlay
         }

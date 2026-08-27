@@ -49,7 +49,7 @@ final class WallpaperEngine {
 
     func apply(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition = .init()) async throws {
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
-            try? await overlay.clear(displayID)
+            overlay.dismantleSession(displayID)
             try await native.apply(asset, to: displayID, composition: composition)
             return
         }
@@ -58,7 +58,7 @@ final class WallpaperEngine {
 
     func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
-            try? await overlay.clearAll()
+            overlay.dismantleSessions()
             try await native.applyToAll(asset, composition: composition)
             return
         }
@@ -99,7 +99,7 @@ final class WallpaperEngine {
             if needsOverlay {
                 await overlay.restore(using: library)
             } else {
-                try? await overlay.clearAll()
+                overlay.dismantleSessions()
                 await native.restore(using: library)
             }
             return

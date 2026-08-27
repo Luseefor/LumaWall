@@ -10,6 +10,7 @@ enum NativeWallpaperAssignmentService {
         case unknownDisplay
         case invalidStore
         case verificationFailed
+        case writeFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -18,6 +19,7 @@ enum NativeWallpaperAssignmentService {
             case .unknownDisplay: "That display is missing from the wallpaper configuration."
             case .invalidStore: "The macOS wallpaper configuration has an unsupported format."
             case .verificationFailed: "macOS did not retain the new wallpaper assignment."
+            case .writeFailed(let detail): "LumaWall could not update the macOS wallpaper configuration. \(detail)"
             }
         }
     }
@@ -28,7 +30,9 @@ enum NativeWallpaperAssignmentService {
     }
 
     private static var backupURL: URL {
-        storeURL.deletingLastPathComponent().appendingPathComponent("Index.lumawall-backup.plist")
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("LumaWall/Backups", isDirectory: true)
+            .appendingPathComponent("WallpaperIndex.plist")
     }
 
     static func stableUUID(for displayID: UInt32) -> String? {
@@ -47,14 +51,21 @@ enum NativeWallpaperAssignmentService {
 
     static func apply(assignments: [UInt32: NativeWallpaperDeployment.EntryInfo]) throws {
         guard #available(macOS 26, *) else { throw AssignmentError.unsupportedSystem }
+        nativeHostLog.info("assignment: begin for \(assignments.count) display(s)")
         let stableAssignments = assignments.reduce(into: [String: NativeWallpaperDeployment.EntryInfo]()) {
             if let uuid = stableUUID(for: $1.key) { $0[uuid] = $1.value }
         }
-        guard !stableAssignments.isEmpty else { throw AssignmentError.unknownDisplay }
+        guard !stableAssignments.isEmpty else {
+            nativeHostLog.error("assignment: CoreGraphics returned no stable display UUID")
+            throw AssignmentError.unknownDisplay
+        }
 
         let original: Data
         do { original = try Data(contentsOf: storeURL) }
-        catch { throw AssignmentError.unreadableStore }
+        catch {
+            logFailure("read", error)
+            throw AssignmentError.unreadableStore
+        }
 
         let source = try PropertyListSerialization.propertyList(
             from: original,
@@ -71,19 +82,28 @@ enum NativeWallpaperAssignmentService {
                 displayUUIDs: [uuid]
             ))
         }
-        guard changed == Set(stableAssignments.keys) else { throw AssignmentError.unknownDisplay }
+        guard changed == Set(stableAssignments.keys) else {
+            let missing = Set(stableAssignments.keys).subtracting(changed).sorted().joined(separator: ", ")
+            let known = ((root["Displays"] as? NSDictionary)?.allKeys as? [String] ?? []).sorted().joined(separator: ", ")
+            nativeHostLog.error("assign: no Desktop surface for display(s) [\(missing, privacy: .public)]; store has [\(known, privacy: .public)]")
+            throw AssignmentError.unknownDisplay
+        }
 
         let encoded = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
-        try original.write(to: backupURL, options: .atomic)
+        nativeHostLog.info("assignment: matched all displays; writing \(encoded.count) bytes")
+        try saveBackup(original)
         do {
-            try encoded.write(to: storeURL, options: .atomic)
+            try writeCoordinated(encoded, to: storeURL)
             let check = try Data(contentsOf: storeURL)
             guard check == encoded else { throw AssignmentError.verificationFailed }
         } catch {
-            try? original.write(to: storeURL, options: .atomic)
-            throw error
+            logFailure("write", error)
+            try? writeCoordinated(original, to: storeURL)
+            if let assignmentError = error as? AssignmentError { throw assignmentError }
+            throw AssignmentError.writeFailed(error.localizedDescription)
         }
 
+        nativeHostLog.info("assignment: verified; restarting WallpaperAgent")
         restartWallpaperAgent()
     }
 
@@ -104,9 +124,54 @@ enum NativeWallpaperAssignmentService {
             videoURL: NativeWallpaperDeployment.videoURL(for: entry)
         )
         let encoded = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
-        try original.write(to: backupURL, options: .atomic)
-        try encoded.write(to: storeURL, options: .atomic)
+        try saveBackup(original)
+        do {
+            try writeCoordinated(encoded, to: storeURL)
+            let check = try Data(contentsOf: storeURL)
+            guard check == encoded else { throw AssignmentError.verificationFailed }
+        } catch {
+            try? writeCoordinated(original, to: storeURL)
+            if let assignmentError = error as? AssignmentError { throw assignmentError }
+            throw AssignmentError.writeFailed(error.localizedDescription)
+        }
         restartWallpaperAgent()
+    }
+
+    /// `Index.plist` is a live file owned by WallpaperAgent. Foundation's
+    /// `.atomic` option creates and renames a sibling temporary file, which can
+    /// fail while the agent is observing the directory. Coordinate the replace
+    /// and write the already-encoded plist to the granted URL instead.
+    private static func writeCoordinated(_ data: Data, to url: URL) throws {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var writeError: (any Error)?
+        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordinationError) { grantedURL in
+            do {
+                try data.write(to: grantedURL, options: [])
+            } catch {
+                writeError = error
+            }
+        }
+        if let coordinationError { throw coordinationError }
+        if let writeError { throw writeError }
+    }
+
+    private static func saveBackup(_ data: Data) throws {
+        let folder = backupURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try data.write(to: backupURL, options: .atomic)
+        } catch {
+            logFailure("backup", error)
+            throw AssignmentError.writeFailed("Its safety backup could not be created: \(error.localizedDescription)")
+        }
+    }
+
+    private static func logFailure(_ stage: String, _ error: any Error) {
+        let cocoa = error as NSError
+        nativeHostLog.error(
+            "assignment: \(stage, privacy: .public) failed domain=\(cocoa.domain, privacy: .public) code=\(cocoa.code) description=\(cocoa.localizedDescription, privacy: .public)"
+        )
     }
 
     private static func restartWallpaperAgent() {
