@@ -302,15 +302,20 @@ final class AppModel {
         }
     }
 
-    func apply(_ asset: WallpaperAsset, to displayID: DisplayID? = nil, continuingPlaylist: Bool = false) {
+    func apply(
+        _ asset: WallpaperAsset,
+        to displayID: DisplayID? = nil,
+        composition: DisplayComposition = .init(),
+        continuingPlaylist: Bool = false
+    ) {
         isApplying = true
         if !continuingPlaylist { stopPlaylistRotation() }
         Task {
             do {
                 if let displayID {
-                    try await engine.apply(asset, to: displayID)
+                    try await engine.apply(asset, to: displayID, composition: composition)
                 } else if let main = displayCoordinator.mainDisplay() {
-                    try await engine.apply(asset, to: main.displayID)
+                    try await engine.apply(asset, to: main.displayID, composition: composition)
                 }
                 try? await store.recordApply(id: asset.id)
                 try? await recentsStore.push(asset.id)
@@ -321,6 +326,10 @@ final class AppModel {
             }
             isApplying = false
         }
+    }
+
+    func composition(on display: ConnectedDisplay) -> DisplayComposition {
+        engine.composition(on: display.displayID)
     }
 
     func applyToAll(_ asset: WallpaperAsset, continuingPlaylist: Bool = false) {

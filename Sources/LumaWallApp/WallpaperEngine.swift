@@ -35,6 +35,10 @@ final class WallpaperEngine {
         sessions[displayID]?.asset.id
     }
 
+    func composition(on displayID: DisplayID) -> DisplayComposition {
+        sessions[displayID]?.currentComposition ?? .init()
+    }
+
     func tier(on displayID: DisplayID) -> PlaybackTier {
         tiers[displayID] ?? .full
     }
@@ -134,6 +138,7 @@ final class DesktopVideoSession {
     private let root = SessionRootView()
     private var player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
+    var currentComposition: DisplayComposition { composition }
 
     init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
         self.asset = asset
@@ -245,6 +250,7 @@ final class DesktopVideoSession {
 private final class SessionRootView: NSView {
     let playerLayer = AVPlayerLayer()
     private let posterLayer = CALayer()
+    private var composition = DisplayComposition()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -263,9 +269,11 @@ private final class SessionRootView: NSView {
         super.layout()
         posterLayer.frame = bounds
         playerLayer.frame = bounds
+        applyTransform()
     }
 
     func apply(composition: DisplayComposition, poster: URL?) {
+        self.composition = composition
         if let poster, let image = NSImage(contentsOf: poster) {
             posterLayer.contents = image
         } else {
@@ -275,6 +283,28 @@ private final class SessionRootView: NSView {
         case .fill: playerLayer.videoGravity = .resizeAspectFill
         case .fit: playerLayer.videoGravity = .resizeAspect
         case .stretch: playerLayer.videoGravity = .resize
+        }
+        applyTransform()
+    }
+
+    private func applyTransform() {
+        let focal = CGPoint(
+            x: min(max(composition.focalPoint.x, 0), 1),
+            y: min(max(composition.focalPoint.y, 0), 1)
+        )
+        let anchor = CGPoint(x: focal.x, y: focal.y)
+        let position = CGPoint(
+            x: bounds.width * focal.x + composition.offset.x,
+            y: bounds.height * focal.y + composition.offset.y
+        )
+        let radians = CGFloat(composition.rotationDegrees * .pi / 180)
+        let scale = CGFloat(min(max(composition.scale, 0.25), 4))
+        var transform = CGAffineTransform(rotationAngle: radians)
+        transform = transform.scaledBy(x: scale, y: scale)
+        for layer in [posterLayer, playerLayer] {
+            layer.anchorPoint = anchor
+            layer.position = position
+            layer.setAffineTransform(transform)
         }
     }
 }
