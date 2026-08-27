@@ -138,6 +138,8 @@ final class DesktopVideoSession {
     private let root = SessionRootView()
     private var player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
+    private var decoderReleaseWorkItem: DispatchWorkItem?
+    private var decoderIsLoaded = false
     var currentComposition: DisplayComposition { composition }
 
     init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
@@ -191,14 +193,18 @@ final class DesktopVideoSession {
     }
 
     func apply(tier: PlaybackTier) {
+        decoderReleaseWorkItem?.cancel()
+        decoderReleaseWorkItem = nil
         switch tier {
         case .full:
+            ensureDecoder()
             setBitRate(0)
             root.playerLayer.isHidden = false
             window.orderFrontRegardless()
             player.rate = 1
             player.play()
         case .reduced:
+            ensureDecoder()
             setBitRate(2_000_000)
             root.playerLayer.isHidden = false
             window.orderFrontRegardless()
@@ -208,18 +214,22 @@ final class DesktopVideoSession {
             player.pause()
             root.playerLayer.isHidden = true
             window.orderOut(nil)
+            scheduleDecoderRelease(after: 12)
         case .paused:
             player.pause()
             root.playerLayer.isHidden = false
+            scheduleDecoderRelease(after: 30)
         }
     }
 
     func tearDown() {
+        decoderReleaseWorkItem?.cancel()
         player.pause()
         looper = nil
         root.playerLayer.player = nil
         window.orderOut(nil)
         window.close()
+        decoderIsLoaded = false
     }
 
     private func setBitRate(_ bits: Double) {
@@ -227,6 +237,7 @@ final class DesktopVideoSession {
     }
 
     private func configurePlayer(url: URL) {
+        decoderReleaseWorkItem?.cancel()
         player.pause()
         looper = nil
         player = AVQueuePlayer()
@@ -236,6 +247,27 @@ final class DesktopVideoSession {
         looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         root.playerLayer.player = player
         root.playerLayer.videoGravity = gravity(for: composition.contentMode)
+        decoderIsLoaded = true
+    }
+
+    private func ensureDecoder() {
+        guard !decoderIsLoaded else { return }
+        configurePlayer(url: asset.mediaURL)
+    }
+
+    private func scheduleDecoderRelease(after delay: TimeInterval) {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            player.pause()
+            looper = nil
+            root.playerLayer.player = nil
+            root.playerLayer.isHidden = true
+            player = AVQueuePlayer()
+            player.isMuted = true
+            decoderIsLoaded = false
+        }
+        decoderReleaseWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func gravity(for mode: ContentMode) -> AVLayerVideoGravity {

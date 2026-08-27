@@ -699,7 +699,7 @@ final class AppModel {
 
     private func startStatsPolling() {
         refreshStats()
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshStats() }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -780,7 +780,9 @@ final class AppModel {
                 }
             )
         }
-        let timer = Timer(timeInterval: 4, repeats: true) { [weak self] _ in
+        // Workspace/Space notifications handle normal transitions. This slow fallback
+        // catches apps that resize opaque windows without publishing a workspace event.
+        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.applyPlaybackPolicy() }
         }
         RunLoop.main.add(timer, forMode: .common)
