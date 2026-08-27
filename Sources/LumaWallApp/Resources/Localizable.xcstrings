@@ -1,0 +1,216 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "app.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LumaWall" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "LumaWall" } }
+      }
+    },
+    "nav.home" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Home" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Inicio" } }
+      }
+    },
+    "nav.library" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Library" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Biblioteca" } }
+      }
+    },
+    "nav.displays" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Displays" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Pantallas" } }
+      }
+    },
+    "nav.settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Settings" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Ajustes" } }
+      }
+    },
+    "action.pause" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause playback" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Pausar reproducción" } }
+      }
+    },
+    "action.resume" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Resume playback" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Reanudar reproducción" } }
+      }
+    },
+    "action.import" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Import videos" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Importar vídeos" } }
+      }
+    },
+    "action.search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search wallpapers" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Buscar fondos" } }
+      }
+    },
+    "settings.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Settings" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Ajustes" } }
+      }
+    },
+    "settings.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Energy, lock, and local storage." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Energía, bloqueo y almacenamiento local." } }
+      }
+    },
+    "settings.host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Wallpaper host" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Motor de fondo" } }
+      }
+    },
+    "settings.playback" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playback & energy" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Reproducción y energía" } }
+      }
+    },
+    "settings.energyLog" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Energy Log" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Registro de energía" } }
+      }
+    },
+    "settings.energyLog.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "24-hour log of CPU, RAM, decoders, and battery while wallpapers run." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Registro de 24 h de CPU, RAM, decodificadores y batería con fondos activos." } }
+      }
+    },
+    "settings.energyLog.start" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Start 24h log" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Iniciar registro 24 h" } }
+      }
+    },
+    "settings.energyLog.copy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy report" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Copiar informe" } }
+      }
+    },
+    "settings.energyLog.reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset window" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Reiniciar ventana" } }
+      }
+    },
+    "settings.app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "App" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "App" } }
+      }
+    },
+    "settings.storage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Storage" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Almacenamiento" } }
+      }
+    },
+    "settings.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Status" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Estado" } }
+      }
+    },
+    "settings.launchAtLogin" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Launch at login" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Abrir al iniciar sesión" } }
+      }
+    },
+    "settings.pauseObscured" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause when the desktop is hidden" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Pausar cuando el escritorio está oculto" } }
+      }
+    },
+    "settings.pauseLock" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause when the Mac is locked" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Pausar cuando el Mac está bloqueado" } }
+      }
+    },
+    "settings.stillDesktop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Still desktop only" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Solo imagen fija en escritorio" } }
+      }
+    },
+    "settings.reduceMotion" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reduce Motion" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Reducir movimiento" } }
+      }
+    },
+    "settings.clearRAM" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear RAM" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Vaciar RAM" } }
+      }
+    },
+    "settings.clearDisk" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear disk cache" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Vaciar caché en disco" } }
+      }
+    },
+    "a11y.brand" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "LumaWall home" } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Inicio de LumaWall" } }
+      }
+    },
+    "tagline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Local video wallpapers. No account. No tracking." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Fondos de vídeo locales. Sin cuenta. Sin seguimiento." } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

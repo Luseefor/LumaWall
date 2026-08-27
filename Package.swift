@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "LumaWall",
+    defaultLocalization: "en",
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "LumaWallCore", targets: ["LumaWallCore"]),
