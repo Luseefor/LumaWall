@@ -541,6 +541,11 @@ final class AppModel {
     func refreshDisplays() {
         displays = displayCoordinator.refresh()
         refreshActive()
+        Task {
+            await engine.restore(using: assets)
+            refreshActive()
+            applyPlaybackPolicy()
+        }
     }
 
     private func startPlaylistRotation(ids: [WallpaperID], intervalMinutes: Int) {

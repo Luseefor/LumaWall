@@ -18,7 +18,7 @@ final class WallpaperEngine {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.reassertAll() }
+            Task { @MainActor in self?.scheduleSurfaceRecovery() }
         }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -26,6 +26,23 @@ final class WallpaperEngine {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.rebuildGeometry() }
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.scheduleSurfaceRecovery() }
+        }
+        workspace.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard app?.bundleIdentifier == "com.apple.finder" || app?.bundleIdentifier == "com.apple.dock" else { return }
+            Task { @MainActor in self?.scheduleSurfaceRecovery() }
         }
     }
 
@@ -94,6 +111,7 @@ final class WallpaperEngine {
         let byID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         for assignment in snapshot.assignments where assignment.isEnabled {
             guard let wallpaperID = assignment.wallpaperID, let asset = byID[wallpaperID] else { continue }
+            if sessions[assignment.displayID]?.asset.id == wallpaperID { continue }
             try? await apply(asset, to: assignment.displayID, composition: assignment.composition)
         }
     }
@@ -106,8 +124,21 @@ final class WallpaperEngine {
         }
     }
 
+    private func scheduleSurfaceRecovery() {
+        reassertAll()
+        for delay in [0.08, 0.35] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.reassertAll()
+            }
+        }
+    }
+
     private func rebuildGeometry() {
-        displays.refresh()
+        let connectedIDs = Set(displays.refresh().map(\.displayID))
+        for id in sessions.keys where !connectedIDs.contains(id) {
+            sessions.removeValue(forKey: id)?.tearDown()
+            tiers.removeValue(forKey: id)
+        }
         for (id, session) in sessions {
             guard let screen = displays.screen(for: id),
                   let connected = displays.display(id: id) else { continue }
