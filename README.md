@@ -1,22 +1,39 @@
 # LumaWall
 
-macOS app for live video wallpapers from files on your Mac.
+Live video wallpapers on macOS, from files already on your disk. Bundle id `app.lumawall.personal`. Version 0.4.0 (build 12).
 
-## What it does
+This is the production cut of the app: import, assign, automate, pause for power and accessibility, then leave it alone. Distribution still needs a Developer ID signature, notarization, and a DMG or Homebrew package before Gatekeeper-clean installs for other people. Until then, build and install locally.
 
-- Import MP4 or MOV files (audio is stripped)
-- Apply to one display or every display
-- Browse Home, Library, Displays, and Settings
-- Tag with categories, favorites, and recents
-- Rotate playlists from Library
-- Day/night and light/dark wallpaper pairs from Library
-- Pause per display or globally, set energy profile, clear cache, launch at login
+## Requirements
 
-Version is in `Packaging/Info.plist`.
+- macOS 15 or newer for the overlay path
+- macOS 26 or newer for the embedded WallpaperKit extension (`LumaWallWallpaper.appex`)
+- Xcode with XcodeGen for the signed app target
+- Swift 6 toolchain for library tests
 
-## Build and run
+## Product
 
-Overlay / library tests (macOS 15+):
+Import MP4 or MOV. Audio is stripped. Apply to one display or all of them.
+
+Home, Library, Displays, and Settings cover browsing, tags, favorites, recents, playlists, and day/night or light/dark pairs. Automations cover sunrise/sunset (approximate location), weekday masks, do-not-interrupt hours, and power-source rules. Lock screen can take the Idle poster through the native wallpaper store when the system allows it.
+
+Shared overlay decoders reuse one player when the same media hits multiple screens. Reduce Motion freezes to a static frame. Game Mode pauses playback. On battery, a 720p variant can replace the full file. Shortcuts can apply a wallpaper. English and Spanish ship in the string catalog. Settings includes an Energy Log with a 24h sample window for soak checks.
+
+Force overlay even on a native-capable Mac:
+
+```sh
+defaults write app.lumawall.personal lumawall.forceOverlay -bool YES
+```
+
+## How apply works
+
+On macOS 26+ with the wallpaper extension embedded under `Contents/Extensions`, LumaWall deploys the video into the extension container and assigns it through the system wallpaper store (`com.apple.wallpaper`). WallpaperAgent hosts playback. Lock-screen live video depends on what the OS allows that day.
+
+On macOS 15–25, or in SwiftPM overlay-only builds, LumaWall sets the desktop image to the poster for that screen and plays a muted looping video over it.
+
+## Build
+
+Library and overlay tests (macOS 15+):
 
 ```sh
 cd LumaWall
@@ -24,7 +41,7 @@ swift build -c release
 swift test
 ```
 
-Native wallpaper host (macOS 26+, embeds `LumaWallWallpaper.appex`):
+Native host with the wallpaper appex (macOS 26+):
 
 ```sh
 cd LumaWall
@@ -32,23 +49,21 @@ xcodegen generate
 xcodebuild -scheme LumaWall -configuration Release -derivedDataPath .derived build
 ```
 
-The installed app path used in this project is `/Applications/LumaWall.app`.
+Install the built app to `/Applications/LumaWall.app` for the path this project expects.
 
-## How apply works
+## Release checklist
 
-**macOS 26+ with the wallpaper extension embedded**
+Still open for a public binary:
 
-1. Deploy the video into the extension container.
-2. Assign it through the system wallpaper store (`com.apple.wallpaper` provider).
-3. WallpaperAgent hosts playback; lock-screen live video is available when the system allows it.
+1. Sign with Developer ID Application and enable Hardened Runtime (already on in `project.yml`).
+2. Notarize and staple.
+3. Ship a DMG or Homebrew cask, plus an updater if you want in-app updates.
+4. Attach crash reporting before a wide release.
 
-**macOS 15–25, or SwiftPM / overlay-only builds**
-
-1. Set the system desktop image to the wallpaper poster for that screen.
-2. Play a muted looping video over that screen.
-
-Force overlay on a native-capable Mac with `defaults write app.lumawall.personal lumawall.forceOverlay -bool YES`.
+Local production use does not need those steps. Third-party installs do.
 
 ## Author
 
-Commits and package metadata use Luseefor (sapanakosansar18@gmail.com). Do not attribute work to cursor-agent or other tool identities.
+Luseefor (`sapanakosansar18@gmail.com`). Commits and package metadata use that identity. Do not attribute this work to cursor-agent or other tool accounts.
+
+Third-party notices for Phosphene reference code live in `THIRD_PARTY_NOTICES.md`.
