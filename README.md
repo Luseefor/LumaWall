@@ -51,4 +51,4 @@ Force overlay on a native-capable Mac with `defaults write app.lumawall.personal
 
 ## Author
 
-Commits and package metadata use **Luseefor** (`sapanakosansar18@gmail.com`). Do not attribute work to cursor-agent or other tool identities.
+Commits and package metadata use Luseefor (sapanakosansar18@gmail.com). Do not attribute work to cursor-agent or other tool identities.

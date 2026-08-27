@@ -38,8 +38,6 @@ public actor AssignmentStore {
         try upsert([assignment])
     }
 
-    /// Persists a topology-wide assignment change with one atomic file replace.
-    /// Readers therefore see either the old complete layout or the new one.
     public func upsert(_ assignments: [DisplayAssignment]) throws {
         guard !assignments.isEmpty else { return }
         var values = Dictionary(uniqueKeysWithValues: snapshot.assignments.map { ($0.displayID, $0) })

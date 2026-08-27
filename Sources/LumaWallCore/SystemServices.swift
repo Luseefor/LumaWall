@@ -18,7 +18,6 @@ public enum LaunchAtLogin {
 }
 
 public enum CacheCleaner {
-    /// Frees URL response caches used by the app process.
     public static func clearMemory() {
         URLCache.shared.removeAllCachedResponses()
     }

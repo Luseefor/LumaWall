@@ -1,6 +1,5 @@
 import Foundation
 
-/// Last applied wallpaper IDs, newest first, capped at `limit`.
 public actor RecentsStore {
     public static let limit = 10
 
