@@ -1,6 +1,5 @@
 import Foundation
 
-/// Writes shared prefs the wallpaper extension reads for pause / power policy.
 @MainActor
 enum NativeWallpaperPrefsBridge {
     private static var prefsURL: URL {
@@ -27,6 +26,7 @@ enum NativeWallpaperPrefsBridge {
         occludedDisplays: Set<UInt32> = [],
         fullscreenDisplays: Set<UInt32> = [],
         desktopOccluded: Bool = false,
+        screenSaverIsOurs: Bool? = nil,
         powerProfile: String? = nil
     ) {
         let fm = FileManager.default
@@ -42,7 +42,7 @@ enum NativeWallpaperPrefsBridge {
             occludedDisplays: occludedDisplays,
             fullscreenDisplays: fullscreenDisplays,
             pausedDisplays: pausedDisplays,
-            screenSaverIsOurs: nil,
+            screenSaverIsOurs: screenSaverIsOurs,
             powerProfile: powerProfile
         )
         guard let data = try? JSONEncoder().encode(file) else { return }

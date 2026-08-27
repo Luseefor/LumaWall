@@ -87,6 +87,28 @@ enum NativeWallpaperAssignmentService {
         restartWallpaperAgent()
     }
 
+    static func applyLockScreen(entry: NativeWallpaperDeployment.EntryInfo) throws {
+        guard #available(macOS 26, *) else { throw AssignmentError.unsupportedSystem }
+        let original: Data
+        do { original = try Data(contentsOf: storeURL) }
+        catch { throw AssignmentError.unreadableStore }
+        let source = try PropertyListSerialization.propertyList(
+            from: original,
+            options: [.mutableContainersAndLeaves],
+            format: nil
+        )
+        guard let root = source as? NSMutableDictionary else { throw AssignmentError.invalidStore }
+        NativeWallpaperAssignmentStore.updateIdleEverywhere(
+            root: root,
+            choiceID: entry.id,
+            videoURL: NativeWallpaperDeployment.videoURL(for: entry)
+        )
+        let encoded = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+        try original.write(to: backupURL, options: .atomic)
+        try encoded.write(to: storeURL, options: .atomic)
+        restartWallpaperAgent()
+    }
+
     private static func restartWallpaperAgent() {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
