@@ -28,6 +28,10 @@ public struct PlaybackConditions: Sendable {
     public var displayIsObscured: Bool
     public var userPaused: Bool
     public var hideDesktopVideo: Bool
+    /// Native host can keep live video on the lock screen while the desktop stays still.
+    public var allowLiveOnLock: Bool
+    public var gameModeActive: Bool
+    public var reduceMotion: Bool
 
     public init(
         profile: PowerProfile = .automatic,
@@ -39,7 +43,10 @@ public struct PlaybackConditions: Sendable {
         sessionIsLocked: Bool = false,
         displayIsObscured: Bool = false,
         userPaused: Bool = false,
-        hideDesktopVideo: Bool = false
+        hideDesktopVideo: Bool = false,
+        allowLiveOnLock: Bool = false,
+        gameModeActive: Bool = false,
+        reduceMotion: Bool = false
     ) {
         self.profile = profile
         self.isOnBattery = isOnBattery
@@ -51,12 +58,20 @@ public struct PlaybackConditions: Sendable {
         self.displayIsObscured = displayIsObscured
         self.userPaused = userPaused
         self.hideDesktopVideo = hideDesktopVideo
+        self.allowLiveOnLock = allowLiveOnLock
+        self.gameModeActive = gameModeActive
+        self.reduceMotion = reduceMotion
     }
 }
 
 public enum PlaybackPolicy {
     public static func resolve(_ state: PlaybackConditions) -> PlaybackTier {
-        if state.userPaused || state.displayIsAsleep || state.displayIsObscured || state.sessionIsLocked {
+        if state.userPaused || state.displayIsAsleep || state.displayIsObscured || state.gameModeActive {
+            return .paused
+        }
+        if state.reduceMotion { return .staticFrame }
+        if state.sessionIsLocked {
+            if state.allowLiveOnLock, state.hideDesktopVideo { return .full }
             return .paused
         }
         if state.hideDesktopVideo { return .staticFrame }

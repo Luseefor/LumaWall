@@ -22,4 +22,20 @@ struct PowerPolicyTests {
     @Test func stillDesktopHidesLiveVideo() {
         #expect(PlaybackPolicy.resolve(.init(hideDesktopVideo: true)) == .staticFrame)
     }
+
+    @Test func gameModePausesVideo() {
+        #expect(PlaybackPolicy.resolve(.init(gameModeActive: true)) == .paused)
+    }
+
+    @Test func nativeLockOnlyKeepsLiveOnLock() {
+        #expect(
+            PlaybackPolicy.resolve(
+                .init(sessionIsLocked: true, hideDesktopVideo: true, allowLiveOnLock: true)
+            ) == .full
+        )
+    }
+
+    @Test func reduceMotionUsesStillFrame() {
+        #expect(PlaybackPolicy.resolve(.init(reduceMotion: true)) == .staticFrame)
+    }
 }
