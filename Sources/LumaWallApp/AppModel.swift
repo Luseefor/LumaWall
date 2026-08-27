@@ -83,6 +83,9 @@ final class AppModel {
     private let recentsStore: RecentsStore
     private let automationStore: AutomationStore
     private let energyLogStore: EnergyLogStore
+    private let crashReportStore: CrashReportStore
+    var crashReports: [CrashReport] = []
+    var lastSessionEndedUncleanly = false
     let displayCoordinator: DisplayCoordinator
     private let engine: WallpaperEngine
     var wallpaperHostMode: WallpaperHostMode { engine.mode }
@@ -162,6 +165,7 @@ final class AppModel {
             let recents = try RecentsStore()
             let automations = try AutomationStore()
             let energyLog = try EnergyLogStore()
+            let crashes = try CrashReportStore()
             let displays = DisplayCoordinator()
             self.store = store
             self.importer = MediaImporter(store: store)
@@ -171,10 +175,12 @@ final class AppModel {
             self.recentsStore = recents
             self.automationStore = automations
             self.energyLogStore = energyLog
+            self.crashReportStore = crashes
             self.displayCoordinator = displays
             self.engine = WallpaperEngine(displays: displays, assignments: assignments)
             self.displays = displays.displays
             self.launchAtLogin = LaunchAtLogin.isEnabled
+            startCrashReporting()
             Task { await bootstrap() }
             startStatsPolling()
             observeAppearanceChanges()
@@ -231,6 +237,27 @@ final class AppModel {
     }
 
     var isPaused: Bool { userPaused }
+
+    var playbackScope: PlaybackScope {
+        if userPaused { return .paused }
+        if hideDesktopVideo { return .lockScreen }
+        return .everywhere
+    }
+
+    func setPlaybackScope(_ scope: PlaybackScope) {
+        switch scope {
+        case .everywhere:
+            userPaused = false
+            setHideDesktopVideo(false)
+        case .lockScreen:
+            userPaused = false
+            setHideDesktopVideo(true)
+        case .paused:
+            userPaused = true
+            setHideDesktopVideo(false)
+        }
+        UserDefaults.standard.set(userPaused, forKey: "lumawall.userPaused")
+    }
 
     func isFavorite(_ asset: WallpaperAsset) -> Bool { favoriteIDs.contains(asset.id) }
     func isActive(_ asset: WallpaperAsset) -> Bool { activeByDisplay.values.contains(asset.id) }
@@ -515,6 +542,52 @@ final class AppModel {
 
     private func refreshEnergyReport() async {
         energySoakReport = await energyLogStore.report()
+    }
+
+    // MARK: - Crash reporting (local only)
+
+    private var appVersionString: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        return "\(version) (\(build))"
+    }
+
+    private func startCrashReporting() {
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        CrashMonitor.install(
+            store: crashReportStore,
+            appVersion: appVersionString,
+            osVersion: osVersion
+        )
+        crashReportStore.ingestRawDumps(appVersion: appVersionString, osVersion: osVersion)
+        let unclean = crashReportStore.beginSession(appVersion: appVersionString, osVersion: osVersion)
+        crashReports = crashReportStore.reports()
+        lastSessionEndedUncleanly = unclean != nil
+
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            CrashMonitor.markCleanShutdown()
+        }
+    }
+
+    func copyCrashReport(_ report: CrashReport) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report.formattedText, forType: .string)
+        present("Diagnostics", "Crash report copied to the clipboard.")
+    }
+
+    func revealCrashReports() {
+        NSWorkspace.shared.activateFileViewerSelecting([crashReportStore.directoryURL])
+    }
+
+    func clearCrashReports() {
+        crashReportStore.clearAll()
+        crashReports = []
+        lastSessionEndedUncleanly = false
+        present("Diagnostics", "Crash reports cleared.")
     }
 
     func createPlaylist(name: String, from selection: [WallpaperAsset], shuffled: Bool, intervalMinutes: Int) {
@@ -1265,6 +1338,7 @@ final class AppModel {
     }
 
     private func present(_ title: String, _ message: String) {
+        nativeHostLog.error("alert: \(title, privacy: .public) — \(message, privacy: .public)")
         alertTitle = title
         alertMessage = message
         showsAlert = true
