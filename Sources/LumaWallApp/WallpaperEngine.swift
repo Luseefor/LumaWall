@@ -3,19 +3,12 @@ import AppKit
 import LumaWallCore
 import QuartzCore
 
-/// Live wallpaper presenter for the current milestone.
-///
-/// Strategy:
-/// 1. Install the poster as the *real* macOS desktop picture for that screen.
-/// 2. Keep a muted looping video panel at desktop-icon level so motion continues.
-/// 3. If the compositor briefly hides the panel during Space switches, the matching
-///    poster remains as the system wallpaper — never the previous static image.
 @MainActor
 final class WallpaperEngine {
     private let displays: DisplayCoordinator
     private let assignments: AssignmentStore
     private var sessions: [DisplayID: DesktopVideoSession] = [:]
-    private(set) var isPausedGlobally = false
+    private var tiers: [DisplayID: PlaybackTier] = [:]
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
         self.displays = displays
@@ -42,6 +35,10 @@ final class WallpaperEngine {
         sessions[displayID]?.asset.id
     }
 
+    func tier(on displayID: DisplayID) -> PlaybackTier {
+        tiers[displayID] ?? .full
+    }
+
     func apply(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition = .init()) async throws {
         guard let screen = displays.screen(for: displayID),
               let connected = displays.display(id: displayID) else {
@@ -56,7 +53,7 @@ final class WallpaperEngine {
             sessions[displayID] = session
             session.show()
         }
-        if isPausedGlobally { sessions[displayID]?.pause() }
+        apply(tier: tiers[displayID] ?? .full, to: displayID)
 
         try await assignments.upsert(
             DisplayAssignment(displayID: displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
@@ -71,6 +68,7 @@ final class WallpaperEngine {
 
     func clear(_ displayID: DisplayID) async throws {
         sessions.removeValue(forKey: displayID)?.tearDown()
+        tiers.removeValue(forKey: displayID)
         try await assignments.clear(displayID: displayID)
     }
 
@@ -78,14 +76,13 @@ final class WallpaperEngine {
         for key in sessions.keys {
             sessions.removeValue(forKey: key)?.tearDown()
         }
+        tiers.removeAll()
         try await assignments.clearAll()
     }
 
-    func setPaused(_ paused: Bool) {
-        isPausedGlobally = paused
-        for session in sessions.values {
-            if paused { session.pause() } else { session.resume() }
-        }
+    func apply(tier: PlaybackTier, to displayID: DisplayID) {
+        tiers[displayID] = tier
+        sessions[displayID]?.apply(tier: tier)
     }
 
     func restore(using library: [WallpaperAsset]) async {
@@ -98,7 +95,11 @@ final class WallpaperEngine {
     }
 
     private func reassertAll() {
-        for session in sessions.values { session.reassert() }
+        for (id, session) in sessions {
+            let tier = tiers[id] ?? .full
+            if tier == .staticFrame || tier == .minimal { continue }
+            session.reassert()
+        }
     }
 
     private func rebuildGeometry() {
@@ -107,6 +108,7 @@ final class WallpaperEngine {
             guard let screen = displays.screen(for: id),
                   let connected = displays.display(id: id) else { continue }
             session.relayout(screen: screen, connected: connected)
+            session.apply(tier: tiers[id] ?? .full)
         }
     }
 
@@ -183,8 +185,29 @@ final class DesktopVideoSession {
         window.level = NSWindow.Level(Int(CGWindowLevelForKey(.desktopIconWindow)) - 1)
     }
 
-    func pause() { player.pause() }
-    func resume() { player.play() }
+    func apply(tier: PlaybackTier) {
+        switch tier {
+        case .full:
+            setBitRate(0)
+            root.playerLayer.isHidden = false
+            window.orderFrontRegardless()
+            player.rate = 1
+            player.play()
+        case .reduced:
+            setBitRate(2_000_000)
+            root.playerLayer.isHidden = false
+            window.orderFrontRegardless()
+            player.rate = 1
+            player.play()
+        case .minimal, .staticFrame:
+            player.pause()
+            root.playerLayer.isHidden = true
+            window.orderOut(nil)
+        case .paused:
+            player.pause()
+            root.playerLayer.isHidden = false
+        }
+    }
 
     func tearDown() {
         player.pause()
@@ -192,6 +215,10 @@ final class DesktopVideoSession {
         root.playerLayer.player = nil
         window.orderOut(nil)
         window.close()
+    }
+
+    private func setBitRate(_ bits: Double) {
+        player.currentItem?.preferredPeakBitRate = bits
     }
 
     private func configurePlayer(url: URL) {

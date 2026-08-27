@@ -10,7 +10,11 @@ let package = Package(
     ],
     targets: [
         .target(name: "LumaWallCore"),
-        .executableTarget(name: "LumaWallApp", dependencies: ["LumaWallCore"]),
+        .executableTarget(
+            name: "LumaWallApp",
+            dependencies: ["LumaWallCore"],
+            resources: [.process("Resources")]
+        ),
         .testTarget(name: "LumaWallCoreTests", dependencies: ["LumaWallCore"]),
     ]
 )

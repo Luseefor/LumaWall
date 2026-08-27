@@ -30,8 +30,27 @@ public actor LibraryStore {
         }
     }
 
-    public func assets() -> [WallpaperAsset] {
-        assetsByID.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    public func assets(sortedBy sort: LibrarySort = .newest) -> [WallpaperAsset] {
+        let values = Array(assetsByID.values)
+        switch sort {
+        case .newest:
+            return values.sorted { $0.createdAt > $1.createdAt }
+        case .oldest:
+            return values.sorted { $0.createdAt < $1.createdAt }
+        case .name:
+            return values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .resolution:
+            return values.sorted {
+                ($0.pixelSize.width * $0.pixelSize.height) > ($1.pixelSize.width * $1.pixelSize.height)
+            }
+        case .mostUsed:
+            return values.sorted {
+                if $0.applyCount == $1.applyCount {
+                    return ($0.lastAppliedAt ?? .distantPast) > ($1.lastAppliedAt ?? .distantPast)
+                }
+                return $0.applyCount > $1.applyCount
+            }
+        }
     }
 
     public func asset(id: WallpaperID) -> WallpaperAsset? { assetsByID[id] }
@@ -48,9 +67,30 @@ public actor LibraryStore {
         try persist()
     }
 
+    public func update(_ asset: WallpaperAsset) throws {
+        guard assetsByID[asset.id] != nil else { throw StoreError.missingAsset }
+        assetsByID[asset.id] = asset
+        try persist()
+    }
+
     public func rename(id: WallpaperID, to name: String) throws {
         guard var asset = assetsByID[id] else { throw StoreError.missingAsset }
         asset.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        assetsByID[id] = asset
+        try persist()
+    }
+
+    public func setCategory(id: WallpaperID, category: WallpaperCategory) throws {
+        guard var asset = assetsByID[id] else { throw StoreError.missingAsset }
+        asset.category = category
+        assetsByID[id] = asset
+        try persist()
+    }
+
+    public func recordApply(id: WallpaperID, at date: Date = .now) throws {
+        guard var asset = assetsByID[id] else { throw StoreError.missingAsset }
+        asset.applyCount += 1
+        asset.lastAppliedAt = date
         assetsByID[id] = asset
         try persist()
     }
@@ -63,6 +103,15 @@ public actor LibraryStore {
 
     public func folder(for id: WallpaperID) -> URL {
         rootURL.appendingPathComponent(id.rawValue.uuidString, isDirectory: true)
+    }
+
+    public func diskUsageBytes() -> Int64 {
+        let urls = FileManager.default.enumerator(at: rootURL, includingPropertiesForKeys: [.fileSizeKey])
+        var total: Int64 = 0
+        while let url = urls?.nextObject() as? URL {
+            total += Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        return total
     }
 
     private func persist() throws {

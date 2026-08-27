@@ -27,6 +27,7 @@ public struct PlaybackConditions: Sendable {
     public var sessionIsLocked: Bool
     public var displayIsObscured: Bool
     public var userPaused: Bool
+    public var hideDesktopVideo: Bool
 
     public init(
         profile: PowerProfile = .automatic,
@@ -37,7 +38,8 @@ public struct PlaybackConditions: Sendable {
         displayIsAsleep: Bool = false,
         sessionIsLocked: Bool = false,
         displayIsObscured: Bool = false,
-        userPaused: Bool = false
+        userPaused: Bool = false,
+        hideDesktopVideo: Bool = false
     ) {
         self.profile = profile
         self.isOnBattery = isOnBattery
@@ -48,12 +50,16 @@ public struct PlaybackConditions: Sendable {
         self.sessionIsLocked = sessionIsLocked
         self.displayIsObscured = displayIsObscured
         self.userPaused = userPaused
+        self.hideDesktopVideo = hideDesktopVideo
     }
 }
 
 public enum PlaybackPolicy {
     public static func resolve(_ state: PlaybackConditions) -> PlaybackTier {
-        if state.userPaused || state.displayIsAsleep || state.displayIsObscured { return .paused }
+        if state.userPaused || state.displayIsAsleep || state.displayIsObscured || state.sessionIsLocked {
+            return .paused
+        }
+        if state.hideDesktopVideo { return .staticFrame }
         if state.thermalState == .critical || state.batteryPercent < 10 { return .paused }
         if state.thermalState == .serious { return .minimal }
         if state.isOnBattery {

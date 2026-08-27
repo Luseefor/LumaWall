@@ -1,26 +1,36 @@
 # LumaWall
 
-Independent macOS live-wallpaper app. Original code — not a Phosphene fork.
+macOS app for live video wallpapers from files on your Mac.
 
-## What works now (0.2.0)
+## What it does
 
-- Local video library with import, posters, duplicates, favorites
-- Distinct Home / Explore / Library / Displays / Playlists / Settings
-- Apply to main display, all displays, or a chosen display
-- System desktop poster install so Space switches never flash the old wallpaper
-- Live muted looping video sessions per display
-- Playlist creation from favorites or the full library
-- Energy profile preferences
-- Menu-bar controls
+- Import MP4 or MOV files (audio is stripped)
+- Apply to one display or every display
+- Browse Home, Library, Displays, and Settings
+- Tag with categories, favorites, and recents
+- Rotate playlists from Library
+- Day/night and light/dark wallpaper pairs from Library
+- Pause per display or globally, set energy profile, clear cache, launch at login
 
-## Run
+Version is in `Packaging/Info.plist`.
 
-Open `/Applications/LumaWall.app`, or:
+## Build and run
 
 ```sh
+cd LumaWall
 swift build -c release
+swift test
 ```
 
-## Next
+The installed app path used in this project is `/Applications/LumaWall.app`.
 
-Replace the desktop video panel with a native `com.apple.wallpaper` extension so motion is owned by WallpaperAgent end-to-end.
+## How apply works today
+
+1. Set the system desktop image to the wallpaper poster for that screen.
+2. Play a muted looping video over that screen.
+
+A native `com.apple.wallpaper` extension is the next engine step.
+
+## Author
+
+Commits and package metadata use **Luseefor** (`sapanakosansar18@gmail.com`). Do not attribute work to cursor-agent or other tool identities.

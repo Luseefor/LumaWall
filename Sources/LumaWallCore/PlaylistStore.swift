@@ -1,6 +1,7 @@
 import Foundation
 
-public struct PlaylistID: Hashable, Codable, Sendable, RawRepresentable {
+public struct PlaylistID: Hashable, Codable, Sendable, RawRepresentable, Identifiable {
+    public var id: UUID { rawValue }
     public let rawValue: UUID
     public init(rawValue: UUID) { self.rawValue = rawValue }
     public init() { rawValue = UUID() }

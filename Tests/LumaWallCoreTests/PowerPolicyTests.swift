@@ -15,7 +15,11 @@ struct PowerPolicyTests {
         #expect(PlaybackPolicy.resolve(.init(profile: .staticOnBattery, isOnBattery: true)) == .staticFrame)
     }
 
-    @Test func invisibleDisplayDoesNoContinuousWork() {
-        #expect(PlaybackPolicy.resolve(.init(displayIsObscured: true)) == .paused)
+    @Test func lockPausesVideo() {
+        #expect(PlaybackPolicy.resolve(.init(sessionIsLocked: true)) == .paused)
+    }
+
+    @Test func stillDesktopHidesLiveVideo() {
+        #expect(PlaybackPolicy.resolve(.init(hideDesktopVideo: true)) == .staticFrame)
     }
 }
