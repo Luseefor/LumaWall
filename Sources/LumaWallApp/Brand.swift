@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum Brand {
-    static var iconImage: NSImage {
+    static let iconImage: NSImage = {
         for bundle in resourceBundles {
             if let url = bundle.url(forResource: "AppIcon", withExtension: "png"),
                let image = NSImage(contentsOf: url) {
@@ -10,7 +10,7 @@ enum Brand {
             }
         }
         return NSImage(size: NSSize(width: 128, height: 128))
-    }
+    }()
 
     private static var resourceBundles: [Bundle] {
         #if SWIFT_PACKAGE
@@ -29,10 +29,14 @@ struct BrandMark: View {
         Image(nsImage: Brand.iconImage)
             .resizable()
             .interpolation(.high)
-            .aspectRatio(contentMode: .fit)
+            .aspectRatio(contentMode: .fill)
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.223, style: .continuous))
-            .shadow(color: glowing ? Theme.accent.opacity(0.32) : .clear, radius: glowing ? 10 : 0, y: 2)
+            .overlay(
+                RoundedRectangle(cornerRadius: size * 0.223, style: .continuous)
+                    .stroke(.white.opacity(0.08), lineWidth: 0.5)
+            )
+            .shadow(color: glowing ? Theme.accent.opacity(0.30) : .clear, radius: glowing ? 8 : 0, y: 2)
             .accessibilityLabel(L10n.appName)
     }
 }
