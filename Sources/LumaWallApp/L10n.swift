@@ -29,6 +29,13 @@ enum L10n {
     static var startSoak: String { string("settings.energyLog.start", default: "Start 24h log") }
     static var copyProof: String { string("settings.energyLog.copy", default: "Copy report") }
     static var resetSoak: String { string("settings.energyLog.reset", default: "Reset window") }
+    static var diagnostics: String { string("settings.diagnostics", default: "Diagnostics") }
+    static var diagnosticsDetail: String {
+        string(
+            "settings.diagnostics.detail",
+            default: "Crash reports are written to this Mac only and are never uploaded. Copy one to include it in a bug report."
+        )
+    }
     static var app: String { string("settings.app", default: "App") }
     static var storage: String { string("settings.storage", default: "Storage") }
     static var status: String { string("settings.status", default: "Status") }

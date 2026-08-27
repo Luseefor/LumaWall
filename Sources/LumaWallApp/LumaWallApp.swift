@@ -17,9 +17,9 @@ struct LumaWallApp: App {
         .windowToolbarStyle(.unifiedCompact)
 
         MenuBarExtra {
-            MenuBarRoot(model: model)
+            MenuBarPopover(model: model)
         } label: {
-            BrandMark(size: 15, glowing: false)
+            Image(nsImage: MenuBarIcon.image(badge: model.activePlaylistID != nil))
         }
         .menuBarExtraStyle(.window)
     }
@@ -120,14 +120,16 @@ private struct AppChrome: View {
     var body: some View {
         HStack(spacing: 16) {
             Button { model.section = .home } label: {
-                HStack(spacing: 10) {
-                    BrandMark(size: 34)
+                HStack(spacing: 8) {
+                    BrandMark(size: 30)
                     Text(L10n.appName)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
                 }
-                .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .focusable(false)
             .help(L10n.home)
             .accessibilityLabel(L10n.brandHome)
 
@@ -353,7 +355,7 @@ private struct HomePage: View {
             SectionHeading(title: title, subtitle: subtitle, action: seeAll)
                 .padding(.horizontal, 28)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
                     ForEach(assets) { asset in
                         WallpaperTile(
                             model: model,
@@ -364,6 +366,7 @@ private struct HomePage: View {
                     }
                 }
                 .padding(.horizontal, 28)
+                .padding(.vertical, 10)
             }
         }
     }
@@ -371,33 +374,20 @@ private struct HomePage: View {
 
 private struct FeaturedHero: View {
     @Bindable var model: AppModel
-    private var asset: WallpaperAsset? { model.featured }
+    @State private var slideIndex = 0
+    @State private var slideshowTask: Task<Void, Never>?
+
+    private static let slideDuration: Duration = .seconds(4)
+
+    private var assets: [WallpaperAsset] { model.assets }
+    private var currentAsset: WallpaperAsset? {
+        guard !assets.isEmpty else { return nil }
+        return assets[slideIndex % assets.count]
+    }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Group {
-                if let url = asset?.posterURL, let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().scaledToFill()
-                } else {
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.06, green: 0.18, blue: 0.20),
-                            Color(red: 0.03, green: 0.06, blue: 0.09),
-                            Color(red: 0.02, green: 0.04, blue: 0.06)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .overlay(alignment: .trailing) {
-                        BrandMark(size: 200, glowing: false)
-                            .opacity(0.10)
-                            .offset(x: -28, y: -20)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 420)
-            .clipped()
+            slideshowBackground
 
             LinearGradient(
                 colors: [.clear, .black.opacity(0.35), .black.opacity(0.92)],
@@ -408,24 +398,26 @@ private struct FeaturedHero: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 9) {
                     BrandMark(size: 24)
-                    Text(asset == nil ? "YOUR WALLPAPER, IN MOTION" : statusLabel)
+                    Text(currentAsset == nil ? "YOUR WALLPAPER, IN MOTION" : statusLabel)
                         .font(.system(size: 11, weight: .bold))
                         .tracking(1.6)
                         .foregroundStyle(Theme.accent)
                 }
-                Text(asset?.name ?? "Make your desktop feel alive.")
+                Text(currentAsset?.name ?? "Make your desktop feel alive.")
                     .font(.system(size: 40, weight: .bold, design: .rounded))
                     .lineLimit(2)
                     .shadow(color: .black.opacity(0.5), radius: 10, y: 2)
-                Text(asset.map(meta) ?? "Private local video wallpapers. Import once, apply instantly, stay offline.")
+                    .animation(.easeInOut(duration: 0.35), value: currentAsset?.id)
+                Text(currentAsset.map(meta) ?? "Private local video wallpapers. Import once, apply instantly, stay offline.")
                     .font(.system(size: 14))
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(maxWidth: 520, alignment: .leading)
+                    .animation(.easeInOut(duration: 0.35), value: currentAsset?.id)
                 HStack(spacing: 10) {
-                    if let asset {
-                        PrimaryButton("Use as Wallpaper", symbol: "display") { model.apply(asset) }
-                        GhostButton("All Displays", symbol: "rectangle.on.rectangle") { model.applyToAll(asset) }
-                        GhostButton("Preview", symbol: "play.fill") { model.previewAsset = asset }
+                    if let currentAsset {
+                        PrimaryButton("Use as Wallpaper", symbol: "display") { model.apply(currentAsset) }
+                        GhostButton("All Displays", symbol: "rectangle.on.rectangle") { model.applyToAll(currentAsset) }
+                        GhostButton("Preview", symbol: "play.fill") { model.previewAsset = currentAsset }
                     } else {
                         PrimaryButton("Import your first wallpaper", symbol: "plus", action: model.chooseVideos)
                     }
@@ -434,18 +426,114 @@ private struct FeaturedHero: View {
             .padding(.horizontal, 36)
             .padding(.bottom, 36)
             .frame(maxWidth: 760, alignment: .leading)
+
+            if assets.count > 1 {
+                slideIndicators
+                    .padding(.trailing, 36)
+                    .padding(.bottom, 36)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(height: 420)
+        .onAppear { syncSlideIndex(); startSlideshow() }
+        .onDisappear { stopSlideshow() }
+        .onChange(of: assets.map(\.id)) { _, _ in
+            syncSlideIndex()
+            startSlideshow()
+        }
+    }
+
+    @ViewBuilder
+    private var slideshowBackground: some View {
+        ZStack {
+            if let asset = currentAsset {
+                LoopingVideoView(url: asset.mediaURL)
+                    .id(asset.id)
+                    .transition(.opacity)
+            } else {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.06, green: 0.18, blue: 0.20),
+                        Color(red: 0.03, green: 0.06, blue: 0.09),
+                        Color(red: 0.02, green: 0.04, blue: 0.06)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .overlay(alignment: .trailing) {
+                    BrandMark(size: 200, glowing: false)
+                        .opacity(0.10)
+                        .offset(x: -28, y: -20)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 420)
+        .clipped()
+        .animation(.easeInOut(duration: 0.7), value: slideIndex)
+    }
+
+    private var slideIndicators: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(assets.enumerated()), id: \.element.id) { index, _ in
+                Capsule()
+                    .fill(index == slideIndex % assets.count ? Theme.accent : .white.opacity(0.28))
+                    .frame(width: index == slideIndex % assets.count ? 18 : 6, height: 6)
+                    .animation(.snappy(duration: 0.25), value: slideIndex)
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.7)) {
+                            slideIndex = index
+                        }
+                        startSlideshow()
+                    }
+            }
+        }
+        .accessibilityLabel("Wallpaper \(slideIndex + 1) of \(assets.count)")
     }
 
     private var statusLabel: String {
-        guard let asset else { return "FEATURED" }
-        return model.isActive(asset) ? "NOW PLAYING" : "FEATURED FROM YOUR LIBRARY"
+        guard let currentAsset else { return "FEATURED" }
+        if model.isActive(currentAsset) { return "NOW PLAYING" }
+        if assets.count > 1 { return "PREVIEWING \(slideIndex + 1) OF \(assets.count)" }
+        return "FEATURED FROM YOUR LIBRARY"
     }
 
     private func meta(_ asset: WallpaperAsset) -> String {
         "\(Int(asset.pixelSize.width)) × \(Int(asset.pixelSize.height))  ·  \(Int(asset.framesPerSecond)) FPS  ·  \(asset.category.title)"
+    }
+
+    private func syncSlideIndex() {
+        guard !assets.isEmpty else {
+            slideIndex = 0
+            return
+        }
+        if slideIndex >= assets.count {
+            slideIndex = 0
+        }
+        if let featured = model.featured,
+           let index = assets.firstIndex(where: { $0.id == featured.id }) {
+            slideIndex = index
+        }
+    }
+
+    private func startSlideshow() {
+        slideshowTask?.cancel()
+        guard assets.count > 1 else { return }
+        slideshowTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.slideDuration)
+                guard !Task.isCancelled else { break }
+                withAnimation(.easeInOut(duration: 0.7)) {
+                    slideIndex = (slideIndex + 1) % assets.count
+                }
+            }
+        }
+    }
+
+    private func stopSlideshow() {
+        slideshowTask?.cancel()
+        slideshowTask = nil
     }
 }
 
@@ -453,88 +541,77 @@ private struct FeaturedHero: View {
 
 private struct LibraryPage: View {
     @Bindable var model: AppModel
-    @State private var mode: LibraryMode = .wallpapers
     @State private var selectedID: WallpaperID?
+    @State private var showsAdvancedAutomations = false
 
-    private enum LibraryMode: String, CaseIterable, Identifiable {
-        case wallpapers = "Wallpapers"
-        case playlists = "Playlists"
-        case automations = "Automations"
-        var id: String { rawValue }
-    }
+    private static let cardWidth: CGFloat = 224
+    private static let cardHeight: CGFloat = 150
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            PageHeader(title: "Library", subtitle: "Organize, inspect, and apply your local wallpapers") {
-                HStack(spacing: 10) {
-                    Picker("Library section", selection: $mode) {
-                        ForEach(LibraryMode.allCases) { item in Text(item.rawValue).tag(item) }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 330)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 30) {
+                PageHeader(
+                    title: "Library",
+                    subtitle: "Your wallpapers, playlists, and automatic cycles"
+                ) {
                     PrimaryButton("Import", symbol: "plus", action: model.chooseVideos)
                 }
-            }
 
-            switch mode {
-            case .wallpapers:
-                wallpaperWorkspace
-            case .playlists:
-                ScrollView { playlistSection.padding(.bottom, 28) }
-            case .automations:
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
-                        dayNightSection
-                        appearanceSection
-                        automationRulesSection
-                        lockScreenSection
-                    }
-                    .padding(.bottom, 28)
-                }
+                playlistsShelf
+                dayNightShelf
+                lightDarkShelf
+                allWallpapersSection
+                advancedShelf
+            }
+            .padding(.horizontal, 32)
+            .padding(.top, 28)
+            .padding(.bottom, 44)
+        }
+        .sheet(isPresented: inspectorPresented) {
+            if let asset = selectedAsset {
+                LibraryInspectorSheet(model: model, asset: asset)
             }
         }
-        .padding(.horizontal, 28)
-        .padding(.top, 28)
-        .onAppear { validateSelection() }
-        .onChange(of: model.filteredAssets.map(\.id)) { _, _ in validateSelection() }
     }
 
-    private var wallpaperWorkspace: some View {
+    private var inspectorPresented: Binding<Bool> {
+        Binding(
+            get: { selectedAsset != nil },
+            set: { if !$0 { selectedID = nil } }
+        )
+    }
+
+    private var allWallpapersSection: some View {
         VStack(alignment: .leading, spacing: 14) {
+            shelfHeader(
+                title: "All Wallpapers",
+                subtitle: model.assets.isEmpty
+                    ? "Import an MP4 or MOV to start your collection"
+                    : "\(model.filteredAssets.count) of \(model.assets.count) shown",
+                trailing: { EmptyView() }
+            )
             libraryToolbar
             if model.assets.isEmpty {
                 EmptyInvite(action: model.chooseVideos)
-                    .frame(maxHeight: .infinity)
             } else if model.filteredAssets.isEmpty {
                 ContentUnavailableView(
                     "No Matching Wallpapers",
                     systemImage: "rectangle.stack.badge.minus",
                     description: Text("Clear a filter or try a different search.")
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, minHeight: 220)
             } else {
-                HSplitView {
-                    ScrollView {
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: 14)],
-                            spacing: 16
-                        ) {
-                            ForEach(model.filteredAssets) { asset in
-                                LibrarySelectionTile(
-                                    model: model,
-                                    asset: asset,
-                                    isSelected: selectedID == asset.id
-                                ) { selectedID = asset.id }
-                            }
-                        }
-                        .padding(.vertical, 2)
-                        .padding(.trailing, 12)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 210, maximum: 280), spacing: 16)],
+                    spacing: 18
+                ) {
+                    ForEach(model.filteredAssets) { asset in
+                        LibrarySelectionTile(
+                            model: model,
+                            asset: asset,
+                            isSelected: selectedID == asset.id
+                        ) { selectedID = asset.id }
                     }
-                    .frame(minWidth: 430)
-
-                    LibraryInspector(model: model, asset: selectedAsset)
-                        .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
                 }
             }
         }
@@ -578,174 +655,230 @@ private struct LibraryPage: View {
         .controlSize(.small)
     }
 
-    private func validateSelection() {
-        if let selectedID, model.filteredAssets.contains(where: { $0.id == selectedID }) { return }
-        selectedID = model.filteredAssets.first?.id
+    private func shelfHeader<Trailing: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textDim)
+            }
+            Spacer(minLength: 8)
+            trailing()
+        }
     }
 
-    private var playlistSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Wallpaper Playlists")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                    Text("Rotate chosen videos on a timer.")
-                        .foregroundStyle(Theme.textDim)
-                }
-                Spacer()
-                if model.activePlaylistID != nil {
-                    GhostButton("Stop rotation", symbol: "stop.fill") {
-                        model.stopPlaylistRotation()
+    private var playlistsShelf: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            shelfHeader(
+                title: "Playlists",
+                subtitle: "Rotate through a set of wallpapers on a timer",
+                trailing: {
+                    if model.activePlaylistID != nil {
+                        Button("Stop rotation") { model.stopPlaylistRotation() }
+                            .buttonStyle(.link)
+                            .font(.system(size: 12, weight: .semibold))
                     }
                 }
-            }
-
-            Button { model.beginPlaylistEditor() } label: {
-                    ZStack {
-                        if let url = model.featured?.posterURL, let poster = NSImage(contentsOf: url) {
-                            Image(nsImage: poster)
-                                .resizable()
-                                .scaledToFill()
-                                .opacity(0.35)
-                        } else {
-                            Theme.panel
-                        }
-                        Color.black.opacity(0.35)
-                        Text("+ Create Playlist")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 18)
-                            .frame(height: 36)
-                            .background(.white, in: Capsule())
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [7, 5]))
-                            .foregroundStyle(Theme.line)
-                    )
-                }
-                .buttonStyle(.plain)
+            )
+            ShelfRow {
+                ShelfAddCard(
+                    title: "New Playlist",
+                    caption: model.assets.isEmpty ? "Import a video first" : "Pick videos and an interval",
+                    width: Self.cardWidth,
+                    height: Self.cardHeight
+                ) { model.beginPlaylistEditor() }
                 .disabled(model.assets.isEmpty)
 
-            if !model.playlists.isEmpty {
                 ForEach(model.playlists) { playlist in
-                    let isActive = model.activePlaylistID == playlist.id
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 8) {
-                                Text(playlist.name).font(.subheadline.weight(.semibold))
-                                if isActive {
-                                    Text("ACTIVE")
-                                        .font(.system(size: 9, weight: .bold))
-                                        .padding(.horizontal, 7)
-                                        .frame(height: 18)
-                                        .background(Theme.accent.opacity(0.92), in: Capsule())
-                                        .foregroundStyle(.black)
-                                }
-                            }
-                            Text("\(playlist.wallpaperIDs.count) items · \(playlist.shuffled ? "Shuffled" : "Ordered") · every \(playlist.intervalMinutes)m")
-                                .font(.caption)
-                                .foregroundStyle(Theme.textDim)
-                        }
-                        Spacer()
-                        if isActive {
-                            GhostButton("Stop", symbol: nil) { model.stopPlaylistRotation() }
-                        } else {
-                            PrimaryButton("Apply", symbol: nil) { model.applyPlaylist(playlist) }
-                        }
-                        GhostButton("Edit", symbol: nil) { model.beginPlaylistEditor(existing: playlist) }
-                        Button("Delete", role: .destructive) { model.deletePlaylist(playlist) }
-                            .buttonStyle(.plain)
-                    }
-                    .padding(12)
-                    .background(
-                        isActive ? Theme.accent.opacity(0.10) : Theme.panel,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(isActive ? Theme.accent.opacity(0.45) : Theme.line)
+                    PlaylistShelfCard(
+                        model: model,
+                        playlist: playlist,
+                        width: Self.cardWidth,
+                        height: Self.cardHeight
                     )
                 }
             }
         }
     }
 
-    private var dayNightSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            automationHeader(
-                title: "Day/Night Time Wallpaper",
-                subtitle: "Automatically switch between two wallpapers based on time of day.",
-                enabled: model.automations.dayNightEnabled,
-                expanded: model.dayNightExpanded,
-                onEnable: { model.setDayNightEnabled($0) },
-                onToggleExpand: { model.dayNightExpanded.toggle() }
-            )
-
-            if model.dayNightExpanded {
-                HStack(spacing: 14) {
-                    AutomationSlotCard(
-                        symbol: "sun.max.fill",
-                        title: "Day",
-                        detail: "Choose wallpaper",
-                        footnote: model.automations.useSunriseSunset
-                            ? "From sunrise"
-                            : "From \(formattedHour(model.automations.dayStartHour))",
-                        asset: model.asset(for: model.automations.dayWallpaperID)
-                    ) {
-                        model.automationPickSlot = .day
-                    }
-                    AutomationSlotCard(
-                        symbol: "moon.fill",
-                        title: "Night",
-                        detail: "Choose wallpaper",
-                        footnote: model.automations.useSunriseSunset
-                            ? "From sunset"
-                            : "From \(formattedHour(model.automations.nightStartHour))",
-                        asset: model.asset(for: model.automations.nightWallpaperID)
-                    ) {
-                        model.automationPickSlot = .night
-                    }
+    private var dayNightShelf: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            shelfHeader(
+                title: "Day / Night",
+                subtitle: model.automations.useSunriseSunset
+                    ? "Switches at sunrise and sunset"
+                    : "Switches at \(formattedHour(model.automations.dayStartHour)) and \(formattedHour(model.automations.nightStartHour))",
+                trailing: {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { model.automations.dayNightEnabled },
+                            set: { model.setDayNightEnabled($0) }
+                        )
+                    )
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .accessibilityLabel("Enable day and night cycle")
                 }
-                Toggle(
-                    "Use sunrise and sunset",
-                    isOn: Binding(
-                        get: { model.automations.useSunriseSunset },
-                        set: { model.setUseSunriseSunset($0) }
+            )
+            ShelfRow {
+                AutomationSlotCard(
+                    symbol: "sun.max.fill",
+                    title: "Day",
+                    detail: "Choose wallpaper",
+                    footnote: model.automations.useSunriseSunset
+                        ? "From sunrise"
+                        : "From \(formattedHour(model.automations.dayStartHour))",
+                    asset: model.asset(for: model.automations.dayWallpaperID),
+                    height: Self.cardHeight
+                ) { model.automationPickSlot = .day }
+                .frame(width: Self.cardWidth)
+
+                AutomationSlotCard(
+                    symbol: "moon.fill",
+                    title: "Night",
+                    detail: "Choose wallpaper",
+                    footnote: model.automations.useSunriseSunset
+                        ? "From sunset"
+                        : "From \(formattedHour(model.automations.nightStartHour))",
+                    asset: model.asset(for: model.automations.nightWallpaperID),
+                    height: Self.cardHeight
+                ) { model.automationPickSlot = .night }
+                .frame(width: Self.cardWidth)
+
+                scheduleCard
+            }
+            .opacity(model.automations.dayNightEnabled ? 1 : 0.6)
+        }
+    }
+
+    private var scheduleCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Schedule")
+                .font(.system(size: 13, weight: .semibold))
+            Toggle(
+                "Sunrise / sunset",
+                isOn: Binding(
+                    get: { model.automations.useSunriseSunset },
+                    set: { model.setUseSunriseSunset($0) }
+                )
+            )
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .font(.system(size: 11))
+
+            if model.automations.useSunriseSunset {
+                Text("Needs Location When In Use so LumaWall can estimate daylight for your region.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                compactSchedulePicker(
+                    "Day",
+                    selection: Binding(
+                        get: { model.automations.dayStartHour },
+                        set: { model.setDayStartHour($0) }
                     )
                 )
-                .toggleStyle(.switch)
-                .padding(.horizontal, 14)
-                .frame(height: 44)
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-                if model.automations.useSunriseSunset {
-                    Text("Needs Location When In Use so LumaWall can estimate daylight for your region.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textDim)
-                } else {
-                    HStack(spacing: 14) {
-                        schedulePicker(
-                            "Day begins",
-                            selection: Binding(
-                                get: { model.automations.dayStartHour },
-                                set: { model.setDayStartHour($0) }
-                            )
+                compactSchedulePicker(
+                    "Night",
+                    selection: Binding(
+                        get: { model.automations.nightStartHour },
+                        set: { model.setNightStartHour($0) }
+                    )
+                )
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(width: Self.cardWidth, height: Self.cardHeight, alignment: .topLeading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.line))
+    }
+
+    private var lightDarkShelf: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            shelfHeader(
+                title: "Light / Dark",
+                subtitle: "Follows the macOS system appearance",
+                trailing: {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { model.automations.appearanceEnabled },
+                            set: { model.setAppearanceEnabled($0) }
                         )
-                        schedulePicker(
-                            "Night begins",
-                            selection: Binding(
-                                get: { model.automations.nightStartHour },
-                                set: { model.setNightStartHour($0) }
-                            )
-                        )
-                    }
+                    )
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .accessibilityLabel("Enable light and dark cycle")
+                }
+            )
+            ShelfRow {
+                AutomationSlotCard(
+                    symbol: "sun.max.fill",
+                    title: "Light",
+                    detail: "Choose wallpaper",
+                    footnote: "Light mode",
+                    asset: model.asset(for: model.automations.lightWallpaperID),
+                    height: Self.cardHeight
+                ) { model.automationPickSlot = .light }
+                .frame(width: Self.cardWidth)
+
+                AutomationSlotCard(
+                    symbol: "moon.fill",
+                    title: "Dark",
+                    detail: "Choose wallpaper",
+                    footnote: "Dark mode",
+                    asset: model.asset(for: model.automations.darkWallpaperID),
+                    height: Self.cardHeight
+                ) { model.automationPickSlot = .dark }
+                .frame(width: Self.cardWidth)
+            }
+            .opacity(model.automations.appearanceEnabled ? 1 : 0.6)
+        }
+    }
+
+    private var advancedShelf: some View {
+        DisclosureGroup(isExpanded: $showsAdvancedAutomations) {
+            VStack(alignment: .leading, spacing: 22) {
+                automationRulesSection
+                lockScreenSection
+            }
+            .padding(.top, 14)
+        } label: {
+            Text("Advanced rules and lock screen")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textDim)
+        }
+    }
+
+    private func compactSchedulePicker(_ title: String, selection: Binding<Int>) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.textDim)
+            Picker(title, selection: selection) {
+                ForEach(0..<24, id: \.self) { hour in
+                    Text(formattedHour(hour)).tag(hour)
                 }
             }
+            .labelsHidden()
+            .controlSize(.small)
         }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .frame(height: 30)
+        .background(Theme.panelStrong.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
     }
 
     private func schedulePicker(_ title: String, selection: Binding<Int>) -> some View {
@@ -769,42 +902,6 @@ private struct LibraryPage: View {
     private func formattedHour(_ hour: Int) -> String {
         let date = Calendar.current.date(from: DateComponents(hour: hour)) ?? .now
         return date.formatted(date: .omitted, time: .shortened)
-    }
-
-    private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            automationHeader(
-                title: "Light/Dark Mode Wallpaper",
-                subtitle: "Automatically switch between two wallpapers based on system light or dark mode.",
-                enabled: model.automations.appearanceEnabled,
-                expanded: model.appearanceExpanded,
-                onEnable: { model.setAppearanceEnabled($0) },
-                onToggleExpand: { model.appearanceExpanded.toggle() }
-            )
-
-            if model.appearanceExpanded {
-                HStack(spacing: 14) {
-                    AutomationSlotCard(
-                        symbol: "sun.max.fill",
-                        title: "Light",
-                        detail: "Choose wallpaper",
-                        footnote: "Light mode",
-                        asset: model.asset(for: model.automations.lightWallpaperID)
-                    ) {
-                        model.automationPickSlot = .light
-                    }
-                    AutomationSlotCard(
-                        symbol: "moon.fill",
-                        title: "Dark",
-                        detail: "Choose wallpaper",
-                        footnote: "Dark mode",
-                        asset: model.asset(for: model.automations.darkWallpaperID)
-                    ) {
-                        model.automationPickSlot = .dark
-                    }
-                }
-            }
-        }
     }
 
     private var automationRulesSection: some View {
@@ -943,10 +1040,12 @@ private struct LibraryPage: View {
                         ? "Choose wallpaper"
                         : "Needs macOS 26 native host",
                     footnote: "Idle / lock surface",
-                    asset: model.asset(for: model.automations.lockScreenWallpaperID)
+                    asset: model.asset(for: model.automations.lockScreenWallpaperID),
+                    height: Self.cardHeight
                 ) {
                     model.automationPickSlot = .lock
                 }
+                .frame(width: Self.cardWidth)
                 .opacity(model.wallpaperHostMode == .native ? 1 : 0.55)
                 .disabled(model.wallpaperHostMode != .native)
             }
@@ -955,34 +1054,6 @@ private struct LibraryPage: View {
 
     private func weekdayName(_ index: Int) -> String {
         ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][index]
-    }
-
-    private var savedSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Saved Wallpapers")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-            Text(
-                model.filteredAssets.isEmpty && !model.searchText.isEmpty
-                    ? "No wallpapers match this search."
-                    : (model.assets.isEmpty
-                        ? "Import a video to start your collection."
-                        : "Your collection of \(model.assets.count) saved wallpaper\(model.assets.count == 1 ? "" : "s").")
-            )
-            .foregroundStyle(Theme.textDim)
-
-            if model.assets.isEmpty {
-                EmptyInvite(action: model.chooseVideos)
-            } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 16)],
-                    spacing: 16
-                ) {
-                    ForEach(model.filteredAssets) { asset in
-                        SavedWallpaperTile(model: model, asset: asset)
-                    }
-                }
-            }
-        }
     }
 
     private func automationHeader(
@@ -995,11 +1066,11 @@ private struct LibraryPage: View {
         showsEnable: Bool = true
     ) -> some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.textDim)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1041,33 +1112,28 @@ private struct LibrarySelectionTile: View {
     var body: some View {
         Button(action: select) {
             VStack(alignment: .leading, spacing: 9) {
-                ZStack(alignment: .topLeading) {
-                    Group {
-                        if let url = asset.posterURL, let image = NSImage(contentsOf: url) {
-                            Image(nsImage: image).resizable().scaledToFill()
-                        } else {
-                            Theme.panelStrong
-                        }
-                    }
-                    .aspectRatio(16 / 10, contentMode: .fill)
-                    .clipped()
-
+                WallpaperPosterFrame(posterURL: asset.posterURL, cornerRadius: 13) {
+                    EmptyView()
+                }
+                .overlay(alignment: .topLeading) {
                     HStack(spacing: 6) {
                         if model.isActive(asset) {
                             Text("IN USE")
+                                .padding(.horizontal, 7)
+                                .frame(height: 18)
                                 .foregroundStyle(.black)
                                 .background(Theme.accent, in: Capsule())
                         }
                         if model.isFavorite(asset) {
                             Image(systemName: "heart.fill")
                                 .foregroundStyle(.pink)
+                                .frame(width: 22, height: 22)
                                 .background(.black.opacity(0.55), in: Circle())
                         }
                     }
                     .font(.system(size: 9, weight: .bold))
                     .padding(9)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                 Text(asset.name)
                     .font(.system(size: 13, weight: .semibold))
@@ -1077,6 +1143,7 @@ private struct LibrarySelectionTile: View {
                     .foregroundStyle(Theme.textDim)
                     .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
             .background(
                 isSelected ? Theme.accent.opacity(0.13) : Theme.panel,
@@ -1153,13 +1220,21 @@ private struct LibraryInspector: View {
                                 Button(display.name) { model.apply(asset, to: display.displayID) }
                             }
                         } label: {
-                            Label("Use as Wallpaper", systemImage: "display")
-                                .frame(maxWidth: .infinity)
+                            HStack(spacing: 8) {
+                                Image(systemName: "display")
+                                Text("Use as Wallpaper")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Spacer()
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 14)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 40)
+                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                         }
                         .menuStyle(.borderlessButton)
-                        .padding(.vertical, 9)
-                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                        .foregroundStyle(.black)
 
                         HStack {
                             GhostButton("Preview", symbol: "play.fill") { model.previewAsset = asset }
@@ -1196,7 +1271,8 @@ private struct LibraryInspector: View {
                 Theme.panelStrong
             }
         }
-        .aspectRatio(16 / 10, contentMode: .fill)
+        .frame(maxWidth: .infinity)
+        .aspectRatio(16 / 10, contentMode: .fit)
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay(alignment: .bottomLeading) {
@@ -1247,6 +1323,7 @@ private struct AutomationSlotCard: View {
     let detail: String
     let footnote: String
     let asset: WallpaperAsset?
+    var height: CGFloat = 168
     let action: () -> Void
 
     var body: some View {
@@ -1289,7 +1366,7 @@ private struct AutomationSlotCard: View {
                 .foregroundStyle(.white)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 168)
+            .frame(height: height)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -1300,48 +1377,152 @@ private struct AutomationSlotCard: View {
     }
 }
 
-private struct SavedWallpaperTile: View {
-    @Bindable var model: AppModel
-    let asset: WallpaperAsset
+private struct ShelfRow<Content: View>: View {
+    @ViewBuilder var content: () -> Content
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Group {
-                if let url = asset.posterURL, let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().scaledToFill()
-                } else {
-                    Theme.panel
-                }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 16) {
+                content()
             }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(16 / 10, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.vertical, 8)
+            .padding(.horizontal, 1)
+        }
+    }
+}
 
-            if let display = model.displaysUsing(asset).first {
-                Text("• \(display.name)")
-                    .font(.system(size: 10, weight: .semibold))
-                    .padding(.horizontal, 9)
-                    .frame(height: 22)
-                    .background(Color(red: 0.22, green: 0.48, blue: 0.98).opacity(0.95), in: Capsule())
-                    .foregroundStyle(.white)
-                    .padding(10)
+private struct ShelfAddCard: View {
+    let title: String
+    let caption: String
+    let width: CGFloat
+    let height: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(caption)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textDim)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(14)
+            .frame(width: width, height: height)
+            .background(Theme.panel.opacity(0.5), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [7, 5]))
+                    .foregroundStyle(Theme.line)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct PlaylistShelfCard: View {
+    @Bindable var model: AppModel
+    let playlist: WallpaperPlaylist
+    let width: CGFloat
+    let height: CGFloat
+
+    private var isActive: Bool { model.activePlaylistID == playlist.id }
+
+    private var poster: NSImage? {
+        for id in playlist.wallpaperIDs {
+            if let url = model.asset(for: id)?.posterURL, let image = NSImage(contentsOf: url) {
+                return image
             }
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Theme.line)
-        )
-        .onTapGesture { model.previewAsset = asset }
-        .contextMenu {
-            Button("Use on Main Display") { model.apply(asset) }
-            Button("Use on All Displays") { model.applyToAll(asset) }
-            Menu("Category") {
-                ForEach(WallpaperCategory.allCases) { category in
-                    Button(category.title) { model.setCategory(category, for: asset) }
+        return nil
+    }
+
+    var body: some View {
+        Button(action: toggleRotation) {
+            ZStack {
+                if let poster {
+                    Image(nsImage: poster).resizable().scaledToFill()
+                } else {
+                    Theme.panelStrong
                 }
+                LinearGradient(
+                    colors: [.black.opacity(0.78), .black.opacity(0.2), .clear],
+                    startPoint: .bottom,
+                    endPoint: .top
+                )
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Image(systemName: isActive ? "play.fill" : "list.and.film")
+                        if isActive {
+                            Text("ACTIVE")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 7)
+                                .frame(height: 17)
+                                .background(Theme.accent.opacity(0.92), in: Capsule())
+                                .foregroundStyle(.black)
+                        }
+                    }
+                    Spacer()
+                    Text(playlist.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    Text("\(playlist.wallpaperIDs.count) items · \(playlist.shuffled ? "Shuffled" : "Ordered") · every \(playlist.intervalMinutes)m")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .foregroundStyle(.white)
             }
-            Button("Remove", role: .destructive) { model.remove(asset) }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isActive ? Theme.accent.opacity(0.55) : Theme.line, lineWidth: isActive ? 1.6 : 1)
+            )
         }
+        .buttonStyle(.plain)
+        .help(isActive ? "Stop rotation" : "Start this playlist")
+        .accessibilityLabel("\(playlist.name) playlist")
+        .contextMenu {
+            Button(isActive ? "Stop Rotation" : "Apply Playlist", action: toggleRotation)
+            Button("Edit…") { model.beginPlaylistEditor(existing: playlist) }
+            Divider()
+            Button("Delete", role: .destructive) { model.deletePlaylist(playlist) }
+        }
+    }
+
+    private func toggleRotation() {
+        if isActive {
+            model.stopPlaylistRotation()
+        } else {
+            model.applyPlaylist(playlist)
+        }
+    }
+}
+
+private struct LibraryInspectorSheet: View {
+    @Bindable var model: AppModel
+    let asset: WallpaperAsset
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 14) {
+            LibraryInspector(model: model, asset: asset)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            HStack {
+                Spacer()
+                Button("Done", action: dismiss.callAsFunction)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 420, height: 660)
     }
 }
 
@@ -1702,6 +1883,65 @@ private struct SettingsPage: View {
                     }
                 }
 
+                settingsGroup(title: L10n.diagnostics, symbol: "stethoscope") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.diagnosticsDetail)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if model.lastSessionEndedUncleanly {
+                            HStack(spacing: 10) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(Theme.warm)
+                                    .accessibilityHidden(true)
+                                Text("The previous session did not shut down cleanly. The report below has details.")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.warm.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+
+                        if model.crashReports.isEmpty {
+                            Text("No crashes recorded. LumaWall has been shutting down cleanly.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.textDim)
+                        } else {
+                            VStack(spacing: 0) {
+                                ForEach(model.crashReports.prefix(5)) { report in
+                                    HStack(spacing: 14) {
+                                        Image(systemName: report.kind == .uncleanShutdown ? "bolt.slash" : "ladybug.fill")
+                                            .frame(width: 28, height: 28)
+                                            .foregroundStyle(.secondary)
+                                            .accessibilityHidden(true)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(report.headline).fontWeight(.semibold)
+                                            Text(report.date.formatted(date: .abbreviated, time: .shortened))
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(Theme.textDim)
+                                        }
+                                        Spacer()
+                                        GhostButton("Copy", symbol: "doc.on.doc") { model.copyCrashReport(report) }
+                                    }
+                                    .padding(.vertical, 9)
+                                    .accessibilityElement(children: .combine)
+                                    if report.id != model.crashReports.prefix(5).last?.id {
+                                        Divider().overlay(Theme.line)
+                                    }
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 10) {
+                            GhostButton("Show in Finder", symbol: "folder") { model.revealCrashReports() }
+                            if !model.crashReports.isEmpty {
+                                GhostButton("Clear reports", symbol: "trash") { model.clearCrashReports() }
+                            }
+                        }
+                    }
+                }
+
                 settingsGroup(title: L10n.app, symbol: "app.badge") {
                     settingsRow(
                         title: L10n.launchAtLogin,
@@ -1867,6 +2107,69 @@ private struct StatPill: View {
 
 // MARK: - Shared UI
 
+private struct WallpaperPosterFrame<Overlay: View>: View {
+    let posterURL: URL?
+    var cornerRadius: CGFloat = 16
+    @ViewBuilder var overlay: () -> Overlay
+
+    init(
+        posterURL: URL?,
+        cornerRadius: CGFloat = 16,
+        @ViewBuilder overlay: @escaping () -> Overlay = { EmptyView() }
+    ) {
+        self.posterURL = posterURL
+        self.cornerRadius = cornerRadius
+        self.overlay = overlay
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(Theme.panelStrong)
+            .aspectRatio(16 / 10, contentMode: .fit)
+            .overlay {
+                if let url = posterURL, let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
+            }
+            .overlay { overlay() }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+}
+
+private struct TileHoverActions: View {
+    let onUse: () -> Void
+    let onPreview: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onUse) {
+                Label("Use", systemImage: "display")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(Theme.accent, in: Capsule())
+                    .foregroundStyle(.black)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onPreview) {
+                Label("Preview", systemImage: "play.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(.white.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.2)))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 private struct WallpaperTile: View {
     @Bindable var model: AppModel
     let asset: WallpaperAsset
@@ -1876,55 +2179,53 @@ private struct WallpaperTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                poster
-                    .aspectRatio(16 / 10, contentMode: .fill)
-                    .clipped()
-
-                if hovering {
-                    LoopingVideoView(url: asset.mediaURL)
-                        .aspectRatio(16 / 10, contentMode: .fill)
-                        .clipped()
-                        .transition(.opacity)
-                    Color.black.opacity(0.28)
-                    HStack(spacing: 8) {
-                        PrimaryButton("Use", symbol: "display") { model.apply(asset) }
-                        GhostButton("Preview", symbol: "play.fill") { model.previewAsset = asset }
+            WallpaperPosterFrame(posterURL: asset.posterURL, cornerRadius: 16) {
+                ZStack {
+                    if hovering {
+                        LoopingVideoView(url: asset.mediaURL)
+                            .scaledToFill()
+                            .transition(.opacity)
+                        Color.black.opacity(0.28)
+                            .transition(.opacity)
                     }
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
-
-                VStack {
-                    HStack {
-                        if model.isActive(asset) {
-                            Text("LIVE")
-                                .font(.system(size: 9, weight: .bold))
-                                .padding(.horizontal, 7)
-                                .frame(height: 20)
-                                .background(Theme.accent.opacity(0.92), in: Capsule())
-                                .foregroundStyle(.black)
-                        }
-                        Spacer()
-                        Button { model.toggleFavorite(asset) } label: {
-                            Image(systemName: model.isFavorite(asset) ? "heart.fill" : "heart")
-                                .foregroundStyle(model.isFavorite(asset) ? .pink : .white)
-                                .frame(width: 28, height: 28)
-                                .background(.black.opacity(0.45), in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(model.isFavorite(asset) ? "Remove favorite" : "Add favorite")
+            }
+            .overlay(alignment: .top) {
+                HStack {
+                    if model.isActive(asset) {
+                        Text("LIVE")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 7)
+                            .frame(height: 20)
+                            .background(Theme.accent.opacity(0.92), in: Capsule())
+                            .foregroundStyle(.black)
                     }
                     Spacer()
+                    Button { model.toggleFavorite(asset) } label: {
+                        Image(systemName: model.isFavorite(asset) ? "heart.fill" : "heart")
+                            .foregroundStyle(model.isFavorite(asset) ? .pink : .white)
+                            .frame(width: 28, height: 28)
+                            .background(.black.opacity(0.45), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(model.isFavorite(asset) ? "Remove favorite" : "Add favorite")
                 }
                 .padding(10)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                if hovering {
+                    TileHoverActions(
+                        onUse: { model.apply(asset) },
+                        onPreview: { model.previewAsset = asset }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(hovering ? Theme.accent.opacity(0.45) : Theme.line, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(hovering ? 0.35 : 0.18), radius: hovering ? 16 : 8, y: hovering ? 8 : 4)
-            .scaleEffect(hovering ? 1.015 : 1)
+            .shadow(color: .black.opacity(hovering ? 0.28 : 0.14), radius: hovering ? 12 : 6, y: hovering ? 6 : 3)
             .animation(.snappy(duration: 0.22), value: hovering)
             .onHover { hovering = $0 }
 
@@ -1948,14 +2249,6 @@ private struct WallpaperTile: View {
         .onTapGesture { model.previewAsset = asset }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(asset.name)
-    }
-
-    @ViewBuilder private var poster: some View {
-        if let url = asset.posterURL, let image = NSImage(contentsOf: url) {
-            Image(nsImage: image).resizable().scaledToFill()
-        } else {
-            Rectangle().fill(.white.opacity(0.06))
-        }
     }
 }
 
@@ -2233,173 +2526,6 @@ private struct PreviewSheet: View {
             .padding(16)
         }
         .frame(width: 920, height: 600)
-    }
-}
-
-private struct MenuBarRoot: View {
-    @Bindable var model: AppModel
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                BrandMark(size: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("LumaWall").font(.headline)
-                    Text(statusLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack(spacing: 8) {
-                Button(model.isPaused ? "Resume All" : "Pause All", action: model.togglePause)
-                    .buttonStyle(.borderedProminent)
-                Button("Reapply") { model.reapplyActive() }
-                    .disabled(model.featured == nil)
-            }
-
-            if !model.displays.isEmpty {
-                Divider()
-                Text("Displays").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ForEach(model.displays) { display in
-                    HStack(spacing: 8) {
-                        Image(systemName: display.isMain ? "display" : "rectangle.connected.to.line.below")
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(display.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                            Text(model.activeName(on: display) ?? "Not assigned")
-                                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        Spacer()
-                        if model.activeByDisplay[display.displayID] != nil {
-                            Button(model.pausedDisplayIDs.contains(display.displayID) ? "Resume" : "Pause") {
-                                model.togglePause(on: display)
-                            }
-                            .controlSize(.small)
-                        }
-                    }
-                }
-            }
-
-            Divider()
-            Picker("Power", selection: Binding(
-                get: { model.powerProfile },
-                set: { model.setPowerProfile($0) }
-            )) {
-                Text("Automatic").tag(PowerProfile.automatic)
-                Text("Full Quality").tag(PowerProfile.fullQuality)
-                Text("Battery Saver").tag(PowerProfile.batterySaver)
-                Text("Static on Battery").tag(PowerProfile.staticOnBattery)
-            }
-            .pickerStyle(.menu)
-
-            if !model.playlists.isEmpty {
-                Menu {
-                    ForEach(model.playlists) { playlist in
-                        Button {
-                            model.applyPlaylist(playlist)
-                        } label: {
-                            if model.activePlaylistID == playlist.id {
-                                Label(playlist.name, systemImage: "checkmark")
-                            } else {
-                                Text(playlist.name)
-                            }
-                        }
-                    }
-                    if model.activePlaylistID != nil {
-                        Divider()
-                        Button("Previous") { model.stepPlaylist(-1) }
-                        Button("Next") { model.stepPlaylist(1) }
-                        Button("Stop Playlist", role: .destructive) { model.stopPlaylistRotation() }
-                    }
-                } label: {
-                    Label(activePlaylistName, systemImage: "list.bullet")
-                }
-                .menuStyle(.borderlessButton)
-            }
-
-            Menu {
-                Toggle("Day / Night", isOn: Binding(
-                    get: { model.automations.dayNightEnabled },
-                    set: { model.setDayNightEnabled($0) }
-                ))
-                Toggle("Light / Dark", isOn: Binding(
-                    get: { model.automations.appearanceEnabled },
-                    set: { model.setAppearanceEnabled($0) }
-                ))
-            } label: {
-                Label(automationStatus, systemImage: "clock.arrow.trianglehead.2.counterclockwise.rotate.90")
-            }
-            .menuStyle(.borderlessButton)
-
-            if model.recentAssets.isEmpty {
-                Text("No recent wallpapers").foregroundStyle(.secondary)
-            } else {
-                Text("Recents").font(.caption).foregroundStyle(.secondary)
-                ForEach(model.recentAssets.prefix(5)) { asset in
-                    HStack(spacing: 8) {
-                        poster(asset)
-                        Text(asset.name).lineLimit(1)
-                        Spacer()
-                        Button("Apply") { model.apply(asset) }
-                    }
-                }
-            }
-
-            Divider()
-            Button("Clear RAM") { model.clearMemoryCache() }
-            Button("Open LumaWall") {
-                model.section = .home
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "main")
-                for window in NSApp.windows where window.canBecomeKey || window.isMiniaturized {
-                    window.makeKeyAndOrderFront(nil)
-                }
-            }
-            Button("Import…", action: model.chooseVideos)
-            Divider()
-            Button("Quit LumaWall") { NSApp.terminate(nil) }
-        }
-        .padding(14)
-        .frame(width: 300)
-        .onAppear { model.refreshStats() }
-    }
-
-    private var statusLine: String {
-        let cpu = String(format: "%.0f", model.processCPUPercent)
-        let ram = String(format: "%.0f", model.processMemoryMB)
-        if model.playbackStopped { return "Paused · \(cpu)% CPU · \(ram) MB" }
-        if model.activeByDisplay.isEmpty { return "Idle · \(cpu)% CPU · \(ram) MB" }
-        return "Live · \(cpu)% CPU · \(ram) MB"
-    }
-
-    private var activePlaylistName: String {
-        guard let id = model.activePlaylistID,
-              let playlist = model.playlists.first(where: { $0.id == id }) else { return "Playlists" }
-        return playlist.name
-    }
-
-    private var automationStatus: String {
-        if model.automations.dayNightEnabled { return "Day / Night Active" }
-        if model.automations.appearanceEnabled { return "Light / Dark Active" }
-        return "Automations"
-    }
-
-    @ViewBuilder
-    private func poster(_ asset: WallpaperAsset) -> some View {
-        if let url = asset.posterURL, let image = NSImage(contentsOf: url) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 40, height: 24)
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        } else {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(.white.opacity(0.08))
-                .frame(width: 40, height: 24)
-        }
     }
 }
 
@@ -2681,7 +2807,7 @@ private struct SectionHeading: View {
     }
 }
 
-private extension PowerProfile {
+extension PowerProfile {
     var label: String {
         switch self {
         case .automatic: "Automatic"
