@@ -1,15 +1,15 @@
 import Foundation
 import LumaWallCore
 
-/// Chooses the WallpaperExtensionKit host on macOS 26 when the extension is packaged,
-/// otherwise keeps the existing desktop overlay engine.
 @MainActor
 final class WallpaperEngine {
     private let overlay: OverlayWallpaperEngine
     private let native: NativeWallpaperEngine?
+    private let assignments: AssignmentStore
     private(set) var mode: WallpaperHostMode
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
+        self.assignments = assignments
         self.overlay = OverlayWallpaperEngine(displays: displays, assignments: assignments)
         self.mode = WallpaperHostCapabilities.preferredMode
         if mode == .native {
@@ -48,7 +48,7 @@ final class WallpaperEngine {
     }
 
     func apply(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition = .init()) async throws {
-        if mode == .native, let native {
+        if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
             try? await overlay.clear(displayID)
             try await native.apply(asset, to: displayID, composition: composition)
             return
@@ -57,7 +57,7 @@ final class WallpaperEngine {
     }
 
     func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
-        if mode == .native, let native {
+        if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
             try? await overlay.clearAll()
             try await native.applyToAll(asset, composition: composition)
             return
@@ -66,11 +66,6 @@ final class WallpaperEngine {
     }
 
     func applySpanning(_ asset: WallpaperAsset) async throws {
-        if mode == .native, let native {
-            try? await overlay.clearAll()
-            try await native.applySpanning(asset)
-            return
-        }
         try await overlay.applySpanning(asset)
     }
 
@@ -97,8 +92,16 @@ final class WallpaperEngine {
 
     func restore(using library: [WallpaperAsset]) async {
         if mode == .native, let native {
-            try? await overlay.clearAll()
-            await native.restore(using: library)
+            let snapshot = await assignments.current()
+            let needsOverlay = snapshot.assignments.contains {
+                $0.isEnabled && (!$0.composition.usesDefaultCrop || $0.composition.spanningCanvas != nil)
+            }
+            if needsOverlay {
+                await overlay.restore(using: library)
+            } else {
+                try? await overlay.clearAll()
+                await native.restore(using: library)
+            }
             return
         }
         await overlay.restore(using: library)
@@ -110,5 +113,27 @@ final class WallpaperEngine {
             return
         }
         overlay.reapplyAssignments()
+    }
+
+    func releaseWorkingMemory() {
+        overlay.releaseWorkingMemory()
+        if mode == .native {
+            NativeWallpaperDeployment.notifyLibraryChanged()
+            let center = CFNotificationCenterGetDarwinNotifyCenter()
+            CFNotificationCenterPostNotification(
+                center,
+                CFNotificationName("app.lumawall.personal.clearCaches" as CFString),
+                nil,
+                nil,
+                true
+            )
+        }
+    }
+
+    var activeDecoderCount: Int {
+        switch mode {
+        case .native: native?.activeDisplayIDs.count ?? 0
+        case .overlay: overlay.activeDecoderCount
+        }
     }
 }

@@ -4,7 +4,6 @@ import CryptoKit
 import Foundation
 import LumaWallCore
 
-/// Deploys library videos into the wallpaper extension container for WallpaperAgent.
 enum NativeWallpaperDeployment {
     struct EntryInfo: Codable, Equatable, Sendable {
         let id: String
@@ -27,7 +26,6 @@ enum NativeWallpaperDeployment {
             .appendingPathComponent(entry.filename)
     }
 
-    /// Install or refresh the extension-side copy for a LumaWall library asset.
     @MainActor
     static func ensureDeployed(asset: WallpaperAsset) async throws -> EntryInfo {
         let fm = FileManager.default
@@ -159,11 +157,5 @@ enum PathSafety {
         if name.contains("/") || name.contains("\\") { return false }
         if name.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) { return false }
         return (name as NSString).lastPathComponent == name
-    }
-
-    static func contained(_ child: URL, in base: URL) -> Bool {
-        let basePath = base.standardizedFileURL.resolvingSymlinksInPath().path
-        let childPath = child.standardizedFileURL.resolvingSymlinksInPath().path
-        return childPath == basePath || childPath.hasPrefix(basePath + "/")
     }
 }

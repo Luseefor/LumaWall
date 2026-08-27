@@ -10,8 +10,6 @@ enum WallpaperHostCapabilities {
     static let frameworkPath =
         "/System/Library/PrivateFrameworks/WallpaperExtensionKit.framework/WallpaperExtensionKit"
 
-    /// Native WallpaperExtensionKit host when the OS and packaged extension both allow it.
-    /// Lower macOS and SwiftPM/overlay-only builds keep the desktop video overlay.
     static var preferredMode: WallpaperHostMode {
         if UserDefaults.standard.bool(forKey: "lumawall.forceOverlay") {
             return .overlay
@@ -25,16 +23,25 @@ enum WallpaperHostCapabilities {
     }
 
     static var hasEmbeddedWallpaperExtension: Bool {
-        guard let plugins = Bundle.main.builtInPlugInsURL else { return false }
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: plugins,
-            includingPropertiesForKeys: nil
-        ) else { return false }
-        return contents.contains { url in
-            url.pathExtension == "appex"
-                && (Bundle(url: url)?.bundleIdentifier == extensionBundleID
-                    || url.deletingPathExtension().lastPathComponent.contains("Wallpaper"))
+        let fm = FileManager.default
+        let roots = [
+            Bundle.main.builtInPlugInsURL,
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Extensions", isDirectory: true)
+        ].compactMap { $0 }
+        for root in roots {
+            guard let contents = try? fm.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            ) else { continue }
+            if contents.contains(where: { url in
+                url.pathExtension == "appex"
+                    && (Bundle(url: url)?.bundleIdentifier == extensionBundleID
+                        || url.deletingPathExtension().lastPathComponent.contains("Wallpaper"))
+            }) {
+                return true
+            }
         }
+        return false
     }
 
     static var extensionDocumentsURL: URL {

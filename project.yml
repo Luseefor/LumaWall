@@ -58,10 +58,6 @@ targets:
         embed: true
       - target: LumaWallWallpaper
         embed: true
-        copy:
-          destination: plugins
-          codeSignOnCopy: true
-          removeHeadersOnCopy: true
     scheme:
       testTargets: []
 
