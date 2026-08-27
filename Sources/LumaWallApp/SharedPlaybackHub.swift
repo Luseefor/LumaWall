@@ -1,7 +1,9 @@
 import AVFoundation
 import CoreVideo
 import Foundation
+import LumaWallCore
 import QuartzCore
+import AppKit
 
 @MainActor
 final class SharedPlaybackHub {
@@ -14,6 +16,7 @@ final class SharedPlaybackHub {
     private var layers: [ObjectIdentifier: WeakLayer] = [:]
     private var pumpTimer: Timer?
     private var retainCount = 0
+    private var sourceFrameRate: Double = 60
     private(set) var isLoaded = false
 
     private struct WeakLayer {
@@ -100,13 +103,38 @@ final class SharedPlaybackHub {
         item.add(output)
         looper = AVPlayerLooper(player: player, templateItem: item)
         isLoaded = true
+        Task { await refreshSourceFrameRate(for: url) }
+    }
+
+    private func refreshSourceFrameRate(for url: URL) async {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let fps = try? await track.load(.nominalFrameRate)
+        else { return }
+        let rate = Double(fps)
+        guard rate.isFinite, rate > 0 else { return }
+        sourceFrameRate = rate
+        restartPump()
+    }
+
+    private func displayMaxFrameRate() -> Double {
+        Double(NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60)
+    }
+
+    private func restartPump() {
+        stopPump()
+        startPump()
     }
 
     private func startPump() {
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        let interval = PlaybackFrameRate.pumpInterval(
+            sourceFPS: sourceFrameRate,
+            displayMaxFPS: displayMaxFrameRate()
+        )
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.pumpFrames() }
         }
-        timer.tolerance = 0.01
+        timer.tolerance = min(0.01, interval * 0.1)
         RunLoop.main.add(timer, forMode: .common)
         pumpTimer = timer
     }

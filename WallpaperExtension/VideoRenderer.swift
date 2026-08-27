@@ -55,6 +55,7 @@ final class VideoRenderer: @unchecked Sendable {
     // lastEnqueuedEnd tracks the highest sample end time (max, not last — handles B-frames).
     private var ptsOffset: CMTime = .zero
     private var lastEnqueuedEnd: CMTime = .zero
+    private var nominalFrameRate: Double = 60
 
     /// Called at each loop boundary to select the video URL for the next iteration.
     var variantSelector: (@Sendable () -> URL)?
@@ -71,6 +72,7 @@ final class VideoRenderer: @unchecked Sendable {
                 NSLocalizedDescriptionKey: "No video track found in \(videoURL.lastPathComponent)",
             ])
         }
+        let nominalFrameRate = Double(try await track.load(.nominalFrameRate))
 
         let displayLayer = AVSampleBufferDisplayLayer()
         displayLayer.videoGravity = .resizeAspectFill
@@ -95,6 +97,7 @@ final class VideoRenderer: @unchecked Sendable {
             asset: asset,
             videoTrack: track,
             stillImage: stillImage,
+            nominalFrameRate: nominalFrameRate,
         )
     }
 
@@ -104,11 +107,15 @@ final class VideoRenderer: @unchecked Sendable {
         asset: AVURLAsset,
         videoTrack: AVAssetTrack,
         stillImage: CGImage?,
+        nominalFrameRate: Double,
     ) {
         self.displayLayer = displayLayer
         self.renderer = displayLayer.sampleBufferRenderer
         self.asset = asset
         self.videoTrack = videoTrack
+        if nominalFrameRate.isFinite, nominalFrameRate > 0 {
+            self.nominalFrameRate = nominalFrameRate
+        }
 
         self.stillFrameLayer = CALayer()
         stillFrameLayer.frame = rootLayer.bounds
@@ -565,9 +572,7 @@ final class VideoRenderer: @unchecked Sendable {
             let pts = CMSampleBufferGetPresentationTimeStamp(first)
             let dur = CMSampleBufferGetDuration(first)
             if pts.isValid {
-                lastEnqueuedEnd = dur.isValid && dur > .zero
-                    ? CMTimeAdd(pts, dur)
-                    : CMTimeAdd(pts, CMTime(value: 1, timescale: 60))
+                lastEnqueuedEnd = estimatedSampleEnd(pts: pts, duration: dur)
             }
         }
 
@@ -653,9 +658,7 @@ final class VideoRenderer: @unchecked Sendable {
                     let pts = CMSampleBufferGetPresentationTimeStamp(first)
                     let dur = CMSampleBufferGetDuration(first)
                     if pts.isValid {
-                        lastEnqueuedEnd = dur.isValid && dur > .zero
-                            ? CMTimeAdd(pts, dur)
-                            : CMTimeAdd(pts, CMTime(value: 1, timescale: 60))
+                        lastEnqueuedEnd = estimatedSampleEnd(pts: pts, duration: dur)
                     }
                 }
 
@@ -716,6 +719,7 @@ final class VideoRenderer: @unchecked Sendable {
             if let nrAsset = nr.asset as? AVURLAsset, nrAsset.url != asset.url {
                 asset = nrAsset
                 videoTrack = no.track
+                refreshNominalFrameRate(from: no.track)
                 traceLog("  [Renderer] Switched variant: \(nrAsset.url.lastPathComponent)")
             }
             currentReader = nr
@@ -779,9 +783,7 @@ final class VideoRenderer: @unchecked Sendable {
                     let pts = CMSampleBufferGetPresentationTimeStamp(adjusted)
                     let dur = CMSampleBufferGetDuration(adjusted)
                     if pts.isValid {
-                        let sampleEnd = dur.isValid && dur > .zero
-                            ? CMTimeAdd(pts, dur)
-                            : CMTimeAdd(pts, CMTime(value: 1, timescale: 60))
+                        let sampleEnd = estimatedSampleEnd(pts: pts, duration: dur)
                         if sampleEnd > lastEnqueuedEnd {
                             lastEnqueuedEnd = sampleEnd
                         }
@@ -805,6 +807,24 @@ final class VideoRenderer: @unchecked Sendable {
                 traceLog("  [feed #\(debugID)] tick enqueued=\(enqueuedThisTick) status=\(renderer.status.rawValue) requiresFlush=\(renderer.requiresFlushToResumeDecoding) ready=\(renderer.isReadyForMoreMediaData) timebase=\(CMTimebaseGetTime(timebase).seconds)")
             }
         }
+    }
+
+    private func estimatedSampleEnd(pts: CMTime, duration: CMTime) -> CMTime {
+        if duration.isValid, duration > .zero {
+            return CMTimeAdd(pts, duration)
+        }
+        return CMTimeAdd(pts, fallbackFrameDuration())
+    }
+
+    private func fallbackFrameDuration() -> CMTime {
+        let fps = max(nominalFrameRate, 1)
+        let timescale = CMTimeScale(min(120_000, max(1, Int((fps * 100).rounded()))))
+        return CMTime(value: 100, timescale: timescale)
+    }
+
+    private func refreshNominalFrameRate(from track: AVAssetTrack) {
+        let fps = Double(track.nominalFrameRate)
+        if fps.isFinite, fps > 0 { nominalFrameRate = fps }
     }
 
     /// Offset both DTS and PTS of a sample for gapless looping.

@@ -19,7 +19,7 @@ public struct ImportInspection: Sendable {
         }
         if duration > 60 { messages.append("Long loops use more storage and take longer to optimize.") }
         if fileSize > 200 * 1_024 * 1_024 { messages.append("This source is larger than 200 MB.") }
-        if framesPerSecond > 60 { messages.append("Frames above 60 FPS may not be visible on the target display.") }
+        if framesPerSecond > 120 { messages.append("Frame rates above 120 FPS use more GPU.") }
         return messages
     }
 }

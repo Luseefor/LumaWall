@@ -124,18 +124,30 @@ final class OverlayWallpaperEngine {
     }
 
     func clear(_ displayID: DisplayID) async throws {
-        sessions.removeValue(forKey: displayID)?.tearDown()
-        tiers.removeValue(forKey: displayID)
+        dismantleSession(displayID)
         try await assignments.clear(displayID: displayID)
-        reconcileSharedDecoders()
     }
 
     func clearAll() async throws {
+        dismantleSessions()
+        try await assignments.clearAll()
+    }
+
+    /// Tears down overlay windows without touching the shared assignment
+    /// store. Used when the native host takes over rendering the same
+    /// assignments — clearing the store here would wipe what native restore
+    /// is about to read.
+    func dismantleSession(_ displayID: DisplayID) {
+        sessions.removeValue(forKey: displayID)?.tearDown()
+        tiers.removeValue(forKey: displayID)
+        reconcileSharedDecoders()
+    }
+
+    func dismantleSessions() {
         for key in sessions.keys {
             sessions.removeValue(forKey: key)?.tearDown()
         }
         tiers.removeAll()
-        try await assignments.clearAll()
     }
 
     func apply(tier: PlaybackTier, to displayID: DisplayID) {
