@@ -4,6 +4,11 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>es</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>LumaWall</string>
 	<key>CFBundleExecutable</key>
@@ -26,6 +31,10 @@
 	<string>15.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSLocationUsageDescription</key>
+	<string>LumaWall uses your approximate location to switch Day/Night wallpapers at local sunrise and sunset.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>LumaWall uses your approximate location to switch Day/Night wallpapers at local sunrise and sunset.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

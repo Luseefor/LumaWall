@@ -33,18 +33,22 @@ struct BrandMark: View {
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.223, style: .continuous))
             .shadow(color: glowing ? Theme.accent.opacity(0.32) : .clear, radius: glowing ? 10 : 0, y: 2)
-            .accessibilityHidden(true)
+            .accessibilityLabel(L10n.appName)
     }
 }
 
 enum Theme {
+    static var increaseContrast: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+    }
+
     static let bgTop = Color(red: 0.035, green: 0.05, blue: 0.062)
     static let bgBottom = Color(red: 0.015, green: 0.028, blue: 0.038)
     static let sidebar = Color(red: 0.025, green: 0.036, blue: 0.046)
-    static let panel = Color.white.opacity(0.04)
-    static let panelStrong = Color.white.opacity(0.07)
-    static let line = Color.white.opacity(0.08)
+    static var panel: Color { Color.white.opacity(increaseContrast ? 0.10 : 0.04) }
+    static var panelStrong: Color { Color.white.opacity(increaseContrast ? 0.16 : 0.07) }
+    static var line: Color { Color.white.opacity(increaseContrast ? 0.28 : 0.08) }
     static let accent = Color(red: 0.20, green: 0.82, blue: 0.76)
     static let warm = Color(red: 0.96, green: 0.80, blue: 0.52)
-    static let textDim = Color.white.opacity(0.55)
+    static var textDim: Color { Color.white.opacity(increaseContrast ? 0.78 : 0.55) }
 }

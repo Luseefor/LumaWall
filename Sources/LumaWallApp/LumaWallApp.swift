@@ -44,7 +44,7 @@ private struct RootView: View {
         ZStack {
             AtmosphereBackground()
             VStack(spacing: 0) {
-                PhospheneChrome(model: model)
+                AppChrome(model: model)
                 Rectangle().fill(Theme.line).frame(height: 1)
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -114,7 +114,7 @@ private struct AtmosphereBackground: View {
 
 // MARK: - Top chrome
 
-private struct PhospheneChrome: View {
+private struct AppChrome: View {
     @Bindable var model: AppModel
 
     var body: some View {
@@ -122,13 +122,14 @@ private struct PhospheneChrome: View {
             Button { model.section = .home } label: {
                 HStack(spacing: 10) {
                     BrandMark(size: 34)
-                    Text("LumaWall")
+                    Text(L10n.appName)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                 }
                 .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
-            .help("Home")
+            .help(L10n.home)
+            .accessibilityLabel(L10n.brandHome)
 
             HStack(spacing: 3) {
                 ForEach(AppModel.Section.allCases) { item in
@@ -147,11 +148,15 @@ private struct PhospheneChrome: View {
                             .foregroundStyle(model.section == item ? Color.black : Color.white.opacity(0.68))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(item.title)
+                    .accessibilityAddTraits(model.section == item ? [.isSelected] : [])
                 }
             }
             .padding(4)
             .background(.black.opacity(0.24), in: Capsule())
             .overlay(Capsule().stroke(Theme.line))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text("Main navigation"))
 
             Spacer(minLength: 10)
 
@@ -161,6 +166,7 @@ private struct PhospheneChrome: View {
                 .frame(height: 36)
                 .background(.white.opacity(0.06), in: Capsule())
                 .overlay(Capsule().stroke(Theme.line))
+                .accessibilityLabel(L10n.search)
                 .onChange(of: model.searchText) { _, value in
                     if !value.isEmpty, model.section != .library {
                         model.section = .library
@@ -174,7 +180,9 @@ private struct PhospheneChrome: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help(model.isPaused ? "Resume" : "Pause")
+            .help(model.isPaused ? L10n.resume : L10n.pause)
+            .accessibilityLabel(model.isPaused ? L10n.resume : L10n.pause)
+            .keyboardShortcut("p", modifiers: [.command])
 
             Button(action: model.chooseVideos) {
                 Image(systemName: "plus")
@@ -184,7 +192,9 @@ private struct PhospheneChrome: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("Import videos")
+            .help(L10n.importVideos)
+            .accessibilityLabel(L10n.importVideos)
+            .keyboardShortcut("i", modifiers: [.command])
         }
         .padding(.horizontal, 24)
         .padding(.top, 28)
@@ -349,7 +359,6 @@ private struct HomePage: View {
                             model: model,
                             asset: asset,
                             width: 268,
-                            style: .cinematic,
                             showCategory: showCategory
                         )
                     }
@@ -478,6 +487,8 @@ private struct LibraryPage: View {
                     VStack(alignment: .leading, spacing: 28) {
                         dayNightSection
                         appearanceSection
+                        automationRulesSection
+                        lockScreenSection
                     }
                     .padding(.bottom, 28)
                 }
@@ -680,7 +691,9 @@ private struct LibraryPage: View {
                         symbol: "sun.max.fill",
                         title: "Day",
                         detail: "Choose wallpaper",
-                        footnote: "From \(formattedHour(model.automations.dayStartHour))",
+                        footnote: model.automations.useSunriseSunset
+                            ? "From sunrise"
+                            : "From \(formattedHour(model.automations.dayStartHour))",
                         asset: model.asset(for: model.automations.dayWallpaperID)
                     ) {
                         model.automationPickSlot = .day
@@ -689,27 +702,47 @@ private struct LibraryPage: View {
                         symbol: "moon.fill",
                         title: "Night",
                         detail: "Choose wallpaper",
-                        footnote: "From \(formattedHour(model.automations.nightStartHour))",
+                        footnote: model.automations.useSunriseSunset
+                            ? "From sunset"
+                            : "From \(formattedHour(model.automations.nightStartHour))",
                         asset: model.asset(for: model.automations.nightWallpaperID)
                     ) {
                         model.automationPickSlot = .night
                     }
                 }
-                HStack(spacing: 14) {
-                    schedulePicker(
-                        "Day begins",
-                        selection: Binding(
-                            get: { model.automations.dayStartHour },
-                            set: { model.setDayStartHour($0) }
-                        )
+                Toggle(
+                    "Use sunrise and sunset",
+                    isOn: Binding(
+                        get: { model.automations.useSunriseSunset },
+                        set: { model.setUseSunriseSunset($0) }
                     )
-                    schedulePicker(
-                        "Night begins",
-                        selection: Binding(
-                            get: { model.automations.nightStartHour },
-                            set: { model.setNightStartHour($0) }
+                )
+                .toggleStyle(.switch)
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                if model.automations.useSunriseSunset {
+                    Text("Needs Location When In Use so LumaWall can estimate daylight for your region.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textDim)
+                } else {
+                    HStack(spacing: 14) {
+                        schedulePicker(
+                            "Day begins",
+                            selection: Binding(
+                                get: { model.automations.dayStartHour },
+                                set: { model.setDayStartHour($0) }
+                            )
                         )
-                    )
+                        schedulePicker(
+                            "Night begins",
+                            selection: Binding(
+                                get: { model.automations.nightStartHour },
+                                set: { model.setNightStartHour($0) }
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -774,6 +807,156 @@ private struct LibraryPage: View {
         }
     }
 
+    private var automationRulesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            automationHeader(
+                title: "Rules",
+                subtitle: "Limit when automations can change the desktop.",
+                enabled: true,
+                expanded: model.automationRulesExpanded,
+                onEnable: { _ in },
+                onToggleExpand: { model.automationRulesExpanded.toggle() },
+                showsEnable: false
+            )
+
+            if model.automationRulesExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Active days")
+                        .font(.system(size: 12, weight: .semibold))
+                    HStack(spacing: 8) {
+                        ForEach(Array(["S", "M", "T", "W", "T", "F", "S"].enumerated()), id: \.offset) { index, label in
+                            Button {
+                                model.toggleWeekday(index)
+                            } label: {
+                                Text(label)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .frame(width: 32, height: 32)
+                                    .background(
+                                        model.isWeekdaySelected(index) ? Theme.accent.opacity(0.22) : Theme.panel,
+                                        in: Circle()
+                                    )
+                                    .overlay(Circle().stroke(model.isWeekdaySelected(index) ? Theme.accent.opacity(0.55) : Theme.line))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(weekdayName(index))
+                        }
+                        if model.automations.weekdayMask != 0 {
+                            Button("Every day") { model.clearWeekdayFilter() }
+                                .buttonStyle(.link)
+                        }
+                    }
+
+                    Divider().overlay(Theme.line)
+
+                    Toggle(
+                        "Do not interrupt",
+                        isOn: Binding(
+                            get: {
+                                model.automations.doNotInterruptStartHour != nil
+                                    && model.automations.doNotInterruptEndHour != nil
+                            },
+                            set: { enabled in
+                                if enabled {
+                                    model.setDoNotInterrupt(start: 22, end: 7)
+                                } else {
+                                    model.setDoNotInterrupt(start: nil, end: nil)
+                                }
+                            }
+                        )
+                    )
+                    .toggleStyle(.switch)
+
+                    if model.automations.doNotInterruptStartHour != nil,
+                       model.automations.doNotInterruptEndHour != nil {
+                        HStack(spacing: 14) {
+                            schedulePicker(
+                                "Quiet from",
+                                selection: Binding(
+                                    get: { model.automations.doNotInterruptStartHour ?? 22 },
+                                    set: {
+                                        model.setDoNotInterrupt(
+                                            start: $0,
+                                            end: model.automations.doNotInterruptEndHour ?? 7
+                                        )
+                                    }
+                                )
+                            )
+                            schedulePicker(
+                                "Quiet until",
+                                selection: Binding(
+                                    get: { model.automations.doNotInterruptEndHour ?? 7 },
+                                    set: {
+                                        model.setDoNotInterrupt(
+                                            start: model.automations.doNotInterruptStartHour ?? 22,
+                                            end: $0
+                                        )
+                                    }
+                                )
+                            )
+                        }
+                    }
+
+                    HStack {
+                        Text("Power source")
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        Picker(
+                            "Power source",
+                            selection: Binding(
+                                get: { model.automations.powerSourceRule },
+                                set: { model.setPowerSourceRule($0) }
+                            )
+                        ) {
+                            ForEach(PowerSourceRule.allCases) { rule in
+                                Text(rule.title).tag(rule)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 44)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                }
+            }
+        }
+    }
+
+    private var lockScreenSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            automationHeader(
+                title: "Lock Screen",
+                subtitle: "Assign a different video for the lock screen when the native wallpaper host is active.",
+                enabled: true,
+                expanded: model.lockAutomationExpanded,
+                onEnable: { _ in },
+                onToggleExpand: { model.lockAutomationExpanded.toggle() },
+                showsEnable: false
+            )
+
+            if model.lockAutomationExpanded {
+                AutomationSlotCard(
+                    symbol: "lock.fill",
+                    title: "Lock Screen",
+                    detail: model.wallpaperHostMode == .native
+                        ? "Choose wallpaper"
+                        : "Needs macOS 26 native host",
+                    footnote: "Idle / lock surface",
+                    asset: model.asset(for: model.automations.lockScreenWallpaperID)
+                ) {
+                    model.automationPickSlot = .lock
+                }
+                .opacity(model.wallpaperHostMode == .native ? 1 : 0.55)
+                .disabled(model.wallpaperHostMode != .native)
+            }
+        }
+    }
+
+    private func weekdayName(_ index: Int) -> String {
+        ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][index]
+    }
+
     private var savedSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Saved Wallpapers")
@@ -808,7 +991,8 @@ private struct LibraryPage: View {
         enabled: Bool,
         expanded: Bool,
         onEnable: @escaping (Bool) -> Void,
-        onToggleExpand: @escaping () -> Void
+        onToggleExpand: @escaping () -> Void,
+        showsEnable: Bool = true
     ) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
@@ -821,19 +1005,21 @@ private struct LibraryPage: View {
             }
             Spacer(minLength: 12)
             HStack(spacing: 10) {
-                Text("Enable")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textDim)
-                Toggle(
-                    "",
-                    isOn: Binding(
-                        get: { enabled },
-                        set: { newValue in onEnable(newValue) }
+                if showsEnable {
+                    Text("Enable")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textDim)
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { enabled },
+                            set: { newValue in onEnable(newValue) }
+                        )
                     )
-                )
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
+                }
                 Button(action: onToggleExpand) {
                     Image(systemName: "chevron.down")
                         .rotationEffect(.degrees(expanded ? 0 : -90))
@@ -1210,6 +1396,7 @@ private struct AutomationPickSheet: View {
         case .night: model.automations.nightWallpaperID
         case .light: model.automations.lightWallpaperID
         case .dark: model.automations.darkWallpaperID
+        case .lock: model.automations.lockScreenWallpaperID
         }
     }
 }
@@ -1225,8 +1412,9 @@ private struct DisplaysPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                Text("Displays")
+                Text(L10n.displays)
                     .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .accessibilityAddTraits(.isHeader)
                 topology
                     .frame(height: 260)
                     .padding(20)
@@ -1371,13 +1559,14 @@ private struct SettingsPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Settings")
+                    Text(L10n.settings)
                         .font(.system(size: 32, weight: .bold, design: .rounded))
-                    Text("Energy, lock, and local storage.")
+                        .accessibilityAddTraits(.isHeader)
+                    Text(L10n.settingsSubtitle)
                         .foregroundStyle(Theme.textDim)
                 }
 
-                settingsGroup(title: "Wallpaper host", symbol: "rectangle.on.rectangle.angled") {
+                settingsGroup(title: L10n.wallpaperHost, symbol: "rectangle.on.rectangle.angled") {
                     settingsRow(
                         title: model.wallpaperHostMode == .native ? "System wallpaper (macOS 26)" : "Desktop overlay",
                         detail: model.wallpaperHostMode == .native
@@ -1389,7 +1578,7 @@ private struct SettingsPage: View {
                     }
                 }
 
-                settingsGroup(title: "Playback & energy", symbol: "leaf.fill") {
+                settingsGroup(title: L10n.playbackEnergy, symbol: "leaf.fill") {
                     VStack(spacing: 0) {
                         ForEach(PowerProfile.allCases, id: \.self) { profile in
                             Button { model.setPowerProfile(profile) } label: {
@@ -1397,6 +1586,7 @@ private struct SettingsPage: View {
                                     Image(systemName: profile.symbol)
                                         .frame(width: 28, height: 28)
                                         .foregroundStyle(model.powerProfile == profile ? Theme.accent : .secondary)
+                                        .accessibilityHidden(true)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(profile.label).fontWeight(.semibold)
                                         Text(profile.detail)
@@ -1406,93 +1596,151 @@ private struct SettingsPage: View {
                                     Spacer()
                                     Image(systemName: model.powerProfile == profile ? "checkmark.circle.fill" : "circle")
                                         .foregroundStyle(model.powerProfile == profile ? Theme.accent : Color.white.opacity(0.22))
+                                        .accessibilityHidden(true)
                                 }
                                 .contentShape(Rectangle())
                                 .padding(.vertical, 11)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(profile.label)
+                            .accessibilityHint(profile.detail)
+                            .accessibilityAddTraits(model.powerProfile == profile ? [.isSelected] : [])
                             if profile != PowerProfile.allCases.last {
                                 Divider().overlay(Theme.line)
                             }
                         }
                         Divider().overlay(Theme.line)
                         settingsRow(
-                            title: "Pause when the desktop is hidden",
+                            title: L10n.reduceMotion,
+                            detail: model.reduceMotionActive
+                                ? "System Reduce Motion is on. Live video stays on a still frame."
+                                : "Follows System Settings → Accessibility → Display → Reduce motion.",
+                            symbol: "figure.walk.motion"
+                        ) {
+                            Text(model.reduceMotionActive ? "On" : "Off")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(model.reduceMotionActive ? Theme.accent : Theme.textDim)
+                                .accessibilityHidden(true)
+                        }
+                        Divider().overlay(Theme.line)
+                        settingsRow(
+                            title: L10n.pauseObscured,
                             detail: "Stops that screen when a window covers about 92% of it.",
                             symbol: "rectangle.slash"
                         ) {
-                            Toggle("", isOn: Binding(
+                            Toggle(L10n.pauseObscured, isOn: Binding(
                                 get: { model.pauseWhenObscured },
                                 set: { model.setPauseWhenObscured($0) }
                             ))
                             .labelsHidden()
+                            .accessibilityLabel(L10n.pauseObscured)
                         }
                         Divider().overlay(Theme.line)
                         settingsRow(
-                            title: "Pause when the Mac is locked",
+                            title: L10n.pauseLock,
                             detail: "Stops live video behind the lock screen. The still poster stays.",
                             symbol: "lock.fill"
                         ) {
-                            Toggle("", isOn: Binding(
+                            Toggle(L10n.pauseLock, isOn: Binding(
                                 get: { model.pauseOnLock },
                                 set: { model.setPauseOnLock($0) }
                             ))
                             .labelsHidden()
+                            .accessibilityLabel(L10n.pauseLock)
                         }
                         Divider().overlay(Theme.line)
                         settingsRow(
-                            title: "Still desktop only",
+                            title: L10n.stillDesktop,
                             detail: model.wallpaperHostMode == .native
-                                ? "Asks the wallpaper extension to keep the desktop still while the system host stays assigned."
-                                : "Hides the live overlay. System Settings still has the poster.",
+                                ? "Keeps the desktop still. Lock screen and screen saver can keep live video through the wallpaper extension."
+                                : "Hides the live overlay on the desktop. System Settings still has the poster.",
                             symbol: "photo"
                         ) {
-                            Toggle("", isOn: Binding(
+                            Toggle(L10n.stillDesktop, isOn: Binding(
                                 get: { model.hideDesktopVideo },
                                 set: { model.setHideDesktopVideo($0) }
                             ))
                             .labelsHidden()
+                            .accessibilityLabel(L10n.stillDesktop)
                         }
                     }
                 }
 
-                settingsGroup(title: "App", symbol: "app.badge") {
+                settingsGroup(title: L10n.energyLog, symbol: "bolt.heart.fill") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.energyLogDetail)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let report = model.energySoakReport {
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                statusCell(title: "Duration", value: String(format: "%.1f h", report.durationHours))
+                                statusCell(title: "Samples", value: "\(report.sampleCount)")
+                                statusCell(title: "Avg CPU", value: String(format: "%.2f%%", report.averageProcessCPU))
+                                statusCell(title: "Peak CPU", value: String(format: "%.1f%%", report.peakProcessCPU))
+                                statusCell(title: "Avg RAM", value: String(format: "%.0f MB", report.averageMemoryMB))
+                                statusCell(title: "Avg decoders", value: String(format: "%.2f", report.averageDecoders))
+                                statusCell(
+                                    title: "24h mark",
+                                    value: report.meets24HourGate ? "Met" : "In progress"
+                                )
+                                statusCell(
+                                    title: "Battery Δ",
+                                    value: report.batteryDeltaPercent.map { "\($0)%" } ?? "—"
+                                )
+                            }
+                        } else {
+                            Text("No samples yet. Start a 24h window while wallpapers play.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.textDim)
+                        }
+                        HStack(spacing: 10) {
+                            GhostButton(L10n.startSoak, symbol: "timer") { model.startEnergySoak() }
+                            GhostButton(L10n.copyProof, symbol: "doc.on.doc") { model.copyEnergyProof() }
+                            GhostButton(L10n.resetSoak, symbol: "arrow.counterclockwise") { model.resetEnergySoak() }
+                        }
+                    }
+                }
+
+                settingsGroup(title: L10n.app, symbol: "app.badge") {
                     settingsRow(
-                        title: "Launch at login",
+                        title: L10n.launchAtLogin,
                         detail: "Starts LumaWall in the background after you sign in.",
                         symbol: "power"
                     ) {
                         Toggle(
-                            "",
+                            L10n.launchAtLogin,
                             isOn: Binding(
                                 get: { model.launchAtLogin },
                                 set: { model.setLaunchAtLogin($0) }
                             )
                         )
                         .labelsHidden()
+                        .accessibilityLabel(L10n.launchAtLogin)
                     }
                 }
 
-                settingsGroup(title: "Storage", symbol: "internaldrive.fill") {
+                settingsGroup(title: L10n.storage, symbol: "internaldrive.fill") {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(spacing: 12) {
                             StatPill(title: "Process RAM", value: String(format: "%.0f MB", model.processMemoryMB))
+                            StatPill(title: "Active decoders", value: "\(model.activeDecoderCount)")
                             StatPill(title: "Library on disk", value: String(format: "%.0f MB", model.libraryDiskMB))
                             StatPill(title: "Wallpapers", value: "\(model.assets.count)")
                             Spacer()
                         }
                         Divider().overlay(Theme.line)
                         HStack(spacing: 10) {
-                            GhostButton("Clear RAM cache", symbol: "memorychip") { model.clearMemoryCache() }
-                            GhostButton("Clear disk cache", symbol: "externaldrive") { model.clearDiskCache() }
+                            GhostButton(L10n.clearRAM, symbol: "memorychip") { model.clearMemoryCache() }
+                            GhostButton(L10n.clearDisk, symbol: "externaldrive") { model.clearDiskCache() }
                         }
-                        Text("Clearing cache keeps your imported videos. It only drops temporary files.")
+                        Text("Clear RAM drops decoders and temporary caches. Imported videos stay on disk. Matching multi-display videos share one decoder on the overlay host.")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textDim)
                     }
                 }
 
-                settingsGroup(title: "Status", symbol: "info.circle") {
+                settingsGroup(title: L10n.status, symbol: "info.circle") {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                         statusCell(title: "Playback", value: model.playbackStopped ? "Paused" : (model.activeByDisplay.isEmpty ? "Idle" : "Live"))
                         statusCell(title: "Displays", value: "\(model.activeByDisplay.count) of \(model.displays.count) live")
@@ -1502,18 +1750,27 @@ private struct SettingsPage: View {
                         statusCell(title: "System CPU", value: String(format: "%.1f%%", model.systemCPUPercent))
                         statusCell(title: "Battery", value: model.isOnBattery ? "\(model.batteryPercent)% battery" : "Power adapter")
                         statusCell(title: "RAM", value: String(format: "%.0f MB", model.processMemoryMB))
+                        statusCell(title: "Decoders", value: "\(model.activeDecoderCount)")
+                        statusCell(title: "Reduce Motion", value: model.reduceMotionActive ? "On (still frame)" : "Off")
+                        statusCell(
+                            title: "Energy soak",
+                            value: model.energySoakReport.map {
+                                $0.meets24HourGate ? "24h met" : String(format: "%.1fh", $0.durationHours)
+                            } ?? "Idle"
+                        )
                     }
                 }
 
                 HStack(spacing: 14) {
                     BrandMark(size: 52)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("LumaWall").font(.headline)
-                        Text("Local video wallpapers. No account. No tracking.")
+                        Text(L10n.appName).font(.headline)
+                        Text(L10n.tagline)
                             .font(.caption).foregroundStyle(Theme.textDim)
-                        Text("v0.3.5").font(.caption2).foregroundStyle(.secondary)
+                        Text("v0.4.0").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
+                .accessibilityElement(children: .combine)
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -1539,11 +1796,13 @@ private struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: symbol)
                 .font(.headline)
+                .accessibilityAddTraits(.isHeader)
             content()
                 .padding(16)
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.line))
         }
+        .accessibilityElement(children: .contain)
     }
 
     private func settingsRow<Trailing: View>(
@@ -1556,6 +1815,7 @@ private struct SettingsPage: View {
             Image(systemName: symbol)
                 .frame(width: 28, height: 28)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).fontWeight(.semibold)
                 Text(detail)
@@ -1566,6 +1826,9 @@ private struct SettingsPage: View {
             trailing()
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
+        .accessibilityHint(detail)
     }
 
     private func statusCell(title: String, value: String) -> some View {
@@ -1579,6 +1842,8 @@ private struct SettingsPage: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(Theme.panelStrong, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(value)")
     }
 
 }
@@ -1595,21 +1860,17 @@ private struct StatPill: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Theme.panelStrong, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(value)")
     }
 }
 
 // MARK: - Shared UI
 
-private enum TileStyle {
-    case cinematic
-    case gallery
-}
-
 private struct WallpaperTile: View {
     @Bindable var model: AppModel
     let asset: WallpaperAsset
     var width: CGFloat? = nil
-    var style: TileStyle = .gallery
     var showCategory: Bool = false
     @State private var hovering = false
 
@@ -1651,14 +1912,15 @@ private struct WallpaperTile: View {
                                 .background(.black.opacity(0.45), in: Circle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(model.isFavorite(asset) ? "Remove favorite" : "Add favorite")
                     }
                     Spacer()
                 }
                 .padding(10)
             }
-            .clipShape(RoundedRectangle(cornerRadius: style == .cinematic ? 18 : 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: style == .cinematic ? 18 : 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(hovering ? Theme.accent.opacity(0.45) : Theme.line, lineWidth: 1)
             )
             .shadow(color: .black.opacity(hovering ? 0.35 : 0.18), radius: hovering ? 16 : 8, y: hovering ? 8 : 4)
@@ -1684,6 +1946,8 @@ private struct WallpaperTile: View {
         }
         .frame(width: width)
         .onTapGesture { model.previewAsset = asset }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(asset.name)
     }
 
     @ViewBuilder private var poster: some View {
@@ -1704,7 +1968,7 @@ private struct LibraryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WallpaperTile(model: model, asset: asset, style: .gallery, showCategory: true)
+            WallpaperTile(model: model, asset: asset, showCategory: true)
 
             if isEditingName {
                 TextField("Name", text: $draftName)
@@ -2084,7 +2348,7 @@ private struct MenuBarRoot: View {
             }
 
             Divider()
-            Button("Clear memory cache") { model.clearMemoryCache() }
+            Button("Clear RAM") { model.clearMemoryCache() }
             Button("Open LumaWall") {
                 model.section = .home
                 NSApp.setActivationPolicy(.regular)
@@ -2257,6 +2521,7 @@ private struct PrimaryButton: View {
             .foregroundStyle(.black)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 
@@ -2274,7 +2539,7 @@ private struct GhostButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let symbol { Image(systemName: symbol) }
+                if let symbol { Image(systemName: symbol).accessibilityHidden(true) }
                 Text(title).fontWeight(.medium)
             }
             .padding(.horizontal, 14)
@@ -2283,6 +2548,7 @@ private struct GhostButton: View {
             .overlay(Capsule().stroke(Theme.line))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 

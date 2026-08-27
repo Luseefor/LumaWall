@@ -13,10 +13,10 @@ final class AppModel {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .home: "Home"
-            case .library: "Library"
-            case .displays: "Displays"
-            case .settings: "Settings"
+            case .home: L10n.home
+            case .library: L10n.library
+            case .displays: L10n.displays
+            case .settings: L10n.settings
             }
         }
 
@@ -63,10 +63,15 @@ final class AppModel {
     var activePlaylistID: PlaylistID?
     var processMemoryMB: Double = 0
     var libraryDiskMB: Double = 0
+    var activeDecoderCount = 0
+    var reduceMotionActive = false
+    var energySoakReport: EnergySoakReport?
     var automations = WallpaperAutomations()
     var automationPickSlot: AutomationSlot?
     var dayNightExpanded = true
     var appearanceExpanded = true
+    var automationRulesExpanded = true
+    var lockAutomationExpanded = true
     private(set) var favoriteIDs: Set<WallpaperID> = []
     private(set) var activeByDisplay: [DisplayID: WallpaperID] = [:]
 
@@ -77,6 +82,7 @@ final class AppModel {
     private let playlistPlaybackStore: PlaylistPlaybackStore
     private let recentsStore: RecentsStore
     private let automationStore: AutomationStore
+    private let energyLogStore: EnergyLogStore
     let displayCoordinator: DisplayCoordinator
     private let engine: WallpaperEngine
     var wallpaperHostMode: WallpaperHostMode { engine.mode }
@@ -88,6 +94,7 @@ final class AppModel {
     private var lastAutomationWallpaperID: WallpaperID?
     private var appearanceObserver: NSObjectProtocol?
     private var automationObservers: [NSObjectProtocol] = []
+    private var reduceMotionObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
     private var coverageObservers: [NSObjectProtocol] = []
     private var coverageTimer: Timer?
@@ -98,6 +105,9 @@ final class AppModel {
     private var cpuSampler = CPUSampler()
     private var playlistIDs: [WallpaperID] = []
     private var statsTick = 0
+    private let gameModeMonitor = GameModeMonitor()
+    private var didAdvancePlaylistOnLogin = false
+    private var lastPlaylistWakeAdvance: Date?
 
     struct PlaylistEditorState: Identifiable {
         var id: PlaylistID
@@ -109,7 +119,7 @@ final class AppModel {
     }
 
     enum AutomationSlot: String, Identifiable {
-        case day, night, light, dark
+        case day, night, light, dark, lock
         var id: String { rawValue }
 
         var title: String {
@@ -118,6 +128,7 @@ final class AppModel {
             case .night: "Night"
             case .light: "Light"
             case .dark: "Dark"
+            case .lock: "Lock Screen"
             }
         }
     }
@@ -150,6 +161,7 @@ final class AppModel {
             let playlistPlayback = try PlaylistPlaybackStore()
             let recents = try RecentsStore()
             let automations = try AutomationStore()
+            let energyLog = try EnergyLogStore()
             let displays = DisplayCoordinator()
             self.store = store
             self.importer = MediaImporter(store: store)
@@ -158,6 +170,7 @@ final class AppModel {
             self.playlistPlaybackStore = playlistPlayback
             self.recentsStore = recents
             self.automationStore = automations
+            self.energyLogStore = energyLog
             self.displayCoordinator = displays
             self.engine = WallpaperEngine(displays: displays, assignments: assignments)
             self.displays = displays.displays
@@ -166,10 +179,12 @@ final class AppModel {
             startStatsPolling()
             observeAppearanceChanges()
             observeAutomationClockChanges()
+            observeReduceMotion()
             observeScreenChanges()
             observeDesktopCoverage()
             observeLockAndSleep()
             observePowerChanges()
+            observeGameMode()
         } catch {
             fatalError("Unable to initialize LumaWall: \(error)")
         }
@@ -444,8 +459,10 @@ final class AppModel {
 
     func clearMemoryCache() {
         CacheCleaner.clearMemory()
+        engine.releaseWorkingMemory()
+        applyPlaybackPolicy()
         refreshStats()
-        present("Cache", "In-memory caches cleared.")
+        present("RAM", "Released wallpaper decoders and in-memory caches.")
     }
 
     func clearDiskCache() {
@@ -458,6 +475,46 @@ final class AppModel {
                 present("Cache", error.localizedDescription)
             }
         }
+    }
+
+    func startEnergySoak() {
+        Task {
+            do {
+                try await energyLogStore.startSoak()
+                await refreshEnergyReport()
+                present("Energy Log", "24-hour sample window started. Samples append while LumaWall runs.")
+            } catch {
+                present("Energy Log", error.localizedDescription)
+            }
+        }
+    }
+
+    func resetEnergySoak() {
+        Task {
+            do {
+                try await energyLogStore.clearSoak()
+                await refreshEnergyReport()
+                present("Energy Log", "Sample window cleared. Rolling 24h samples remain.")
+            } catch {
+                present("Energy Log", error.localizedDescription)
+            }
+        }
+    }
+
+    func copyEnergyProof() {
+        guard let proof = energySoakReport?.proofSummary else {
+            present("Energy Log", "Start a sample window and wait for readings before copying.")
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(proof, forType: .string)
+        present("Energy Log", energySoakReport?.meets24HourGate == true
+            ? "Copied 24h energy report to the clipboard."
+            : "Copied in-progress energy report to the clipboard.")
+    }
+
+    private func refreshEnergyReport() async {
+        energySoakReport = await energyLogStore.report()
     }
 
     func createPlaylist(name: String, from selection: [WallpaperAsset], shuffled: Bool, intervalMinutes: Int) {
@@ -690,12 +747,68 @@ final class AppModel {
         evaluateAutomations(force: true)
     }
 
+    func setUseSunriseSunset(_ enabled: Bool) {
+        automations.useSunriseSunset = enabled
+        if enabled { LocationDaylightProvider.shared.requestIfNeeded() }
+        persistAutomations()
+        evaluateAutomations(force: true)
+    }
+
+    func setPowerSourceRule(_ rule: PowerSourceRule) {
+        automations.powerSourceRule = rule
+        persistAutomations()
+        evaluateAutomations(force: true)
+    }
+
+    func setWeekdayMask(_ mask: UInt8) {
+        automations.weekdayMask = mask
+        persistAutomations()
+        evaluateAutomations(force: true)
+    }
+
+    func setDoNotInterrupt(start: Int?, end: Int?) {
+        automations.doNotInterruptStartHour = start.map { min(max($0, 0), 23) }
+        automations.doNotInterruptEndHour = end.map { min(max($0, 0), 23) }
+        persistAutomations()
+        evaluateAutomations(force: true)
+    }
+
+    func toggleWeekday(_ weekday: Int) {
+        guard (0...6).contains(weekday) else { return }
+        let bit: UInt8 = 1 << weekday
+        if automations.weekdayMask == 0 {
+            automations.weekdayMask = 0b0111_1111 ^ bit
+        } else {
+            automations.weekdayMask ^= bit
+            if automations.weekdayMask == 0 || automations.weekdayMask == 0b0111_1111 {
+                automations.weekdayMask = 0
+            }
+        }
+        persistAutomations()
+        evaluateAutomations(force: true)
+    }
+
+    func isWeekdaySelected(_ weekday: Int) -> Bool {
+        guard (0...6).contains(weekday) else { return true }
+        if automations.weekdayMask == 0 { return true }
+        return (automations.weekdayMask & (1 << weekday)) != 0
+    }
+
+    func clearWeekdayFilter() {
+        automations.weekdayMask = 0
+        persistAutomations()
+        evaluateAutomations(force: true)
+    }
+
     func assignAutomation(slot: AutomationSlot, asset: WallpaperAsset) {
         switch slot {
         case .day: automations.dayWallpaperID = asset.id
         case .night: automations.nightWallpaperID = asset.id
         case .light: automations.lightWallpaperID = asset.id
         case .dark: automations.darkWallpaperID = asset.id
+        case .lock:
+            automations.lockScreenWallpaperID = asset.id
+            Task { await applyLockScreenWallpaper(asset, announceUnavailable: true) }
         }
         automationPickSlot = nil
         persistAutomations()
@@ -708,8 +821,25 @@ final class AppModel {
         case .night: automations.nightWallpaperID = nil
         case .light: automations.lightWallpaperID = nil
         case .dark: automations.darkWallpaperID = nil
+        case .lock: automations.lockScreenWallpaperID = nil
         }
         persistAutomations()
+        evaluateAutomations(force: true)
+    }
+
+    private func applyLockScreenWallpaper(_ asset: WallpaperAsset, announceUnavailable: Bool = false) async {
+        guard engine.mode == .native else {
+            if announceUnavailable {
+                present("Lock Screen", "Lock-screen assignment needs the macOS 26 wallpaper extension build.")
+            }
+            return
+        }
+        do {
+            let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset)
+            try NativeWallpaperAssignmentService.applyLockScreen(entry: entry)
+        } catch {
+            present("Lock Screen", error.localizedDescription)
+        }
     }
 
     private func persistAutomations() {
@@ -771,9 +901,24 @@ final class AppModel {
                     Task { @MainActor in
                         self?.syncDayNightTimer()
                         self?.evaluateAutomations(force: false)
+                        await self?.consumePendingShortcutIfNeeded()
                     }
                 }
             )
+        }
+    }
+
+    private func observeReduceMotion() {
+        reduceMotionActive = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        reduceMotionObserver = NotificationCenter.default.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.reduceMotionActive = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                self?.applyPlaybackPolicy()
+            }
         }
     }
 
@@ -788,9 +933,20 @@ final class AppModel {
     }
 
     func evaluateAutomations(force: Bool) {
+        guard automations.allowsWeekday() else { return }
+        guard !automations.isDoNotInterrupt() else { return }
+        guard automations.powerSourceRule.allows(isOnBattery: PowerStatus.current().isOnBattery) else { return }
+
         let targetID: WallpaperID?
         if automations.dayNightEnabled {
-            targetID = automations.isDayPeriod() ? automations.dayWallpaperID : automations.nightWallpaperID
+            if automations.useSunriseSunset {
+                LocationDaylightProvider.shared.requestIfNeeded()
+            }
+            let coordinate = LocationDaylightProvider.shared.coordinate
+            targetID = automations.isDayPeriod(
+                latitude: coordinate?.latitude,
+                longitude: coordinate?.longitude
+            ) ? automations.dayWallpaperID : automations.nightWallpaperID
         } else if automations.appearanceEnabled {
             targetID = isSystemDarkAppearance() ? automations.darkWallpaperID : automations.lightWallpaperID
         } else {
@@ -828,6 +984,43 @@ final class AppModel {
         applyPlaybackPolicy()
         syncDayNightTimer()
         evaluateAutomations(force: false)
+        notePlaylistLoginIfNeeded()
+        await refreshEnergyReport()
+        if automations.useSunriseSunset {
+            LocationDaylightProvider.shared.requestIfNeeded()
+        }
+        if let lockID = automations.lockScreenWallpaperID,
+           let asset = assets.first(where: { $0.id == lockID }) {
+            await applyLockScreenWallpaper(asset)
+        }
+        await consumePendingShortcutIfNeeded()
+    }
+
+    private func consumePendingShortcutIfNeeded() async {
+        guard let pending = UserDefaults.standard.string(forKey: "lumawall.pendingShortcutApply") else { return }
+        UserDefaults.standard.removeObject(forKey: "lumawall.pendingShortcutApply")
+        let asset: WallpaperAsset?
+        if pending == "__featured__" {
+            asset = featured
+        } else {
+            asset = assets.first { $0.name.compare(pending, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+                ?? assets.first { $0.name.localizedCaseInsensitiveContains(pending) }
+        }
+        guard let asset else {
+            present("Shortcuts", pending == "__featured__"
+                ? "No wallpaper is ready to apply."
+                : "No wallpaper matched “\(pending)”.")
+            return
+        }
+        stopPlaylistRotation()
+        do {
+            try await engine.applyToAll(asset)
+            try? await store.recordApply(id: asset.id)
+            try? await recentsStore.push(asset.id)
+            await reload()
+        } catch {
+            present("Shortcuts", error.localizedDescription)
+        }
     }
 
     func reload() async {
@@ -866,6 +1059,8 @@ final class AppModel {
         if result == KERN_SUCCESS {
             processMemoryMB = Double(info.resident_size) / 1_048_576
         }
+        activeDecoderCount = engine.activeDecoderCount
+        reduceMotionActive = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let cpu = cpuSampler.sample()
         processCPUPercent = cpu.process
         systemCPUPercent = cpu.system
@@ -881,6 +1076,22 @@ final class AppModel {
             Task { @MainActor in
                 let bytes = await store.diskUsageBytes()
                 libraryDiskMB = Double(bytes) / 1_048_576
+            }
+        }
+        if statsTick == 1 || statsTick.isMultiple(of: 4) {
+            let sample = EnergySample(
+                processCPUPercent: processCPUPercent,
+                systemCPUPercent: systemCPUPercent,
+                processMemoryMB: processMemoryMB,
+                batteryPercent: batteryPercent,
+                isOnBattery: isOnBattery,
+                decoderCount: activeDecoderCount,
+                powerProfile: powerProfile.rawValue,
+                playbackActive: !playbackStopped && !activeByDisplay.isEmpty
+            )
+            Task { @MainActor in
+                try? await energyLogStore.record(sample)
+                await refreshEnergyReport()
             }
         }
     }
@@ -917,9 +1128,49 @@ final class AppModel {
                 Task { @MainActor in
                     self?.displaysAsleep = false
                     self?.applyPlaybackPolicy()
+                    self?.notePlaylistWake()
                 }
             }
         )
+        lockObservers.append(
+            workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.notePlaylistWake() }
+            }
+        )
+    }
+
+    private func observeGameMode() {
+        gameModeMonitor.onChange = { [weak self] in
+            self?.applyPlaybackPolicy()
+        }
+        gameModeMonitor.start()
+    }
+
+    private func notePlaylistWake() {
+        guard activePlaylistID != nil, !playlistIDs.isEmpty else { return }
+        if let lastPlaylistWakeAdvance, Date().timeIntervalSince(lastPlaylistWakeAdvance) < 30 {
+            return
+        }
+        lastPlaylistWakeAdvance = Date()
+        // Advance once on wake so overnight playlists move without waiting for the next timer fire.
+        stepPlaylist(1)
+        if let playlistID = activePlaylistID,
+           let playlist = playlists.first(where: { $0.id == playlistID }) {
+            startPlaylistRotation(ids: playlistIDs, intervalMinutes: playlist.intervalMinutes)
+        }
+    }
+
+    private func notePlaylistLoginIfNeeded() {
+        guard !didAdvancePlaylistOnLogin else { return }
+        didAdvancePlaylistOnLogin = true
+        // Login item launches stay accessory and usually never become active for a click.
+        guard launchAtLogin, NSApp.activationPolicy() == .accessory || !NSApp.isActive else { return }
+        guard activePlaylistID != nil else { return }
+        stepPlaylist(1)
+        if let playlistID = activePlaylistID,
+           let playlist = playlists.first(where: { $0.id == playlistID }) {
+            startPlaylistRotation(ids: playlistIDs, intervalMinutes: playlist.intervalMinutes)
+        }
     }
 
     private func observePowerChanges() {
@@ -965,8 +1216,11 @@ final class AppModel {
         let power = PowerStatus.current()
         batteryPercent = power.percent
         isOnBattery = power.isOnBattery
-        let covered = DisplayOcclusion.coveredIDs(in: displays)
+        let coverage = DisplayOcclusion.analysis(in: displays)
+        let allowLiveOnLock = engine.mode == .native
         for display in displays {
+            let obscured = (pauseWhenObscured && coverage.covered.contains(display.displayID))
+                || coverage.fullscreen.contains(display.displayID)
             let conditions = PlaybackConditions(
                 profile: powerProfile,
                 isOnBattery: power.isOnBattery,
@@ -975,11 +1229,30 @@ final class AppModel {
                 thermalState: ProcessInfo.processInfo.thermalState,
                 displayIsAsleep: displaysAsleep,
                 sessionIsLocked: pauseOnLock && sessionLocked,
-                displayIsObscured: pauseWhenObscured && covered.contains(display.displayID),
+                displayIsObscured: obscured,
                 userPaused: userPaused || pausedDisplayIDs.contains(display.displayID),
-                hideDesktopVideo: hideDesktopVideo
+                hideDesktopVideo: hideDesktopVideo,
+                allowLiveOnLock: allowLiveOnLock,
+                gameModeActive: gameModeMonitor.isActive,
+                reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             )
             engine.apply(tier: PlaybackPolicy.resolve(conditions), to: display.displayID)
+        }
+        if engine.mode == .native {
+            let pausedCG = Set(pausedDisplayIDs.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
+            let coveredCG = Set(coverage.covered.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
+            let fullscreenCG = Set(coverage.fullscreen.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
+            NativeWallpaperPrefsBridge.write(
+                userPaused: userPaused,
+                pauseWhenOccluded: pauseWhenObscured,
+                alwaysPauseDesktop: hideDesktopVideo,
+                pausedDisplays: pausedCG,
+                occludedDisplays: coveredCG,
+                fullscreenDisplays: fullscreenCG,
+                desktopOccluded: coverage.covered.count == displays.count && !displays.isEmpty,
+                screenSaverIsOurs: WallpaperStoreProbe.screenSaverIsOurs(),
+                powerProfile: powerProfile.rawValue
+            )
         }
         playbackStopped = displays.contains { engine.wallpaperID(on: $0.displayID) != nil }
             && displays.allSatisfy { display in
@@ -999,14 +1272,19 @@ final class AppModel {
 }
 
 private enum DisplayOcclusion {
-    static func coveredIDs(in displays: [ConnectedDisplay]) -> Set<DisplayID> {
+    struct Analysis {
+        var covered: Set<DisplayID>
+        var fullscreen: Set<DisplayID>
+    }
+
+    static func analysis(in displays: [ConnectedDisplay]) -> Analysis {
         let desktopLayer = Int(CGWindowLevelForKey(.desktopIconWindow))
         let desktop = displays.map(\.frame).reduce(CGRect.null) { $0.union($1) }
         guard !desktop.isNull,
               let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
-        else { return [] }
+        else { return Analysis(covered: [], fullscreen: []) }
 
-        var windows: [CGRect] = []
+        var windows: [(rect: CGRect, layer: Int)] = []
         for dict in info {
             let layer = dict[kCGWindowLayer as String] as? Int ?? 0
             if layer <= desktopLayer { continue }
@@ -1017,15 +1295,25 @@ private enum DisplayOcclusion {
                 width: bounds["Width"] ?? 0,
                 height: bounds["Height"] ?? 0
             )
-            windows.append(ScreenGeometry.cocoa(fromQuartz: quartz, desktop: desktop))
+            windows.append((ScreenGeometry.cocoa(fromQuartz: quartz, desktop: desktop), layer))
         }
 
         var covered: Set<DisplayID> = []
+        var fullscreen: Set<DisplayID> = []
         for display in displays {
-            if ScreenGeometry.isCovered(screen: display.frame, windows: windows) {
+            let rects = windows.map(\.rect)
+            if ScreenGeometry.isCovered(screen: display.frame, windows: rects) {
                 covered.insert(display.displayID)
             }
+            let ownsFullscreen = windows.contains { window in
+                ScreenGeometry.coverageRatio(screen: display.frame, windows: [window.rect]) >= 0.98
+                    && abs(window.rect.width - display.frame.width) < 4
+                    && abs(window.rect.height - display.frame.height) < 4
+            }
+            if ownsFullscreen {
+                fullscreen.insert(display.displayID)
+            }
         }
-        return covered
+        return Analysis(covered: covered, fullscreen: fullscreen)
     }
 }
