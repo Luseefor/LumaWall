@@ -40,7 +40,6 @@ targets:
           - Resources
       - path: Sources/LumaWallApp/Resources
         buildPhase: resources
-        type: folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal
@@ -72,6 +71,7 @@ targets:
           - NOTICE
           - LICENSE-Phosphene
           - WallpaperExtension-Bridging-Header.h
+          - LumaWallWallpaper.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.wallpaper
@@ -83,5 +83,6 @@ targets:
         CURRENT_PROJECT_VERSION: "12"
         MACOSX_DEPLOYMENT_TARGET: "26.0"
         SWIFT_OBJC_BRIDGING_HEADER: WallpaperExtension/WallpaperExtension-Bridging-Header.h
+        CODE_SIGN_ENTITLEMENTS: WallpaperExtension/LumaWallWallpaper.entitlements
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         SKIP_INSTALL: YES
