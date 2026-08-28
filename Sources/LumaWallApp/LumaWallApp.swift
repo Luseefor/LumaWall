@@ -1182,12 +1182,15 @@ private struct LibraryInspector: View {
     var body: some View {
         Group {
             if let asset {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                GeometryReader { viewport in
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 16) {
                         poster(asset)
                         TextField("Wallpaper name", text: $draftName)
                             .font(.title3.weight(.semibold))
                             .textFieldStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .clipped()
                             .onSubmit { commitName(asset) }
                         metadata(asset)
                         Divider().overlay(Theme.line)
@@ -1250,8 +1253,15 @@ private struct LibraryInspector: View {
                         Button("Remove from Library", role: .destructive) { model.remove(asset) }
                             .buttonStyle(.plain)
                             .foregroundStyle(.red.opacity(0.9))
+                        }
+                        // Scroll views otherwise let media and long filenames choose
+                        // an oversized ideal width, which can push the leading edge
+                        // underneath the inspector's rounded border.
+                        .frame(width: max(viewport.size.width - 36, 1), alignment: .leading)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 18)
                     }
-                    .padding(18)
+                    .scrollIndicators(.visible)
                 }
                 .onAppear { draftName = asset.name }
                 .onChange(of: asset.id) { _, _ in draftName = asset.name }
@@ -1265,6 +1275,7 @@ private struct LibraryInspector: View {
         }
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(Theme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func poster(_ asset: WallpaperAsset) -> some View {
