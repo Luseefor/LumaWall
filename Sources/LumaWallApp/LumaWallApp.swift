@@ -150,6 +150,10 @@ private struct AppChrome: View {
                             .foregroundStyle(model.section == item ? Color.black : Color.white.opacity(0.68))
                     }
                     .buttonStyle(.plain)
+                    // Keep the tab keyboard-focusable, but suppress SwiftUI's
+                    // bright blue focus plate; the white capsule already conveys
+                    // the selected destination in this custom navigation bar.
+                    .focusEffectDisabled()
                     .accessibilityLabel(item.title)
                     .accessibilityAddTraits(model.section == item ? [.isSelected] : [])
                 }
