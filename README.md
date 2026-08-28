@@ -67,3 +67,7 @@ Local production use does not need those steps. Third-party installs do.
 Luseefor (`sapanakosansar18@gmail.com`). Commits and package metadata use that identity. Do not attribute this work to cursor-agent or other tool accounts.
 
 Third-party notices for Phosphene reference code live in `THIRD_PARTY_NOTICES.md`.
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE`.
