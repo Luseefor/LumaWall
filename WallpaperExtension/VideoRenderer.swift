@@ -719,7 +719,6 @@ final class VideoRenderer: @unchecked Sendable {
             if let nrAsset = nr.asset as? AVURLAsset, nrAsset.url != asset.url {
                 asset = nrAsset
                 videoTrack = no.track
-                refreshNominalFrameRate(from: no.track)
                 traceLog("  [Renderer] Switched variant: \(nrAsset.url.lastPathComponent)")
             }
             currentReader = nr
@@ -820,11 +819,6 @@ final class VideoRenderer: @unchecked Sendable {
         let fps = max(nominalFrameRate, 1)
         let timescale = CMTimeScale(min(120_000, max(1, Int((fps * 100).rounded()))))
         return CMTime(value: 100, timescale: timescale)
-    }
-
-    private func refreshNominalFrameRate(from track: AVAssetTrack) {
-        let fps = Double(track.nominalFrameRate)
-        if fps.isFinite, fps > 0 { nominalFrameRate = fps }
     }
 
     /// Offset both DTS and PTS of a sample for gapless looping.

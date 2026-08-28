@@ -75,10 +75,10 @@ enum SettingsPush {
         }
         extensionLog("[SettingsPush] Pushing view models to \(proxies.count) connection(s)")
         for proxy in proxies {
-            proxy.updateSettingsViewModels(models) { error in
-                if let error {
-                    extensionLog("[SettingsPush] updateSettingsViewModels error: \(error)")
-                }
+            do {
+                try await proxy.updateSettingsViewModels(models)
+            } catch {
+                extensionLog("[SettingsPush] updateSettingsViewModels error: \(error)")
             }
         }
     }
