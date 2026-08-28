@@ -51,16 +51,22 @@ xcodebuild -scheme LumaWall -configuration Release -derivedDataPath .derived bui
 
 Install the built app to `/Applications/LumaWall.app` for the path this project expects.
 
-## Release checklist
+## Production DMG
 
-Still open for a public binary:
+The release script deliberately refuses development or ad-hoc identities. Configure
+a Developer ID Application certificate and a `notarytool` Keychain profile, then run:
 
-1. Sign with Developer ID Application and enable Hardened Runtime (already on in `project.yml`).
-2. Notarize and staple.
-3. Ship a DMG or Homebrew cask, plus an updater if you want in-app updates.
-4. Attach crash reporting before a wide release.
+```sh
+DEVELOPER_ID_APPLICATION="Developer ID Application: Your Name (TEAMID)" \
+DEVELOPMENT_TEAM="TEAMID" \
+NOTARY_KEYCHAIN_PROFILE="lumawall-notary" \
+./Packaging/release.sh
+```
 
-Local production use does not need those steps. Third-party installs do.
+It archives with Hardened Runtime, rejects `get-task-allow`, verifies nested code,
+creates `dist/LumaWall.dmg`, submits it to Apple, staples the ticket, and requires a
+passing Gatekeeper assessment. A DMG that has not completed every step is not a
+production artifact.
 
 ## Author
 
