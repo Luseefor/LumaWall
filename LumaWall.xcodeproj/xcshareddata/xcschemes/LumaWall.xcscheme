@@ -39,6 +39,17 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E32FF0342909C645D768D9D0"
+               BuildableName = "LumaWallAppTests.xctest"
+               BlueprintName = "LumaWallAppTests"
+               ReferencedContainer = "container:LumaWall.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

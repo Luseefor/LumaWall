@@ -58,7 +58,8 @@ targets:
       - target: LumaWallWallpaper
         embed: true
     scheme:
-      testTargets: []
+      testTargets:
+        - LumaWallAppTests
 
   LumaWallWallpaper:
     type: extensionkit-extension
@@ -86,3 +87,16 @@ targets:
         CODE_SIGN_ENTITLEMENTS: WallpaperExtension/LumaWallWallpaper.entitlements
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         SKIP_INSTALL: YES
+
+  LumaWallAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Tests/LumaWallAppTests
+    dependencies:
+      - target: LumaWall
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.tests
+        GENERATE_INFOPLIST_FILE: YES
