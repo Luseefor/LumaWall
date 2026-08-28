@@ -280,6 +280,12 @@ private struct LibrarySearchField: NSViewRepresentable {
 
 private struct HomePage: View {
     @Bindable var model: AppModel
+    @State private var selectedCategory: WallpaperCategory?
+
+    private var recentlyAddedAssets: [WallpaperAsset] {
+        let assets = selectedCategory.map(model.assets(in:)) ?? model.assets
+        return Array(assets.prefix(12))
+    }
 
     var body: some View {
         ScrollView {
@@ -290,43 +296,18 @@ private struct HomePage: View {
                     EmptyInvite(action: model.chooseVideos)
                         .padding(.horizontal, 28)
                 } else {
+                    categorySelector
+
                     horizontalRow(
-                        title: "Recently added",
-                        subtitle: "One click puts motion on your desktop",
-                        assets: Array(model.assets.prefix(8)),
-                        seeAll: { model.section = .library }
-                    )
-
-                    if !model.recentAssets.isEmpty {
-                        horizontalRow(
-                            title: "Recents",
-                            subtitle: "Wallpapers you’ve applied lately",
-                            assets: Array(model.recentAssets.prefix(8)),
-                            seeAll: { model.section = .library }
-                        )
-                    }
-
-                    if !model.likedAssets.isEmpty {
-                        horizontalRow(
-                            title: "Favorites",
-                            subtitle: "Hearted wallpapers from this Mac",
-                            assets: Array(model.likedAssets.prefix(8)),
-                            seeAll: { model.section = .library }
-                        )
-                    }
-
-                    ForEach(WallpaperCategory.allCases) { category in
-                        let items = model.assets(in: category)
-                        if !items.isEmpty {
-                            horizontalRow(
-                                title: category.title,
-                                subtitle: "\(items.count) local",
-                                assets: Array(items.prefix(8)),
-                                showCategory: false,
-                                seeAll: { model.section = .library }
-                            )
+                        title: "Recently Added",
+                        subtitle: selectedCategory.map { "Newest wallpapers in \($0.title)" }
+                            ?? "Newest wallpapers in your library",
+                        assets: recentlyAddedAssets,
+                        seeAll: {
+                            model.categoryFilter = selectedCategory
+                            model.section = .library
                         }
-                    }
+                    )
                 }
 
                 HStack(spacing: 12) {
@@ -345,6 +326,24 @@ private struct HomePage: View {
             }
             .padding(.top, 0)
         }
+    }
+
+    private var categorySelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 9) {
+                FilterChip(title: "All", selected: selectedCategory == nil) {
+                    selectedCategory = nil
+                }
+                ForEach(WallpaperCategory.allCases) { category in
+                    FilterChip(title: category.title, selected: selectedCategory == category) {
+                        selectedCategory = category
+                    }
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 2)
+        }
+        .accessibilityLabel("Wallpaper categories")
     }
 
     @ViewBuilder
