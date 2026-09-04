@@ -235,10 +235,12 @@ final class PowerMonitor: Sendable {
     }
 
     private func yieldToSubscribers(_ state: PowerState) {
-        continuations.withLock { continuations in
-            for continuation in continuations.values {
-                continuation.yield(state)
-            }
+        // Snapshot under lock, yield outside: continuations may re-enter
+        // PowerMonitor synchronously, and yielding while holding the lock
+        // risks deadlock + stalls all publishers on a slow subscriber.
+        let live = continuations.withLock { Array($0.values) }
+        for continuation in live {
+            continuation.yield(state)
         }
     }
 }

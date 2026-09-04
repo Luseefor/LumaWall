@@ -104,8 +104,8 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         lock.lock()
+        defer { lock.unlock() }
         _coordinate = locations.last?.coordinate
-        lock.unlock()
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}

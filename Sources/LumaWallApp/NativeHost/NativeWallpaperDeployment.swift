@@ -28,8 +28,6 @@ enum NativeWallpaperDeployment {
 
     @MainActor
     static func ensureDeployed(asset: WallpaperAsset) async throws -> EntryInfo {
-        let fm = FileManager.default
-        try fm.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
@@ -37,28 +35,34 @@ enum NativeWallpaperDeployment {
 
         let hash = try await contentHash(for: asset.mediaURL)
         if let existing = entry(id: entryID),
-           existing.contentHash == hash,
-           fm.fileExists(atPath: videoURL(for: existing).path) {
+           FileManager.default.fileExists(atPath: videoURL(for: existing).path),
+           existing.contentHash == hash {
             return existing
         }
 
-        let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
-        if fm.fileExists(atPath: dir.path) {
-            try fm.removeItem(at: dir)
-        }
-        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Stage the (potentially large) video file off the main actor. The old
+        // code copied gigabytes on MainActor, stalling the UI + watchdog.
+        let staged = try await Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            try fm.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
+            let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
+            if fm.fileExists(atPath: dir.path) {
+                try fm.removeItem(at: dir)
+            }
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let filename = PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
+                ? asset.mediaURL.lastPathComponent
+                : "Wallpaper.mov"
+            let dest = dir.appendingPathComponent(filename)
+            try fm.copyItem(at: asset.mediaURL, to: dest)
+            return (dir: dir, dest: dest, filename: filename)
+        }.value
 
-        let filename = PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
-            ? asset.mediaURL.lastPathComponent
-            : "Wallpaper.mov"
-        let dest = dir.appendingPathComponent(filename)
-        try fm.copyItem(at: asset.mediaURL, to: dest)
-
-        let probe = try await probe(url: dest)
+        let probe = try await probe(url: staged.dest)
         let entry = EntryInfo(
             id: entryID,
             name: asset.name,
-            filename: filename,
+            filename: staged.filename,
             duration: probe.duration,
             fps: probe.fps,
             resolution: probe.resolution,
@@ -67,8 +71,8 @@ enum NativeWallpaperDeployment {
             audioStripped: false
         )
         let data = try JSONEncoder().encode(entry)
-        try data.write(to: dir.appendingPathComponent("metadata.json"), options: .atomic)
-        await generateThumbnail(for: dest, in: dir)
+        try data.write(to: staged.dir.appendingPathComponent("metadata.json"), options: .atomic)
+        await generateThumbnail(for: staged.dest, in: staged.dir)
         notifyLibraryChanged()
         return entry
     }
@@ -119,6 +123,7 @@ enum NativeWallpaperDeployment {
             defer { try? handle.close() }
             var hasher = SHA256()
             while let data = try handle.read(upToCount: 1_024 * 1_024), !data.isEmpty {
+                try Task.checkCancellation()
                 hasher.update(data: data)
             }
             return hasher.finalize().map { String(format: "%02x", $0) }.joined()
