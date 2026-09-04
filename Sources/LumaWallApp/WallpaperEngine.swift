@@ -118,7 +118,7 @@ final class OverlayWallpaperEngine {
         let clock = CMClockGetHostTimeClock()
         let now = CMClockGetTime(clock)
         let start = CMTimeAdd(now, CMTime(seconds: 0.25, preferredTimescale: 1_000_000_000))
-        for id in displayIDs where tiers[id] == .full || tiers[id] == .reduced {
+        for id in displayIDs where tiers[id] == .full || tiers[id] == .reduced || tiers[id] == .minimal {
             sessions[id]?.synchronize(atHostTime: start, tier: tiers[id] ?? .full)
         }
     }
@@ -381,53 +381,67 @@ final class DesktopVideoSession {
         decoderReleaseWorkItem?.cancel()
         decoderReleaseWorkItem = nil
         switch tier {
-        case .full:
+        case .full, .reduced, .minimal:
+            // Unified tier semantics (see PlaybackTier docs): `.minimal` plays
+            // motion at a reduced decode budget, exactly like `.reduced`. Only
+            // `.staticFrame` hides video (poster still) and `.paused` holds the
+            // last frame. This matches the native extension host, where
+            // `.minimal` resumes playback with a lower-res variant — previously
+            // overlay blanked on batterySaver while native kept playing.
+            let reduced = tier != .full
+            let bitRate: Double = reduced ? 2_000_000 : 0
+            let maxResolution = reduced ? reducedResolution : .zero
             if let sharedHub {
-                sharedHub.setDecodeBudget(bitRate: 0, maximumResolution: .zero)
-                sharedHub.play()
-                root.setVideoVisible(true)
+                // If a previous pause unloaded the hub, re-attach a fresh decoder
+                // instead of playing an emptied player (black). The hub is
+                // re-acquired by reconcile; here just guard the loaded flag.
+                if !sharedHub.isLoaded {
+                    usePrivatePlayer()
+                    ensureDecoder(preferBatteryVariant: reduced)
+                    configureDecodeBudget(bitRate: bitRate, maximumResolution: maxResolution)
+                    root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+                    player.rate = 1
+                    player.play()
+                } else {
+                    sharedHub.setDecodeBudget(bitRate: bitRate, maximumResolution: maxResolution)
+                    sharedHub.play()
+                    root.setVideoVisible(true)
+                }
             } else {
-                ensureDecoder()
-                configureDecodeBudget(bitRate: 0, maximumResolution: .zero)
+                ensureDecoder(preferBatteryVariant: reduced)
+                configureDecodeBudget(bitRate: bitRate, maximumResolution: maxResolution)
                 root.setVideoVisible(root.playerLayer.isReadyForDisplay)
                 player.rate = 1
                 player.play()
             }
             reassert()
-        case .reduced:
-            if let sharedHub {
-                sharedHub.setDecodeBudget(bitRate: 2_000_000, maximumResolution: reducedResolution)
-                sharedHub.play()
-                root.setVideoVisible(true)
-            } else {
-                ensureDecoder(preferBatteryVariant: true)
-                configureDecodeBudget(bitRate: 2_000_000, maximumResolution: reducedResolution)
-                root.setVideoVisible(root.playerLayer.isReadyForDisplay)
-                player.rate = 1
-                player.play()
-            }
-            reassert()
-        case .minimal, .staticFrame:
+        case .staticFrame:
             sharedHub?.pause()
             player.pause()
             root.setVideoVisible(false)
             reassert()
             scheduleDecoderRelease(after: 2)
         case .paused:
+            // Hold the last frame AND the decoder for instant resume. The old
+            // code freed the decoder 10s after every pause (and emptied the
+            // shared hub via unload()), so resume had to re-decode from disk:
+            // black flash + spin-up on every pause/resume cycle.
             sharedHub?.pause()
             player.pause()
             root.setVideoVisible(root.usesSharedFrames || root.playerLayer.isReadyForDisplay)
             reassert()
-            scheduleDecoderRelease(after: 10)
         }
     }
 
     func tearDown() {
         decoderReleaseWorkItem?.cancel()
+        decoderReleaseWorkItem = nil
         readinessObservation?.invalidate()
+        readinessObservation = nil
         detachSharedHub()
         player.pause()
         looper = nil
+        player.replaceCurrentItem(with: nil)
         root.playerLayer.player = nil
         window.orderOut(nil)
         window.close()
@@ -437,20 +451,22 @@ final class DesktopVideoSession {
     func synchronize(atHostTime hostTime: CMTime, tier: PlaybackTier) {
         decoderReleaseWorkItem?.cancel()
         requestedTier = tier
+        // `.minimal` plays motion (reduced budget), like `.reduced`.
+        let reduced = tier == .reduced || tier == .minimal
         if let sharedHub {
             sharedHub.setDecodeBudget(
-                bitRate: tier == .reduced ? 2_000_000 : 0,
-                maximumResolution: tier == .reduced ? reducedResolution : .zero
+                bitRate: reduced ? 2_000_000 : 0,
+                maximumResolution: reduced ? reducedResolution : .zero
             )
             sharedHub.synchronize(atHostTime: hostTime)
             root.setVideoVisible(true)
             reassert()
             return
         }
-        ensureDecoder()
+        ensureDecoder(preferBatteryVariant: reduced)
         configureDecodeBudget(
-            bitRate: tier == .reduced ? 2_000_000 : 0,
-            maximumResolution: tier == .reduced ? reducedResolution : .zero
+            bitRate: reduced ? 2_000_000 : 0,
+            maximumResolution: reduced ? reducedResolution : .zero
         )
         root.setVideoVisible(root.playerLayer.isReadyForDisplay)
         reassert()
@@ -572,10 +588,12 @@ final class DesktopVideoSession {
 }
 
 private extension PlaybackTier {
+    /// Tiers that render motion. `.minimal` plays at a reduced decode budget
+    /// (unified with the native host); only `.staticFrame` shows a still.
     var showsMotion: Bool {
         switch self {
-        case .full, .reduced, .paused: true
-        case .minimal, .staticFrame: false
+        case .full, .reduced, .minimal, .paused: true
+        case .staticFrame: false
         }
     }
 }

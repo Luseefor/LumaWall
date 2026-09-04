@@ -1331,7 +1331,7 @@ final class AppModel {
             && displays.allSatisfy { display in
                 guard engine.wallpaperID(on: display.displayID) != nil else { return true }
                 switch engine.tier(on: display.displayID) {
-                case .full, .reduced: return false
+                case .full, .reduced, .minimal: return false
                 default: return true
                 }
             }
