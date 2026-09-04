@@ -148,6 +148,10 @@ final class VideoRenderer: @unchecked Sendable {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         rootLayer.sublayers?.filter { $0.name == "lumawall.stillFrame" }.forEach { $0.removeFromSuperlayer() }
+        // A no-video acquire installs a CAGradientLayer fallback on this same
+        // rootLayer; a later video create must remove it, or the gradient
+        // stacks behind every subsequent renderer on this surface.
+        rootLayer.sublayers?.filter { $0 is CAGradientLayer }.forEach { $0.removeFromSuperlayer() }
         rootLayer.addSublayer(displayLayer)
         rootLayer.addSublayer(stillFrameLayer)
         traceLog("  [Renderer #\(debugID)] CREATED for \(asset.url.lastPathComponent), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0))")
@@ -297,7 +301,9 @@ final class VideoRenderer: @unchecked Sendable {
     /// `queue` — it blocks that (real, owned) thread on a semaphore while AVFoundation
     /// loads the track on its own internal queue, so there's no cooperative-executor
     /// starvation and no out-of-order Task completion. Local files load in a few ms.
+    /// Must never run on the main thread (or any Swift cooperative thread).
     private static func loadFirstVideoTrackBlocking(_ asset: AVURLAsset) -> AVAssetTrack? {
+        assert(!Thread.isMainThread, "blocking track load must not run on the main thread")
         traceLog("  [load] blocking-load START \(asset.url.lastPathComponent) (queue will block until AVF replies)")
         let sem = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var result: AVAssetTrack?
@@ -314,13 +320,20 @@ final class VideoRenderer: @unchecked Sendable {
     /// no callback is mid-flight before canceling the reader.
     func stop() {
         extensionLog("  [stop #\(debugID)] stopping renderer for \(asset.url.lastPathComponent)")
+        cancelRamp()
         cancelDeepPauseTimer()
         queue.sync {
             isRunning = false
             renderer.stopRequestingMediaData()
             currentReader?.cancelReading()
             nextReader?.cancelReading()
+            currentReader = nil
+            currentOutput = nil
+            nextReader = nil
+            nextOutput = nil
         }
+        CMTimebaseSetRate(timebase, rate: 0.0)
+        variantSelector = nil
         // Clean up layers from the layer tree
         displayLayer.removeFromSuperlayer()
         stillFrameLayer.removeFromSuperlayer()

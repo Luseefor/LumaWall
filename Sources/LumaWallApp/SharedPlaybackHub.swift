@@ -87,6 +87,7 @@ final class SharedPlaybackHub {
     }
 
     func unload() {
+        stopPump()
         player.pause()
         looper = nil
         player.replaceCurrentItem(with: nil)

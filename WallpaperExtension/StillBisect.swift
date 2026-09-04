@@ -57,7 +57,9 @@ func bisectShowStill(videoURL: URL?, cachedStill: CGImage?, rootLayer: CALayer, 
 
 /// Decode exactly one frame from a video — no reader kept, no feed loop. Blocks the
 /// caller (`Lifecycle.queue`) briefly, like the video path's blocking track load.
+/// Must never run on the main thread. Diagnostic-only path.
 private func decodeFirstSampleBuffer(_ url: URL) -> CMSampleBuffer? {
+    assert(!Thread.isMainThread, "bisect decode must not run on the main thread")
     let asset = AVURLAsset(url: url)
     let sem = DispatchSemaphore(value: 0)
     nonisolated(unsafe) var track: AVAssetTrack?
