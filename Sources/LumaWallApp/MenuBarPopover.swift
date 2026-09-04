@@ -211,7 +211,7 @@ struct MenuBarPopover: View {
                     .multilineTextAlignment(.center)
                 Button("Open Library") {
                     model.section = .library
-                    openMainWindow()
+                    openMainWindow(preservingSection: true)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -241,7 +241,7 @@ struct MenuBarPopover: View {
                 Button("New Playlist") {
                     model.section = .library
                     model.beginPlaylistEditor()
-                    openMainWindow()
+                    openMainWindow(preservingSection: true)
                 }
                 if !model.playlists.isEmpty { Divider() }
                 ForEach(model.playlists) { playlist in
@@ -358,13 +358,18 @@ struct MenuBarPopover: View {
         }
     }
 
-    private var versionString: String {
+    /// Read once: `body` re-evaluates on every stats tick.
+    private static let versionString: String = {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
         return "v\(version)"
-    }
+    }()
 
-    private func openMainWindow() {
-        model.section = .home
+    private var versionString: String { Self.versionString }
+
+    private func openMainWindow(preservingSection: Bool = false) {
+        if !preservingSection {
+            model.section = .home
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         openWindow(id: "main")

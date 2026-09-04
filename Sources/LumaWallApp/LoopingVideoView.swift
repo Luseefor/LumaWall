@@ -17,22 +17,47 @@ struct LoopingVideoView: NSViewRepresentable {
 
     func updateNSView(_ view: PlayerSurface, context: Context) {
         view.playerLayer.videoGravity = gravity
+        // Recreate the decoder when the URL changes (SwiftUI reuses the view).
+        // Without this, hero/carousel reuse silently kept playing the old video.
+        if context.coordinator.url != url {
+            context.coordinator.reconfigure(url: url)
+            view.playerLayer.player = context.coordinator.player
+            context.coordinator.player.play()
+        }
     }
 
     static func dismantleNSView(_ view: PlayerSurface, coordinator: Coordinator) {
-        coordinator.player.pause()
+        coordinator.tearDown()
         view.playerLayer.player = nil
     }
 
     final class Coordinator {
         let player = AVQueuePlayer()
         private var looper: AVPlayerLooper?
+        private(set) var url: URL
 
         init(url: URL) {
+            self.url = url
             player.isMuted = true
             player.actionAtItemEnd = .none
             player.automaticallyWaitsToMinimizeStalling = false
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        }
+
+        /// Swap the looping item for a new URL (main thread, SwiftUI update).
+        func reconfigure(url: URL) {
+            self.url = url
+            player.pause()
+            looper = nil
+            player.replaceCurrentItem(with: nil)
+            looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        }
+
+        /// Fully release the decoder for view teardown.
+        func tearDown() {
+            player.pause()
+            looper = nil
+            player.replaceCurrentItem(with: nil)
         }
     }
 }

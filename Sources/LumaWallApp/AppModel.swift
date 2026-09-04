@@ -50,20 +50,29 @@ final class AppModel {
     var playbackStopped = false
     var pausedDisplayIDs: Set<DisplayID> = []
     var launchAtLogin = false
-    var processCPUPercent: Double = 0
-    var systemCPUPercent: Double = 0
+    /// Hot diagnostics: excluded from observation so the 15s stats tick doesn't
+    /// re-evaluate every `@Bindable` library view. Read directly where needed.
+    @ObservationIgnored var processCPUPercent: Double = 0
+    @ObservationIgnored var systemCPUPercent: Double = 0
     var batteryPercent = 100
     var isOnBattery = false
     var playlistEditor: PlaylistEditorState?
     var isImporting = false
     var isApplying = false
-    var alertTitle = ""
-    var alertMessage = ""
-    var showsAlert = false
+    /// Queued alerts. The old three-var (`alertTitle/alertMessage/showsAlert`)
+    /// form tore: a second `present` overwrote the first before dismissal.
+    /// `activeAlert` drives a single `.alert(item:)`; the rest wait in `alertQueue`.
+    struct AppAlert: Identifiable {
+        let id = UUID()
+        var title: String
+        var message: String
+    }
+    var activeAlert: AppAlert?
+    private var alertQueue: [AppAlert] = []
     var activePlaylistID: PlaylistID?
-    var processMemoryMB: Double = 0
-    var libraryDiskMB: Double = 0
-    var activeDecoderCount = 0
+    @ObservationIgnored var processMemoryMB: Double = 0
+    @ObservationIgnored var libraryDiskMB: Double = 0
+    @ObservationIgnored var activeDecoderCount = 0
     var reduceMotionActive = false
     var energySoakReport: EnergySoakReport?
     var automations = WallpaperAutomations()
@@ -119,6 +128,49 @@ final class AppModel {
         var orderedIDs: [WallpaperID]
         var shuffled: Bool
         var intervalMinutes: Int
+    }
+
+    /// Single-sheet router. Four `.sheet(item:)` modifiers on one view mean
+    /// only the first non-nil presents and the rest are silently dropped.
+    /// `topSheet` exposes priority order; `setTopSheet(nil)` clears the
+    /// currently presented sheet's source (replacing double `nil + dismiss()`).
+    enum SheetRoute: Identifiable {
+        case preview(WallpaperAsset)
+        case assign(ConnectedDisplay)
+        case automation(AutomationSlot)
+        case playlistEditor
+        var id: String {
+            switch self {
+            case .preview(let asset): "preview-\(asset.id.rawValue)"
+            case .assign(let display): "assign-\(display.displayID.rawValue)"
+            case .automation(let slot): "automation-\(slot.rawValue)"
+            case .playlistEditor: "playlist-editor"
+            }
+        }
+    }
+
+    /// Highest-priority presented sheet. Order: preview > assign > automation > editor.
+    var topSheet: SheetRoute? {
+        if let previewAsset { return .preview(previewAsset) }
+        if let assignTarget { return .assign(assignTarget) }
+        if let automationPickSlot { return .automation(automationPickSlot) }
+        if playlistEditor != nil { return .playlistEditor }
+        return nil
+    }
+
+    /// Clear (or switch) sheets through the router so sources stay consistent.
+    func setTopSheet(_ route: SheetRoute?) {
+        switch route {
+        case .preview(let asset): previewAsset = asset
+        case .assign(let display): assignTarget = display
+        case .automation(let slot): automationPickSlot = slot
+        case .playlistEditor: break
+        case nil:
+            previewAsset = nil
+            assignTarget = nil
+            automationPickSlot = nil
+            playlistEditor = nil
+        }
     }
 
     enum AutomationSlot: String, Identifiable {
@@ -317,23 +369,32 @@ final class AppModel {
         Task {
             var notes: [String] = []
             for url in urls {
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                do {
-                    let result = try await importer.importVideo(url)
-                    notes += result.inspection.recommendations.map { "\(result.asset.name): \($0)" }
-                    if result.removedAudio {
-                        notes.append("\(result.asset.name): Audio removed for silent desktop playback.")
-                    }
-                } catch {
-                    notes.append("\(url.lastPathComponent): \(error.localizedDescription)")
-                }
+                // NOTE: `defer` inside a loop defers to the enclosing scope, not
+                // the iteration — the old code held all security-scoped refs until
+                // every import finished. Per-URL helper scopes each access.
+                notes += await importOneVideo(url)
             }
             await reload()
             isImporting = false
             if !notes.isEmpty {
                 present("Import details", notes.joined(separator: "\n"))
             }
+        }
+    }
+
+    /// Import a single URL, balancing its security-scoped access within the call.
+    private func importOneVideo(_ url: URL) async -> [String] {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let result = try await importer.importVideo(url)
+            var notes = result.inspection.recommendations.map { "\(result.asset.name): \($0)" }
+            if result.removedAudio {
+                notes.append("\(result.asset.name): Audio removed for silent desktop playback.")
+            }
+            return notes
+        } catch {
+            return ["\(url.lastPathComponent): \(error.localizedDescription)"]
         }
     }
 
@@ -347,6 +408,9 @@ final class AppModel {
                 try? await recentsStore.remove(asset.id)
                 favoriteIDs.remove(asset.id)
                 UserDefaults.standard.set(favoriteIDs.map(\.rawValue.uuidString), forKey: "lumawall.favoriteIDs")
+                if let posterURL = asset.posterURL {
+                    await PosterCache.shared.remove(posterURL)
+                }
                 await reload()
             } catch {
                 present("LumaWall", error.localizedDescription)
@@ -637,6 +701,27 @@ final class AppModel {
         guard var draft = playlistEditor, draft.orderedIDs.indices.contains(source) else { return }
         let id = draft.orderedIDs.remove(at: source)
         draft.orderedIDs.insert(id, at: min(destination, draft.orderedIDs.count))
+        playlistEditor = draft
+    }
+
+    /// Explicit copy-writeback setters for the editor draft. Direct optional-chain
+    /// mutation (`playlistEditor?.name = …`) is fragile under `@Observable`
+    /// tracking; these mirror `toggleEditorEntry`'s proven pattern.
+    func setPlaylistEditorName(_ name: String) {
+        guard var draft = playlistEditor else { return }
+        draft.name = name
+        playlistEditor = draft
+    }
+
+    func setPlaylistEditorInterval(_ minutes: Int) {
+        guard var draft = playlistEditor else { return }
+        draft.intervalMinutes = minutes
+        playlistEditor = draft
+    }
+
+    func setPlaylistEditorShuffled(_ shuffled: Bool) {
+        guard var draft = playlistEditor else { return }
+        draft.shuffled = shuffled
         playlistEditor = draft
     }
 
@@ -1352,9 +1437,17 @@ final class AppModel {
 
     private func present(_ title: String, _ message: String) {
         nativeHostLog.error("alert: \(title, privacy: .public) — \(message, privacy: .public)")
-        alertTitle = title
-        alertMessage = message
-        showsAlert = true
+        let alert = AppAlert(title: title, message: message)
+        if activeAlert == nil {
+            activeAlert = alert
+        } else {
+            alertQueue.append(alert)
+        }
+    }
+
+    /// Dismiss the active alert and show the next queued one, if any.
+    func acknowledgeAlert() {
+        activeAlert = alertQueue.isEmpty ? nil : alertQueue.removeFirst()
     }
 }
 

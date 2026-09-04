@@ -53,18 +53,29 @@ private struct RootView: View {
         .preferredColorScheme(.dark)
         .tint(Theme.accent)
         .dropDestination(for: URL.self) { urls, _ in model.importVideos(urls); return true }
-        .alert(model.alertTitle, isPresented: $model.showsAlert) {
+        .alert(
+            model.activeAlert?.title ?? "",
+            isPresented: Binding(
+                get: { model.activeAlert != nil },
+                set: { if !$0 { model.acknowledgeAlert() } }
+            )
+        ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(model.alertMessage)
+            Text(model.activeAlert?.message ?? "")
         }
-        .sheet(item: $model.previewAsset) { PreviewSheet(model: model, asset: $0) }
-        .sheet(item: $model.assignTarget) { AssignSheet(model: model, display: $0) }
-        .sheet(item: $model.automationPickSlot) { slot in
-            AutomationPickSheet(model: model, slot: slot)
-        }
-        .sheet(item: $model.playlistEditor) { _ in
-            PlaylistEditorSheet(model: model)
+        .sheet(
+            item: Binding(
+                get: { model.topSheet },
+                set: { model.setTopSheet($0) }
+            )
+        ) { route in
+            switch route {
+            case .preview(let asset): PreviewSheet(model: model, asset: asset)
+            case .assign(let display): AssignSheet(model: model, display: display)
+            case .automation(let slot): AutomationPickSheet(model: model, slot: slot)
+            case .playlistEditor: PlaylistEditorSheet(model: model)
+            }
         }
         .overlay {
             if model.isImporting || model.isApplying {
@@ -378,7 +389,6 @@ private struct HomePage: View {
 private struct FeaturedHero: View {
     @Bindable var model: AppModel
     @State private var slideIndex = 0
-    @State private var slideshowTask: Task<Void, Never>?
 
     private static let slideDuration: Duration = .seconds(4)
 
@@ -439,11 +449,22 @@ private struct FeaturedHero: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 420)
-        .onAppear { syncSlideIndex(); startSlideshow() }
-        .onDisappear { stopSlideshow() }
+        .onAppear { syncSlideIndex() }
         .onChange(of: assets.map(\.id)) { _, _ in
             syncSlideIndex()
-            startSlideshow()
+        }
+        // Auto-cancelled by SwiftUI on disappear / count change. Keyed on the
+        // count (not the ID list) so metadata reloads from apply/recordApply
+        // don't restart the 4s cadence and make the hero jitter.
+        .task(id: assets.count) {
+            guard assets.count > 1 else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.slideDuration)
+                guard !Task.isCancelled else { break }
+                withAnimation(.easeInOut(duration: 0.7)) {
+                    slideIndex = (slideIndex + 1) % assets.count
+                }
+            }
         }
     }
 
@@ -488,7 +509,6 @@ private struct FeaturedHero: View {
                         withAnimation(.easeInOut(duration: 0.7)) {
                             slideIndex = index
                         }
-                        startSlideshow()
                     }
             }
         }
@@ -518,25 +538,6 @@ private struct FeaturedHero: View {
            let index = assets.firstIndex(where: { $0.id == featured.id }) {
             slideIndex = index
         }
-    }
-
-    private func startSlideshow() {
-        slideshowTask?.cancel()
-        guard assets.count > 1 else { return }
-        slideshowTask = Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: Self.slideDuration)
-                guard !Task.isCancelled else { break }
-                withAnimation(.easeInOut(duration: 0.7)) {
-                    slideIndex = (slideIndex + 1) % assets.count
-                }
-            }
-        }
-    }
-
-    private func stopSlideshow() {
-        slideshowTask?.cancel()
-        slideshowTask = nil
     }
 }
 
@@ -570,18 +571,26 @@ private struct LibraryPage: View {
             .padding(.top, 28)
             .padding(.bottom, 44)
         }
-        .sheet(isPresented: inspectorPresented) {
-            if let asset = selectedAsset {
+        .sheet(
+            item: Binding(
+                get: { selectedID.map(SelectedInspector.init(assetID:)) },
+                set: { selectedID = $0?.assetID }
+            )
+        ) { selection in
+            // Look up live so library reloads while the sheet is open keep
+            // working instead of pinning a stale snapshot.
+            if let asset = model.assets.first(where: { $0.id == selection.assetID }) {
                 LibraryInspectorSheet(model: model, asset: asset)
             }
         }
     }
 
-    private var inspectorPresented: Binding<Bool> {
-        Binding(
-            get: { selectedAsset != nil },
-            set: { if !$0 { selectedID = nil } }
-        )
+    /// Identifiable wrapper giving the inspector sheet stable identity across
+    /// library reloads (a derived `isPresented` boolean loses which asset is
+    /// shown and drops the sheet when the asset value changes).
+    private struct SelectedInspector: Identifiable {
+        let assetID: WallpaperID
+        var id: WallpaperID { assetID }
     }
 
     private var allWallpapersSection: some View {
@@ -1279,11 +1288,7 @@ private struct LibraryInspector: View {
 
     private func poster(_ asset: WallpaperAsset) -> some View {
         Group {
-            if let url = asset.posterURL, let image = NSImage(contentsOf: url) {
-                Image(nsImage: image).resizable().scaledToFill()
-            } else {
-                Theme.panelStrong
-            }
+            PosterImage(url: asset.posterURL)
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(16 / 10, contentMode: .fit)
@@ -1343,13 +1348,7 @@ private struct AutomationSlotCard: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                if let url = asset?.posterURL, let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Theme.panelStrong
-                }
+                PosterImage(url: asset?.posterURL)
                 LinearGradient(
                     colors: [.black.opacity(0.55), .black.opacity(0.15), .clear],
                     startPoint: .bottom,
@@ -1446,10 +1445,10 @@ private struct PlaylistShelfCard: View {
 
     private var isActive: Bool { model.activePlaylistID == playlist.id }
 
-    private var poster: NSImage? {
+    private var posterURL: URL? {
         for id in playlist.wallpaperIDs {
-            if let url = model.asset(for: id)?.posterURL, let image = NSImage(contentsOf: url) {
-                return image
+            if let url = model.asset(for: id)?.posterURL {
+                return url
             }
         }
         return nil
@@ -1458,11 +1457,7 @@ private struct PlaylistShelfCard: View {
     var body: some View {
         Button(action: toggleRotation) {
             ZStack {
-                if let poster {
-                    Image(nsImage: poster).resizable().scaledToFill()
-                } else {
-                    Theme.panelStrong
-                }
+                PosterImage(url: posterURL)
                 LinearGradient(
                     colors: [.black.opacity(0.78), .black.opacity(0.2), .clear],
                     startPoint: .bottom,
@@ -1659,11 +1654,7 @@ private struct DisplayMapTile: View {
             Color.clear
                 .overlay {
                     Group {
-                        if let url = asset?.posterURL, let image = NSImage(contentsOf: url) {
-                            Image(nsImage: image).resizable().scaledToFill()
-                        } else {
-                            Rectangle().fill(.white.opacity(0.06))
-                        }
+                        PosterImage(url: asset?.posterURL)
                     }
                 }
                 .clipped()
@@ -1701,11 +1692,7 @@ private struct DisplayCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 Group {
-                    if let url = asset?.posterURL, let image = NSImage(contentsOf: url) {
-                        Image(nsImage: image).resizable().scaledToFill()
-                    } else {
-                        Theme.panelStrong
-                    }
+                    PosterImage(url: asset?.posterURL)
                 }
                 .frame(width: 72, height: 46)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -2141,11 +2128,7 @@ private struct WallpaperPosterFrame<Overlay: View>: View {
             .fill(Theme.panelStrong)
             .aspectRatio(16 / 10, contentMode: .fit)
             .overlay {
-                if let url = posterURL, let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                }
+                PosterImage(url: posterURL)
             }
             .overlay { overlay() }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -2390,14 +2373,10 @@ private struct AssignSheet: View {
             } else {
                 ZStack {
                     Rectangle().fill(.black)
-                    if let url = selectedAsset?.posterURL, let image = NSImage(contentsOf: url) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: contentMode)
-                            .scaleEffect(composition.scale)
-                            .rotationEffect(.degrees(composition.rotationDegrees))
-                            .offset(x: composition.offset.x * 0.18, y: -composition.offset.y * 0.18)
-                    }
+                    PosterImage(url: selectedAsset?.posterURL, contentMode: contentMode)
+                        .scaleEffect(composition.scale)
+                        .rotationEffect(.degrees(composition.rotationDegrees))
+                        .offset(x: composition.offset.x * 0.18, y: -composition.offset.y * 0.18)
                 }
                 .frame(maxWidth: .infinity)
                 .aspectRatio(max(display.frame.width / max(display.frame.height, 1), 1), contentMode: .fit)
@@ -2619,21 +2598,21 @@ private struct PlaylistEditorSheet: View {
     private var nameBinding: Binding<String> {
         Binding(
             get: { model.playlistEditor?.name ?? "" },
-            set: { model.playlistEditor?.name = $0 }
+            set: { model.setPlaylistEditorName($0) }
         )
     }
 
     private var intervalBinding: Binding<Int> {
         Binding(
             get: { model.playlistEditor?.intervalMinutes ?? 30 },
-            set: { model.playlistEditor?.intervalMinutes = $0 }
+            set: { model.setPlaylistEditorInterval($0) }
         )
     }
 
     private var shuffleBinding: Binding<Bool> {
         Binding(
             get: { model.playlistEditor?.shuffled ?? false },
-            set: { model.playlistEditor?.shuffled = $0 }
+            set: { model.setPlaylistEditorShuffled($0) }
         )
     }
 }
