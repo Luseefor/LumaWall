@@ -58,6 +58,11 @@ struct AutomationStoreTests {
         #expect(!PowerSourceRule.batteryOnly.allows(isOnBattery: false))
         #expect(PowerSourceRule.acOnly.allows(isOnBattery: false))
         #expect(!PowerSourceRule.acOnly.allows(isOnBattery: true))
+        #expect(PowerSourceRule.any.allows(isOnBattery: true))
+        #expect(PowerSourceRule.any.allows(isOnBattery: false))
+        let titles = PowerSourceRule.allCases.map(\.title)
+        #expect(Set(titles).count == titles.count)
+        #expect(PowerSourceRule.any.id == "any")
     }
 
     @Test func sunriseUsesSolarDayBoundaryNearEquator() throws {

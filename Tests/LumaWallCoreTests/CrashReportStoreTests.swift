@@ -110,4 +110,18 @@ import Testing
         #expect(text.contains("0.4.0 (12)"))
         #expect(text.contains("0 LumaWall frame"))
     }
+
+    @Test func clearAllDropsPersistedReports() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumawall-crash-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try CrashReportStore(rootURL: root)
+        store.save(CrashReport(kind: .signal, name: "SIGSEGV", reason: "x", appVersion: "1.0", osVersion: "26.0"))
+        #expect(store.reports().count == 1)
+        store.clearAll()
+        #expect(store.reports().isEmpty)
+
+        let reopened = try CrashReportStore(rootURL: root)
+        #expect(reopened.reports().isEmpty)
+    }
 }

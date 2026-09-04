@@ -77,4 +77,37 @@ struct AssignmentStoreTests {
         #expect(restored?.composition.contentMode == .fit)
         #expect(restored?.composition.spanningCanvas == nil)
     }
+
+    @Test
+    func replaceAllSwapsSnapshotSorted() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try AssignmentStore(rootURL: root)
+        try await store.upsert(DisplayAssignment(displayID: DisplayID(rawValue: "old")))
+        try await store.replaceAll(with: [
+            DisplayAssignment(displayID: DisplayID(rawValue: "b")),
+            DisplayAssignment(displayID: DisplayID(rawValue: "a")),
+        ])
+
+        let snapshot = await store.current()
+        #expect(snapshot.assignments.map(\.displayID.rawValue) == ["a", "b"])
+        #expect(await store.assignment(for: DisplayID(rawValue: "old")) == nil)
+    }
+
+    @Test
+    func clearDropsSingleDisplayAndAll() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try AssignmentStore(rootURL: root)
+        try await store.upsert([
+            DisplayAssignment(displayID: DisplayID(rawValue: "keep")),
+            DisplayAssignment(displayID: DisplayID(rawValue: "drop")),
+        ])
+        try await store.clear(displayID: DisplayID(rawValue: "drop"))
+        #expect(await store.assignment(for: DisplayID(rawValue: "drop")) == nil)
+        #expect(await store.assignment(for: DisplayID(rawValue: "keep")) != nil)
+
+        try await store.clearAll()
+        #expect(await store.current().assignments.isEmpty)
+    }
 }

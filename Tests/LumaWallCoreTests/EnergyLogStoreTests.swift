@@ -79,4 +79,40 @@ struct EnergyLogStoreTests {
         #expect(report?.sampleCount == 1)
         #expect(report?.proofSummary.contains("LumaWall Energy Log") == true)
     }
+
+    @Test func clearSoakResetsWindowButKeepsSamples() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try EnergyLogStore(rootURL: root)
+        try await store.startSoak()
+        #expect(await store.current().soakStartedAt != nil)
+        try await store.clearSoak()
+        #expect(await store.current().soakStartedAt == nil)
+    }
+
+    @Test func relaunchPrunesStalePersistedSamples() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root)
+        try await first.record(EnergySample(
+            date: now.addingTimeInterval(-25 * 3_600),
+            processCPUPercent: 9, systemCPUPercent: 20, processMemoryMB: 200,
+            batteryPercent: 50, isOnBattery: false, decoderCount: 2,
+            powerProfile: "automatic", playbackActive: false
+        ), now: now)
+        try await first.record(EnergySample(
+            date: now.addingTimeInterval(-1 * 3_600),
+            processCPUPercent: 2, systemCPUPercent: 12, processMemoryMB: 110,
+            batteryPercent: 90, isOnBattery: false, decoderCount: 1,
+            powerProfile: "automatic", playbackActive: true
+        ), now: now)
+
+        // A fresh process loading the persisted file must prune on init, so a
+        // relaunch never resurrects out-of-retention samples.
+        let second = try EnergyLogStore(rootURL: root)
+        let snapshot = await second.current()
+        #expect(snapshot.samples.count == 1)
+        #expect(snapshot.samples[0].processCPUPercent == 2)
+    }
 }

@@ -28,4 +28,15 @@ struct PlaylistScheduleTests {
             nextAdvanceAt: nil, intervalMinutes: 5, cursor: 0, itemCount: 0
         ) == nil)
     }
+
+    @Test func missingDeadlineStartsFreshSchedule() throws {
+        // First launch / cleared playback state: no saved deadline, so the
+        // next advance is one full interval out and the cursor is normalized.
+        let now = Date(timeIntervalSince1970: 10_000)
+        let result = try #require(PlaylistSchedule.resume(
+            nextAdvanceAt: nil, intervalMinutes: 5, cursor: 7, itemCount: 3, now: now
+        ))
+        #expect(result.cursor == 1)
+        #expect(result.nextAdvanceAt == now.addingTimeInterval(300))
+    }
 }

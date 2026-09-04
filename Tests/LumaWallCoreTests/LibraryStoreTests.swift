@@ -61,6 +61,128 @@ struct LibraryStoreTests {
         #expect(assets[0].applyCount == 0)
     }
 
+    @Test func updateRenameAndCategoryPersist() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        let asset = sampleAsset(hash: "mutable")
+        try await store.install(asset)
+
+        var renamed = asset
+        renamed.name = "Changed"
+        try await store.update(renamed)
+        try await store.rename(id: asset.id, to: "  Trimmed  ")
+        try await store.setCategory(id: asset.id, category: .space)
+
+        let loaded = await store.asset(id: asset.id)
+        #expect(loaded?.name == "Trimmed")
+        #expect(loaded?.category == .space)
+    }
+
+    @Test func missingAssetOperationsThrow() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        let ghost = WallpaperID()
+        await #expect(throws: LibraryStore.StoreError.self) {
+            try await store.update(sampleAsset(hash: "ghost"))
+        }
+        await #expect(throws: LibraryStore.StoreError.self) {
+            try await store.rename(id: ghost, to: "x")
+        }
+        await #expect(throws: LibraryStore.StoreError.self) {
+            try await store.setCategory(id: ghost, category: .nature)
+        }
+        await #expect(throws: LibraryStore.StoreError.self) {
+            try await store.recordApply(id: ghost)
+        }
+        await #expect(throws: LibraryStore.StoreError.self) {
+            try await store.remove(id: ghost)
+        }
+    }
+
+    @Test func removeDeletesAssetFolder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        let id = WallpaperID()
+        let folder = root.appendingPathComponent(id.rawValue.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let asset = WallpaperAsset(
+            id: id,
+            name: "Doomed",
+            mediaURL: folder.appendingPathComponent("wallpaper.mov"),
+            duration: 5,
+            framesPerSecond: 30,
+            pixelSize: CGSize(width: 1920, height: 1080),
+            contentHash: "doomed",
+            containsAudio: false
+        )
+        try await store.install(asset)
+        #expect(await store.folder(for: id) == folder)
+
+        try await store.remove(id: id)
+        #expect(await store.asset(id: id) == nil)
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    @Test func lookupByContentHashAndErrorText() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        try await store.install(sampleAsset(hash: "find-me", name: "Findable"))
+        #expect(await store.asset(contentHash: "find-me")?.name == "Findable")
+        #expect(await store.asset(contentHash: "absent") == nil)
+        #expect(LibraryStore.StoreError.missingAsset.errorDescription == "The wallpaper is no longer installed.")
+        #expect(
+            LibraryStore.StoreError.duplicate(sampleAsset(hash: "x", name: "Dup")).errorDescription?
+                .contains("Dup") == true
+        )
+    }
+
+    @Test func sortsByNameResolutionAndAge() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        var small = sampleAsset(hash: "small", name: "banana")
+        small.pixelSize = CGSize(width: 1280, height: 720)
+        small.createdAt = Date(timeIntervalSince1970: 100)
+        var big = sampleAsset(hash: "big", name: "Apple")
+        big.pixelSize = CGSize(width: 3840, height: 2160)
+        big.createdAt = Date(timeIntervalSince1970: 200)
+        try await store.install(small)
+        try await store.install(big)
+
+        #expect(await store.assets(sortedBy: .name).map(\.name) == ["Apple", "banana"])
+        #expect(await store.assets(sortedBy: .resolution).first?.contentHash == "big")
+        #expect(await store.assets(sortedBy: .oldest).first?.contentHash == "small")
+        #expect(await store.assets(sortedBy: .newest).first?.contentHash == "big")
+    }
+
+    @Test func diskUsageCountsLibraryFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        try await store.install(sampleAsset(hash: "weighed"))
+        let blob = root.appendingPathComponent("blob.bin")
+        try Data(repeating: 7, count: 4096).write(to: blob)
+        #expect(await store.diskUsageBytes() >= 4096)
+    }
+
+    @Test func mostUsedBreaksTiesByRecency() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        let older = sampleAsset(hash: "older", name: "Older")
+        let newer = sampleAsset(hash: "newer", name: "Newer")
+        try await store.install(older)
+        try await store.install(newer)
+        // Equal apply counts: the more recently applied asset must win.
+        try await store.recordApply(id: older.id, at: Date(timeIntervalSince1970: 1_000))
+        try await store.recordApply(id: newer.id, at: Date(timeIntervalSince1970: 2_000))
+        #expect(await store.assets(sortedBy: .mostUsed).map(\.contentHash) == ["newer", "older"])
+    }
+
     private func sampleAsset(
         hash: String,
         name: String = "Wallpaper",
@@ -93,5 +215,23 @@ struct RecentsStoreTests {
         try await store.push(first)
         #expect(await store.all().first == first)
         #expect(await store.all().count == 10)
+    }
+
+    @Test func removeAndClearDropEntries() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try RecentsStore(rootURL: root)
+        let a = WallpaperID()
+        let b = WallpaperID()
+        try await store.push(a)
+        try await store.push(b)
+        try await store.remove(a)
+        #expect(await store.all() == [b])
+        try await store.clear()
+        #expect(await store.all().isEmpty)
+
+        // Clearing persists: a reopened store stays empty.
+        let reopened = try RecentsStore(rootURL: root)
+        #expect(await reopened.all().isEmpty)
     }
 }
