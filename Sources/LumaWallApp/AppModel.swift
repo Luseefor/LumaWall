@@ -1376,13 +1376,16 @@ private enum DisplayOcclusion {
         var fullscreen: Set<DisplayID> = []
         for display in displays {
             let rects = windows.map(\.rect)
-            if ScreenGeometry.isCovered(screen: display.frame, windows: rects) {
+            // Require near-total occlusion before auto-pausing (see
+            // PlaybackPolicyThresholds). Lower values flap pause/resume on
+            // maximized windows with menu bar/dock visible (~96% coverage).
+            if ScreenGeometry.isCovered(screen: display.frame, windows: rects, threshold: PlaybackPolicyThresholds.occlusionCovered) {
                 covered.insert(display.displayID)
             }
             let ownsFullscreen = windows.contains { window in
-                ScreenGeometry.coverageRatio(screen: display.frame, windows: [window.rect]) >= 0.98
-                    && abs(window.rect.width - display.frame.width) < 4
-                    && abs(window.rect.height - display.frame.height) < 4
+                ScreenGeometry.coverageRatio(screen: display.frame, windows: [window.rect]) >= PlaybackPolicyThresholds.fullscreenCoverage
+                    && abs(window.rect.width - display.frame.width) < PlaybackPolicyThresholds.fullscreenWidthTolerance
+                    && abs(window.rect.height - display.frame.height) < PlaybackPolicyThresholds.fullscreenHeightTolerance
             }
             if ownsFullscreen {
                 fullscreen.insert(display.displayID)

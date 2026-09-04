@@ -17,6 +17,18 @@ enum PlaybackPolicy: Int, Comparable {
     /// as paused so the renderer stops burning battery.
     static let brightnessPauseThreshold: Float = 0.05
 
+    /// Mirrors of `LumaWallCore.PlaybackPolicyThresholds` (the extension cannot
+    /// import LumaWallCore). Keep in sync — drift reintroduces per-host
+    /// pause/resume divergence.
+    ///
+    /// Tier mapping note: this host has 4 tiers (no `.staticFrame`); the app
+    /// host has 5. `.minimal` plays motion on both hosts (reduced budget here,
+    /// reduced budget + lower-res variant selection). `staticOnBattery` maps to
+    /// `.paused` here (hold last frame) vs `.staticFrame` in-app (show poster).
+    /// Both are still UX; do not "fix" one side without updating the other + tests.
+    static let batteryCriticalLevel = 10
+    static let batteryLowLevel = 20
+
     /// Evaluate all conditions and return the most restrictive applicable policy.
     ///
     /// `alwaysPauseDesktop`: when true, wallpaper only plays on the lock screen.
@@ -54,7 +66,7 @@ enum PlaybackPolicy: Int, Comparable {
         // --- paused tier ---
         if userPaused { worst = max(worst, .paused) }
         if thermalState == .critical { worst = max(worst, .paused) }
-        if batteryLevel < 10 { worst = max(worst, .paused) }
+        if batteryLevel < Self.batteryCriticalLevel { worst = max(worst, .paused) }
         if activityState.contains("suspended") { worst = max(worst, .paused) }
         if presentationMode == "idle", !screenSaverIsOurs { worst = max(worst, .paused) }
         if isGameModeActive { worst = max(worst, .paused) }
@@ -86,7 +98,7 @@ enum PlaybackPolicy: Int, Comparable {
             case "staticOnBattery":
                 worst = max(worst, .paused)
             default:
-                if batteryLevel < 20 {
+                if batteryLevel < Self.batteryLowLevel {
                     worst = max(worst, .minimal)
                 } else {
                     worst = max(worst, .reduced)
