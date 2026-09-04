@@ -69,8 +69,18 @@ final class OverlayWallpaperEngine {
     }
 
     private func activate(_ asset: WallpaperAsset, on displayID: DisplayID, composition: DisplayComposition) throws {
-        guard let screen = displays.screen(for: displayID),
-              let connected = displays.display(id: displayID) else {
+        // Refresh on cache miss: after a join/cut the cached ConnectedDisplay
+        // list is stale, and throwing missingDisplay here (then showing an
+        // alert) is the "glitches when display is joined or cut off" path.
+        // A live lookup must consult the refreshed topology.
+        var screen = displays.screen(for: displayID)
+        var connected = displays.display(id: displayID)
+        if screen == nil || connected == nil {
+            let fresh = displays.refresh()
+            screen = screen ?? NSScreen.screens.first { DisplayCoordinator.stableID(for: $0) == displayID }
+            connected = connected ?? fresh.first { $0.displayID == displayID }
+        }
+        guard let screen, let connected else {
             throw EngineError.missingDisplay
         }
 

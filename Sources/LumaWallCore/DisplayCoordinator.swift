@@ -84,6 +84,12 @@ public final class DisplayCoordinator {
         guard cgID != 0 else { return nil }
         let frame = screen.frame
         let scale = screen.backingScaleFactor
+        // NOTE: NSScreen.main follows the key window (whichever display hosts the
+        // focused window), NOT the menu-bar / primary display. Using it as "main"
+        // makes "Apply to Main Display" jump between monitors as focus changes —
+        // reported as "when i put one it goes another". The primary display is
+        // CGMainDisplayID() (equivalently NSScreen.screens[0]).
+        let mainCGID = CGMainDisplayID()
         return ConnectedDisplay(
             displayID: stableID(for: screen),
             name: screen.localizedName,
@@ -91,7 +97,7 @@ public final class DisplayCoordinator {
             pixelSize: CGSize(width: frame.width * scale, height: frame.height * scale),
             scale: scale,
             refreshRate: screen.maximumFramesPerSecond.doubleValue,
-            isMain: screen == NSScreen.main,
+            isMain: cgID == mainCGID,
             cgDisplayID: cgID
         )
     }

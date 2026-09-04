@@ -6,30 +6,21 @@ import ImageIO
 /// or concurrent acquires for different displays will race and a renderer
 /// can end up initialized with the wrong monitor's video.
 ///
-/// Falls back to the first video in the library, then bundle resources, so
-/// the picker fallback path still has something to display.
+/// Returns nil when the exact choice is unavailable. Callers show a static
+/// gradient fallback in that case. Deliberately NO fallback to "first video
+/// in library": that masked deployment/scan races by showing the WRONG
+/// wallpaper on the display ("when i put one it goes another").
 func findVideoURL(forChoice videoID: String?) -> URL? {
-    if let videoID,
-       let url = VideoLibrary.shared.videoURL(for: videoID),
-       FileManager.default.fileExists(atPath: url.path) {
-        return url
-    }
-
-    if let first = VideoLibrary.shared.entries.first {
-        let url = VideoLibrary.shared.videoURL(for: first)
-        if FileManager.default.fileExists(atPath: url.path) {
-            return url
+    guard let videoID,
+          let url = VideoLibrary.shared.videoURL(for: videoID),
+          FileManager.default.fileExists(atPath: url.path)
+    else {
+        if videoID != nil {
+            extensionLog("  [VideoDiscovery] no file for choice \(videoID ?? "nil") — returning nil (no wrong-video fallback)")
         }
+        return nil
     }
-
-    let videoExtensions = ["mp4", "mov", "m4v"]
-    for ext in videoExtensions {
-        if let url = Bundle.main.url(forResource: "wallpaper", withExtension: ext) {
-            return url
-        }
-    }
-
-    return nil
+    return url
 }
 
 /// Compatibility wrapper for callers without a per-context choice (snapshot
