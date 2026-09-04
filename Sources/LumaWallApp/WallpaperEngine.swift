@@ -157,12 +157,36 @@ final class OverlayWallpaperEngine {
     }
 
     func reconcileSharedDecoders() {
-        for session in sessions.values {
-            session.detachSharedHub()
-        }
+        // Incremental reconcile: the old code detached EVERY session on each
+        // apply, destroying and recreating the shared hub per display added.
+        // Each detach cleared layer.contents (black flash) and reset playback,
+        // so applying to N displays flickered N times. Only touch sessions
+        // whose sharing state actually changed.
         var groups: [String: [DesktopVideoSession]] = [:]
         for session in sessions.values {
             groups[session.mediaKey, default: []].append(session)
+        }
+        var desiredHubKey: [ObjectIdentifier: String?] = [:]
+        for session in sessions.values {
+            let group = groups[session.mediaKey] ?? []
+            desiredHubKey[ObjectIdentifier(session)] = group.count >= 2 ? session.mediaKey : nil
+        }
+        var alreadyCorrect = true
+        for session in sessions.values {
+            let want = desiredHubKey[ObjectIdentifier(session)] ?? nil
+            if session.sharedHubKey != want {
+                alreadyCorrect = false
+                break
+            }
+        }
+        if alreadyCorrect {
+            for (id, session) in sessions {
+                session.apply(tier: tiers[id] ?? .full)
+            }
+            return
+        }
+        for session in sessions.values {
+            session.detachSharedHub()
         }
         for (_, group) in groups {
             if group.count >= 2, let url = group.first?.asset.mediaURL {
@@ -542,6 +566,10 @@ final class DesktopVideoSession {
         player.pause()
         looper = nil
         root.playerLayer.player = nil
+    }
+
+    var sharedHubKey: String? {
+        sharedHub?.key
     }
 
     func detachSharedHub() {
