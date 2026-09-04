@@ -398,9 +398,13 @@ final class DesktopVideoSession {
 
     func relayout(screen: NSScreen, connected: ConnectedDisplay) {
         displayPixelSize = connected.pixelSize
-        let frame = screen.frame
-        window.setFrame(frame, display: true)
-        root.bounds = CGRect(origin: .zero, size: frame.size)
+        // Use the refreshed ConnectedDisplay frame as the single source of truth
+        // for window geometry. screen.frame (live) and connected.frame (cached)
+        // can disagree after a mode change / join / cut; mixing them (window from
+        // one, media crop from the other) rendered the video half off-screen.
+        // The NSScreen is still needed for poster assignment by callers.
+        window.setFrame(connected.frame, display: true)
+        root.bounds = CGRect(origin: .zero, size: connected.frame.size)
         root.apply(composition: composition, poster: asset.posterURL, displayFrame: connected.frame)
     }
 

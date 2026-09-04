@@ -148,6 +148,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         var scaleFactor: CGFloat = 2.0
         var isPreview = false
         var displayID: UInt32?
+        var didExtractGeometry = false
         if let reqObj = request as? NSObject {
             let mirror = Mirror(reflecting: reqObj)
             for child in mirror.children {
@@ -158,6 +159,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                         for destProp in destMirror.children {
                             if destProp.label == "size", let size = destProp.value as? CGSize {
                                 destSize = size
+                                didExtractGeometry = true
                             } else if destProp.label == "scaleFactor", let sf = destProp.value as? CGFloat {
                                 scaleFactor = sf
                             } else if destProp.label == "directDisplayID", let did = destProp.value as? UInt32 {
@@ -172,6 +174,18 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                         }
                     }
                 }
+            }
+        }
+        // Mirror layout is private and can shift between OS versions. If it failed,
+        // fall back to the live display's pixel size instead of a hardcoded 1440p —
+        // a wrong-sized root layer renders into a sub-region (half off-screen).
+        if !didExtractGeometry, let did = displayID, CGDisplayPixelsWide(did) > 0 {
+            let w = CGFloat(CGDisplayPixelsWide(did))
+            let h = CGFloat(CGDisplayPixelsHigh(did))
+            // destSize is in points; derive it from pixels / scale when possible.
+            if w > 0, h > 0 {
+                destSize = CGSize(width: w / max(scaleFactor, 1), height: h / max(scaleFactor, 1))
+                extensionLog("  [acquire] geometry Mirror missed — fell back to live display \(did): \(destSize) @\(scaleFactor)x")
             }
         }
         // Extract choice configuration and files from descriptor via Mirror traversal
