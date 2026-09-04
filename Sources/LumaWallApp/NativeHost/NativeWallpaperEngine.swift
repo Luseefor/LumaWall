@@ -11,6 +11,11 @@ final class NativeWallpaperEngine {
     private var active: [DisplayID: (WallpaperID, DisplayComposition)] = [:]
     private var tiers: [DisplayID: PlaybackTier] = [:]
     private var libraryByID: [WallpaperID: WallpaperAsset] = [:]
+    /// Last (cgDisplayID → entryID) map actually written to Index.plist.
+    /// Restores that resolve to the identical map skip the plist rewrite +
+    /// WallpaperAgent kill — those are what black-flash every display on a
+    /// join/cut burst or redundant refresh.
+    private var lastWrittenMap: [UInt32: String] = [:]
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
         self.displays = displays
@@ -48,6 +53,7 @@ final class NativeWallpaperEngine {
         nativeHostLog.info("apply: \(asset.name, privacy: .public) → display \(displayID.rawValue, privacy: .public)")
         libraryByID[asset.id] = asset
         active[displayID] = (asset.id, composition)
+        lastWrittenMap[connected.cgDisplayID] = entry.id
         try await assignments.upsert(
             DisplayAssignment(displayID: displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
         )
@@ -66,6 +72,7 @@ final class NativeWallpaperEngine {
         libraryByID[asset.id] = asset
         for display in connected {
             active[display.displayID] = (asset.id, composition)
+            lastWrittenMap[display.cgDisplayID] = entry.id
         }
         try await assignments.upsert(connected.map {
             DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
@@ -75,12 +82,16 @@ final class NativeWallpaperEngine {
     func clear(_ displayID: DisplayID) async throws {
         active.removeValue(forKey: displayID)
         tiers.removeValue(forKey: displayID)
+        if let cg = displays.display(id: displayID)?.cgDisplayID {
+            lastWrittenMap.removeValue(forKey: cg)
+        }
         try await assignments.clear(displayID: displayID)
     }
 
     func clearAll() async throws {
         active.removeAll()
         tiers.removeAll()
+        lastWrittenMap.removeAll()
         try await assignments.clearAll()
     }
 
@@ -117,8 +128,14 @@ final class NativeWallpaperEngine {
             nativeHostLog.info("restore: nothing to assign")
             return
         }
+        let fingerprint = map.mapValues(\.id)
+        if fingerprint == lastWrittenMap {
+            nativeHostLog.info("restore: assignments unchanged — skipping Index.plist rewrite + agent restart")
+            return
+        }
         do {
             try NativeWallpaperAssignmentService.apply(assignments: map)
+            lastWrittenMap = fingerprint
             nativeHostLog.info("restore: assigned \(map.count) display(s)")
         } catch {
             nativeHostLog.error("restore: assignment failed: \(error, privacy: .public)")

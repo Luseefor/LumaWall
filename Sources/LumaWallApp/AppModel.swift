@@ -699,6 +699,7 @@ final class AppModel {
     }
 
     func refreshDisplays() {
+        displayRefreshWorkItem?.cancel()
         displays = displayCoordinator.refresh()
         refreshActive()
         Task {
@@ -706,6 +707,15 @@ final class AppModel {
             refreshActive()
             applyPlaybackPolicy()
         }
+    }
+
+    private var displayRefreshWorkItem: DispatchWorkItem?
+
+    private func scheduleDebouncedDisplayRefresh(delay: TimeInterval = 0.6) {
+        displayRefreshWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.refreshDisplays() }
+        displayRefreshWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func startPlaylistRotation(
@@ -1001,7 +1011,10 @@ final class AppModel {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.refreshDisplays() }
+            // didChangeScreenParameters fires in bursts during join/cut/mode
+            // probes. Restoring on every fire rewrote Index.plist + killall'd
+            // WallpaperAgent repeatedly → visible glitch loop. Debounce.
+            Task { @MainActor in self?.scheduleDebouncedDisplayRefresh() }
         }
     }
 
