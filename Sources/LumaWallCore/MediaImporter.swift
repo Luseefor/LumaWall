@@ -31,7 +31,7 @@ public struct ImportOutcome: Sendable {
 }
 
 public actor MediaImporter {
-    public enum ImportError: LocalizedError {
+    public enum ImportError: LocalizedError, Equatable {
         case noVideoTrack
         case invalidDuration
         case unsupportedMedia
@@ -53,7 +53,18 @@ public actor MediaImporter {
 
     public func inspect(_ sourceURL: URL) async throws -> ImportInspection {
         let asset = AVURLAsset(url: sourceURL)
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+        let videoTracks: [AVAssetTrack]
+        do {
+            videoTracks = try await asset.loadTracks(withMediaType: .video)
+        } catch {
+            // AVFoundation surfaces unreadable media as a raw AVError ("Cannot
+            // Open"); prefer the friendly message when the file itself exists.
+            if FileManager.default.fileExists(atPath: sourceURL.path) {
+                throw ImportError.unsupportedMedia
+            }
+            throw error
+        }
+        guard let track = videoTracks.first else {
             throw ImportError.noVideoTrack
         }
         let duration = CMTimeGetSeconds(try await asset.load(.duration))
