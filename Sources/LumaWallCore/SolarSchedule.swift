@@ -41,7 +41,16 @@ public enum SolarSchedule: Sendable {
         let cosH = (cos(90.833 * .pi / 180) - (sinDec * sin(latitude * .pi / 180)))
             / (cosDec * cos(latitude * .pi / 180))
         guard cosH >= -1, cosH <= 1 else {
-            return rising ? 0 : 24 * 60
+            // Polar edge: cosH > 1 means the sun never rises (polar night),
+            // cosH < -1 means it never sets (polar day). The old code returned
+            // rise=0/set=1440 in both cases, reporting full daylight through
+            // polar night. Return a degenerate pair that reads correctly on
+            // both branches of isDaylight instead.
+            if cosH > 1 {
+                return rising ? 24 * 60 : 0
+            } else {
+                return rising ? 0 : 24 * 60
+            }
         }
         var h = rising
             ? 360 - (acos(cosH) * 180 / .pi)
