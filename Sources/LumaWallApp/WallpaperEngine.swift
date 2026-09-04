@@ -517,8 +517,9 @@ final class DesktopVideoSession {
     func releaseDecoderNow() {
         decoderReleaseWorkItem?.cancel()
         decoderReleaseWorkItem = nil
-        readinessObservation?.invalidate()
-        readinessObservation = nil
+        // Keep the readiness observation alive: clearing it permanently (old
+        // behaviour) meant the next decoder never flipped the layer visible
+        // again → stuck black after "Clear RAM" until re-apply.
         detachSharedHub()
         player.pause()
         looper = nil
@@ -561,9 +562,12 @@ final class DesktopVideoSession {
     private func scheduleDecoderRelease(after delay: TimeInterval) {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            if let sharedHub {
-                sharedHub.unload()
-                decoderIsLoaded = false
+            if sharedHub != nil {
+                // Do NOT unload() the shared hub here: unload() empties its
+                // player (replaceCurrentItem(nil)), so the next play() resumed
+                // a dead pipeline → black until full re-create. Shared decoders
+                // stay paused with the last frame retained; memory is reclaimed
+                // by teardown / releaseWorkingMemory instead.
                 return
             }
             player.pause()
