@@ -153,14 +153,3 @@ enum NativeWallpaperDeployment {
         }
     }
 }
-
-enum PathSafety {
-    static func isValidEntryID(_ id: String) -> Bool { UUID(uuidString: id) != nil }
-
-    static func isSafeComponent(_ name: String) -> Bool {
-        if name.isEmpty || name == "." || name == ".." { return false }
-        if name.contains("/") || name.contains("\\") { return false }
-        if name.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) { return false }
-        return (name as NSString).lastPathComponent == name
-    }
-}
