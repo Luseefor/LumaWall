@@ -9,34 +9,40 @@ final class OverlayWallpaperEngine {
     private let assignments: AssignmentStore
     private var sessions: [DisplayID: DesktopVideoSession] = [:]
     private var tiers: [DisplayID: PlaybackTier] = [:]
-    private var recoveryWorkItems: [DispatchWorkItem] = []
+    // Observer tokens + pending work are touched on MainActor during life, but
+    // nonisolated deinit must also reach them. nonisolated(unsafe) with
+    // init-once/deinit-once discipline (mutations otherwise happen on MainActor
+    // while the instance is alive; deinit runs exclusively after last release).
+    nonisolated(unsafe) private var recoveryWorkItems: [DispatchWorkItem] = []
+    nonisolated(unsafe) private var notificationTokens: [NSObjectProtocol] = []
+    nonisolated(unsafe) private var workspaceTokens: [NSObjectProtocol] = []
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
         self.displays = displays
         self.assignments = assignments
-        NotificationCenter.default.addObserver(
+        notificationTokens.append(NotificationCenter.default.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.scheduleSurfaceRecovery() }
-        }
-        NotificationCenter.default.addObserver(
+        })
+        notificationTokens.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.rebuildGeometry() }
-        }
+        })
         let workspace = NSWorkspace.shared.notificationCenter
-        workspace.addObserver(
+        workspaceTokens.append(workspace.addObserver(
             forName: NSWorkspace.screensDidWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.scheduleSurfaceRecovery() }
-        }
-        workspace.addObserver(
+        })
+        workspaceTokens.append(workspace.addObserver(
             forName: NSWorkspace.didLaunchApplicationNotification,
             object: nil,
             queue: .main
@@ -44,6 +50,18 @@ final class OverlayWallpaperEngine {
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             guard app?.bundleIdentifier == "com.apple.finder" || app?.bundleIdentifier == "com.apple.dock" else { return }
             Task { @MainActor in self?.scheduleSurfaceRecovery() }
+        })
+    }
+
+    deinit {
+        for token in notificationTokens {
+            NotificationCenter.default.removeObserver(token)
+        }
+        for token in workspaceTokens {
+            NSWorkspace.shared.notificationCenter.removeObserver(token)
+        }
+        for work in recoveryWorkItems {
+            work.cancel()
         }
     }
 

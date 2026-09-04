@@ -11,12 +11,27 @@ final class GameModeMonitor {
     func start() {
         guard token == NOTIFY_TOKEN_INVALID else { return }
         var registered = NOTIFY_TOKEN_INVALID
+        // notify_register_dispatch invokes the block off-actor. Hop back to
+        // MainActor before touching isActive/onChange (Swift 6 race otherwise).
         let status = notify_register_dispatch(Self.name, &registered, DispatchQueue.main) { [weak self] token in
-            self?.update(token: token)
+            Task { @MainActor in self?.update(token: token) }
         }
         guard status == NOTIFY_STATUS_OK else { return }
         token = registered
         update(token: registered)
+    }
+
+    /// Cancel the notify registration. Call on teardown; also guards `deinit`.
+    func stop() {
+        guard token != NOTIFY_TOKEN_INVALID else { return }
+        notify_cancel(token)
+        token = NOTIFY_TOKEN_INVALID
+    }
+
+    deinit {
+        if token != NOTIFY_TOKEN_INVALID {
+            notify_cancel(token)
+        }
     }
 
     private func update(token: Int32) {

@@ -120,6 +120,7 @@ final class AppModel {
     private let gameModeMonitor = GameModeMonitor()
     private var didAdvancePlaylistOnLogin = false
     private var lastPlaylistWakeAdvance: Date?
+    private var willTerminateObserver: NSObjectProtocol?
 
     struct PlaylistEditorState: Identifiable {
         var id: PlaylistID
@@ -635,6 +636,47 @@ final class AppModel {
         ) { _ in
             CrashMonitor.markCleanShutdown()
         }
+        willTerminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.shutdown() }
+        }
+    }
+
+    /// Invalidate timers, cancel pending work, and remove observers.
+    /// Called on termination; also the safety net for previews/tests that
+    /// recreate the model (which previously leaked all of the below).
+    func shutdown() {
+        playlistTimer?.invalidate()
+        statsTimer?.invalidate()
+        dayNightTimer?.invalidate()
+        coverageTimer?.invalidate()
+        playlistTimer = nil
+        statsTimer = nil
+        dayNightTimer = nil
+        coverageTimer = nil
+        displayRefreshWorkItem?.cancel()
+        displayRefreshWorkItem = nil
+        gameModeMonitor.stop()
+        let center = NotificationCenter.default
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        let distributedCenter = DistributedNotificationCenter.default()
+        for observer in [appearanceObserver, reduceMotionObserver, screenObserver, willTerminateObserver].compactMap({ $0 }) {
+            center.removeObserver(observer)
+        }
+        // Tokens originate from default, workspace, and distributed centers;
+        // removing from a center that doesn't own the token is a harmless no-op.
+        for observer in automationObservers + coverageObservers + lockObservers + powerObservers {
+            center.removeObserver(observer)
+            workspaceCenter.removeObserver(observer)
+            distributedCenter.removeObserver(observer)
+        }
+        automationObservers.removeAll()
+        coverageObservers.removeAll()
+        lockObservers.removeAll()
+        powerObservers.removeAll()
     }
 
     func copyCrashReport(_ report: CrashReport) {

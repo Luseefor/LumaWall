@@ -38,15 +38,25 @@ public struct ConnectedDisplay: Identifiable, Equatable, Hashable, Sendable {
 @MainActor
 public final class DisplayCoordinator {
     public private(set) var displays: [ConnectedDisplay] = []
+    // Tokens are non-Sendable; storage is nonisolated(unsafe) so nonisolated
+    // deinit can remove the observer. Written once in init, read once in
+    // deinit — no concurrent access.
+    nonisolated(unsafe) private var screenParametersObserver: NSObjectProtocol?
 
     public init() {
         refresh()
-        NotificationCenter.default.addObserver(
+        screenParametersObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
+        }
+    }
+
+    deinit {
+        if let token = screenParametersObserver {
+            NotificationCenter.default.removeObserver(token)
         }
     }
 
@@ -68,7 +78,7 @@ public final class DisplayCoordinator {
         NSScreen.screens.first { Self.stableID(for: $0) == id }
     }
 
-    public static func stableID(for screen: NSScreen) -> DisplayID {
+    public static nonisolated func stableID(for screen: NSScreen) -> DisplayID {
         let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         let cgID = CGDirectDisplayID(number?.uint32Value ?? 0)
         if let uuid = CGDisplayCreateUUIDFromDisplayID(cgID)?.takeRetainedValue() {
