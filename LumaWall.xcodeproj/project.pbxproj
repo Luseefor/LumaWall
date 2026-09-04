@@ -14,8 +14,10 @@
 		0ED8B62E42030A5CD5B6FC2E /* AutomationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB67E20FE99BF95F6C7B5362 /* AutomationStore.swift */; };
 		10FF16D1BC296A5D080BCA5D /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 289AC19257F838602572AE26 /* L10n.swift */; };
 		119C840EF8C784E5E5E7A90B /* SolarSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5521AC1A8196EE62B0D65EB0 /* SolarSchedule.swift */; };
+		1A1C9BD60650B07E7EC4F5E1 /* PosterCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671B9908FCE7C5727066DF3E /* PosterCache.swift */; };
 		1A4BBB4364D72A7820895BE6 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26E3B368D5F4F600032F2BB7 /* AppModel.swift */; };
 		1AD7B4046F122A9D54F1FC22 /* BatteryMediaVariant.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F008AE58768A26D058DE69 /* BatteryMediaVariant.swift */; };
+		1ED15E1E38560FCE64A7CEA4 /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1E3923CC90EF89D2215250F /* PathSafety.swift */; };
 		2005D320EE4DB3C6E61F5DC2 /* NativeWallpaperDeployment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF64A3AE50DDE3102971EF2 /* NativeWallpaperDeployment.swift */; };
 		231A4C0C03E085872F103491 /* PlaylistPlaybackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7BE0D955C7F0BE8DF866CF /* PlaylistPlaybackStore.swift */; };
 		24B0B1B525BA760C4DD60285 /* LumaWallWallpaper.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = B5F138BA1F2F0179AE357E78 /* LumaWallWallpaper.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -177,6 +179,7 @@
 		5FC740A5E83119D4F75B4580 /* ShuffleController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShuffleController.swift; sourceTree = "<group>"; };
 		636191B69905B65C3526F8DB /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		65C36BD3D4CBB93BA9F8E64F /* SettingsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsProvider.swift; sourceTree = "<group>"; };
+		671B9908FCE7C5727066DF3E /* PosterCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PosterCache.swift; sourceTree = "<group>"; };
 		68C5D43D163EAB6096ACD99C /* SystemServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemServices.swift; sourceTree = "<group>"; };
 		6AF64A3AE50DDE3102971EF2 /* NativeWallpaperDeployment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperDeployment.swift; sourceTree = "<group>"; };
 		6B49861145EBB96C948C50C8 /* SnapshotCreation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotCreation.swift; sourceTree = "<group>"; };
@@ -209,6 +212,7 @@
 		DEAC344A725794E789B8517E /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
 		DF4AC82CC46B940190BC7779 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		DF77B5569F11B32DEC4DDB6C /* RecentsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsStore.swift; sourceTree = "<group>"; };
+		E1E3923CC90EF89D2215250F /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
 		E29310CD5FF9A5DCEFFF01BB /* VariantSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariantSelection.swift; sourceTree = "<group>"; };
 		E615B895EBC9A29191A4CC3C /* NativeWallpaperAssignmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperAssignmentService.swift; sourceTree = "<group>"; };
 		E754FFABC4851272B5B28410 /* NativeWallpaperAssignmentStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperAssignmentStoreTests.swift; sourceTree = "<group>"; };
@@ -271,6 +275,7 @@
 				48A30AF2E839F9A4C376A239 /* LumaWallApp.swift */,
 				44DFFDD792BBCDD731E0C30B /* MenuBarIcon.swift */,
 				A63748F726DA7BB383A7158A /* MenuBarPopover.swift */,
+				671B9908FCE7C5727066DF3E /* PosterCache.swift */,
 				0CF12B9E3E2FCE2FADFDA7E2 /* SetLumaWallWallpaperIntent.swift */,
 				004C5CE2B0390C8A96316AD1 /* SharedPlaybackHub.swift */,
 				6E4E5CBB3184C2D063537A13 /* WallpaperEngine.swift */,
@@ -290,6 +295,7 @@
 				0B19454371AFEB8BC36A88B6 /* EnergyLogStore.swift */,
 				DEAC344A725794E789B8517E /* LibraryStore.swift */,
 				F4307418F872C77E79530286 /* MediaImporter.swift */,
+				E1E3923CC90EF89D2215250F /* PathSafety.swift */,
 				ABDCE412E62E7FE35E60E348 /* PlaybackFrameRate.swift */,
 				5D7BE0D955C7F0BE8DF866CF /* PlaylistPlaybackStore.swift */,
 				5D7CFDF4DCB161B1453D1439 /* PlaylistSchedule.swift */,
@@ -548,6 +554,7 @@
 				2005D320EE4DB3C6E61F5DC2 /* NativeWallpaperDeployment.swift in Sources */,
 				CA96B24654E0DBC8EE91D66B /* NativeWallpaperEngine.swift in Sources */,
 				75C46C08A6DBEA592E04ADBA /* NativeWallpaperPrefsBridge.swift in Sources */,
+				1A1C9BD60650B07E7EC4F5E1 /* PosterCache.swift in Sources */,
 				2C562986A43830A14F700F8F /* SetLumaWallWallpaperIntent.swift in Sources */,
 				ABFC54D7CB6FA7846C6301FB /* SharedPlaybackHub.swift in Sources */,
 				F9A25F4027A6362D426CC6B5 /* WallpaperEngine.swift in Sources */,
@@ -570,6 +577,7 @@
 				F7327F9028585F0432488052 /* EnergyLogStore.swift in Sources */,
 				4A9D27798A99323D694E602F /* LibraryStore.swift in Sources */,
 				711792427B0487BB41AD746E /* MediaImporter.swift in Sources */,
+				1ED15E1E38560FCE64A7CEA4 /* PathSafety.swift in Sources */,
 				488AD46E56274ACDC0A14FB4 /* PlaybackFrameRate.swift in Sources */,
 				231A4C0C03E085872F103491 /* PlaylistPlaybackStore.swift in Sources */,
 				5FF61F1F7DCB9C91983A5B67 /* PlaylistSchedule.swift in Sources */,
