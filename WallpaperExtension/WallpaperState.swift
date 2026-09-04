@@ -224,21 +224,24 @@ final class WallpaperState: Sendable {
 
     /// Tear down (stop renderer + invalidate context) every display slot using the
     /// given videoID — the video was removed from the library, so its slots are
-    /// genuinely gone (not a reuse). Returns affected displayIDs.
+    /// genuinely gone (not a reuse). Returns the removed surface keys so callers
+    /// can also cancel pending teardown timers (otherwise the timer leaks 15s
+    /// then no-ops on an already-removed key).
     @discardableResult
-    func removeContexts(forVideoID videoID: String) -> [UInt32?] {
-        let removed = lock.withLock { state -> [ActiveWallpaper] in
+    func removeContexts(forVideoID videoID: String) -> [DisplayKey] {
+        let removed = lock.withLock { state -> [(DisplayKey, ActiveWallpaper)] in
             let matches = state.contexts.filter { $0.value.videoID == videoID }
             for (key, _) in matches {
                 state.contexts.removeValue(forKey: key)
             }
-            return Array(matches.values)
+            return Array(matches)
         }
-        for context in removed {
+        for (_, context) in removed {
             context.renderer?.stop()
             invalidateRemoteContext(context.caContext)
         }
-        return removed.map(\.displayID)
+        CATransaction.flush()
+        return removed.map(\.0)
     }
 
     // MARK: - WallpaperID ↔ display bridge (for per-display invalidate/teardown)
@@ -271,6 +274,10 @@ final class WallpaperState: Sendable {
         guard let removed else { return false }
         removed.renderer?.stop()
         invalidateRemoteContext(removed.caContext)
+        // Push the invalidation to the render server now; without a flush the
+        // reclaimed tree can stay resident in the WindowServer until an
+        // unrelated commit happens to flush it.
+        CATransaction.flush()
         return true
     }
 

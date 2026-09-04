@@ -709,14 +709,17 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Tear down only the contexts actually using this video — the video is gone
         // from the library, so these slots are genuinely dead (not a reuse). Other
         // displays may be playing different videos and must keep running.
-        let stoppedDisplays = WallpaperState.shared.removeContexts(forVideoID: videoID)
-        if !stoppedDisplays.isEmpty {
+        let removedKeys = WallpaperState.shared.removeContexts(forVideoID: videoID)
+        for key in removedKeys {
+            cancelTeardown(for: key)
+        }
+        if !removedKeys.isEmpty {
             if WallpaperState.shared.currentVideoID == videoID {
                 WallpaperState.shared.currentVideoID = nil
                 WallpaperState.shared.cachedThumbnailURL = nil
             }
             WallpaperPrefs.shared.updateCurrentVideo()
-            extensionLog("  [Remove] Stopped \(stoppedDisplays.count) renderer(s) for removed video")
+            extensionLog("  [Remove] Stopped \(removedKeys.count) renderer(s) for removed video")
         }
 
         // Invalidate Agent snapshots so Settings refreshes

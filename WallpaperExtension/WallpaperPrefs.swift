@@ -206,25 +206,17 @@ final class WallpaperPrefs: @unchecked Sendable {
     }
 
     /// Recompute playback policy and apply to all active renderers.
-    /// Uses ramp animation for occlusion transitions (desktop covered/uncovered).
-    private var previousDesktopOccluded = false
-    private var previousOccludedDisplays: Set<UInt32> = []
-    private var previousFullscreenDisplays: Set<UInt32> = []
-
+    /// Occlusion/fullscreen transitions apply INSTANTLY (no ramp): the 6s
+    /// ramp-down made covering/uncovering a window feel like broken slow-motion
+    /// pause/resume. Ramps are reserved for desktop↔lock transitions, which pass
+    /// animated explicitly from updateBody().
     private func applyPauseState() {
-        let occlusionChanged = desktopOccluded != previousDesktopOccluded
-            || occludedDisplays != previousOccludedDisplays
-            || fullscreenDisplays != previousFullscreenDisplays
-        previousDesktopOccluded = desktopOccluded
-        previousOccludedDisplays = occludedDisplays
-        previousFullscreenDisplays = fullscreenDisplays
-
         let state = WallpaperState.shared
         applyPolicies(
             presentationMode: state.presentationMode,
             activityState: state.activityState,
             powerState: PowerMonitor.shared.currentState,
-            animated: occlusionChanged,
+            animated: false,
         )
     }
 
