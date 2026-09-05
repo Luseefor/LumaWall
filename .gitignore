@@ -5,3 +5,5 @@ DerivedData/
 .derived/
 # Stray clone of the opencode-skills repo; not part of LumaWall.
 opencode-skills/
+# Local build outputs (including release.sh DMGs).
+dist/
