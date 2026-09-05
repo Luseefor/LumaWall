@@ -169,6 +169,67 @@ struct LibraryStoreTests {
         #expect(await store.diskUsageBytes() >= 4096)
     }
 
+    @Test func removeRefusesPathsOutsideEntryFolder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // Bystander file outside any entry folder; a corrupt mediaURL must
+        // never cause its deletion.
+        let outside = root.appendingPathComponent("precious.mov")
+        try Data(repeating: 1, count: 8).write(to: outside)
+        let siblingID = WallpaperID()
+        let siblingFolder = root.appendingPathComponent(siblingID.rawValue.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: siblingFolder, withIntermediateDirectories: true)
+
+        func asset(id: WallpaperID, hash: String, mediaURL: URL) -> WallpaperAsset {
+            WallpaperAsset(
+                id: id, name: "x", mediaURL: mediaURL, duration: 1,
+                framesPerSecond: 30, pixelSize: CGSize(width: 640, height: 480),
+                contentHash: hash, containsAudio: false
+            )
+        }
+        let store = try LibraryStore(rootURL: root)
+        let escapeID = WallpaperID()
+        try await store.install(asset(id: escapeID, hash: "stray", mediaURL: outside))
+        let sibling = asset(id: siblingID, hash: "sibling", mediaURL: siblingFolder.appendingPathComponent("w.mov"))
+        try await store.install(sibling)
+
+        // Points outside the library root: index entry goes, file survives.
+        await #expect(throws: LibraryStore.StoreError.invalidLocation) {
+            try await store.remove(id: escapeID)
+        }
+        #expect(await store.asset(id: escapeID) == nil)
+        #expect(FileManager.default.fileExists(atPath: outside.path))
+
+        // Points at a sibling entry's folder: also refused.
+        let hijackID = WallpaperID()
+        try await store.install(asset(
+            id: hijackID, hash: "hijacker",
+            mediaURL: siblingFolder.appendingPathComponent("w.mov")
+        ))
+        await #expect(throws: LibraryStore.StoreError.invalidLocation) {
+            try await store.remove(id: hijackID)
+        }
+        #expect(FileManager.default.fileExists(atPath: siblingFolder.path))
+        #expect(LibraryStore.StoreError.invalidLocation.errorDescription?
+            .contains("outside the library") == true)
+    }
+
+    @Test func corruptLibraryIsQuarantinedNotSilentlyReset() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "not-json{{".write(
+            to: root.appendingPathComponent("Library.json"), atomically: true, encoding: .utf8
+        )
+
+        let store = try LibraryStore(rootURL: root)
+        #expect(await store.assets().isEmpty)
+        let leftovers = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        #expect(leftovers.contains { $0.lastPathComponent.hasPrefix("Library.json.corrupt-") })
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Library.json").path))
+    }
+
     @Test func mostUsedBreaksTiesByRecency() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

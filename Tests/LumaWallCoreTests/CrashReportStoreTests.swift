@@ -124,4 +124,28 @@ import Testing
         let reopened = try CrashReportStore(rootURL: root)
         #expect(reopened.reports().isEmpty)
     }
+
+    @Test func ingestTruncatesOversizedDumpFields() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumawall-crash-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try CrashReportStore(rootURL: root)
+        let longName = String(repeating: "S", count: 500)
+        let frames = (0..<300).map { "frame \($0)" }.joined(separator: "\n")
+        let dump = "\(longName)\n1700000000\n\(frames)\n"
+        try dump.write(
+            to: store.directoryURL.appendingPathComponent("raw.stack"),
+            atomically: true, encoding: .utf8
+        )
+
+        store.ingestRawDumps(appVersion: "1.0", osVersion: "26.0")
+        let reports = store.reports()
+        #expect(reports.count == 1)
+        #expect(reports[0].name.count <= CrashReportStore.maxDumpNameLength)
+        #expect(reports[0].backtrace.count <= CrashReportStore.maxDumpBacktraceLines)
+        // The dump file is consumed either way.
+        #expect(!FileManager.default.fileExists(
+            atPath: store.directoryURL.appendingPathComponent("raw.stack").path
+        ))
+    }
 }
