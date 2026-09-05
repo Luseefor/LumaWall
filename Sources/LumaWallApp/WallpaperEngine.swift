@@ -172,7 +172,9 @@ final class OverlayWallpaperEngine {
     }
 
     func dismantleSessions() {
-        for key in sessions.keys {
+        // Snapshot the keys: mutating the dictionary while iterating its live
+        // keys view corrupts the table (and every session/window it owns).
+        for key in Array(sessions.keys) {
             sessions.removeValue(forKey: key)?.tearDown()
         }
         tiers.removeAll()
@@ -320,7 +322,9 @@ final class OverlayWallpaperEngine {
 
     private func rebuildGeometry() {
         let connectedIDs = Set(displays.refresh().map(\.displayID))
-        for id in sessions.keys where !connectedIDs.contains(id) {
+        // Snapshot the keys: removing while iterating the live view corrupts
+        // the dictionary (see dismantleSessions).
+        for id in Array(sessions.keys) where !connectedIDs.contains(id) {
             sessions.removeValue(forKey: id)?.tearDown()
             tiers.removeValue(forKey: id)
         }
@@ -663,8 +667,12 @@ private extension PlaybackTier {
 }
 
 private final class DesktopSurfaceWindow: NSWindow {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
+    // AppKit queries these on its window list at any time (key recalculation
+    // during modal sessions, Spaces switches). They must never touch Swift
+    // executors or session state — a plain answer keeps the ObjC entry path
+    // thunk-free no matter how the SDK annotates NSWindow members.
+    override nonisolated var canBecomeKey: Bool { false }
+    override nonisolated var canBecomeMain: Bool { false }
 }
 
 private final class SessionRootView: NSView {
