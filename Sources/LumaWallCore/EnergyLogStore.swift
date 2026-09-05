@@ -91,13 +91,9 @@ public actor EnergyLogStore {
     private var snapshot = EnergyLogSnapshot()
 
     public init(rootURL: URL? = nil) throws {
-        let base = rootURL ?? FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0].appendingPathComponent("LumaWall", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let base = try StorePaths.appSupportBase(rootURL: rootURL)
         self.fileURL = base.appendingPathComponent("EnergyLog.json")
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder.lumaWall.decode(EnergyLogSnapshot.self, from: data) {
+        if let decoded: EnergyLogSnapshot = StoreIO.readJSON(from: fileURL, as: EnergyLogSnapshot.self) {
             snapshot = Self.pruned(decoded, now: .now)
         }
     }
@@ -167,8 +163,7 @@ public actor EnergyLogStore {
     }
 
     private func persist() throws {
-        let data = try JSONEncoder.lumaWall.encode(snapshot)
-        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try StoreIO.writeJSON(snapshot, to: fileURL)
     }
 
     private static func pruned(_ snapshot: EnergyLogSnapshot, now: Date) -> EnergyLogSnapshot {

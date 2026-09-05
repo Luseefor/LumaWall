@@ -1,14 +1,16 @@
 import Foundation
 
 public actor LibraryStore {
-    public enum StoreError: LocalizedError {
+    public enum StoreError: LocalizedError, Equatable {
         case duplicate(WallpaperAsset)
         case missingAsset
+        case invalidLocation
 
         public var errorDescription: String? {
             switch self {
             case let .duplicate(asset): "This video is already installed as “\(asset.name)”."
             case .missingAsset: "The wallpaper is no longer installed."
+            case .invalidLocation: "The wallpaper points outside the library and was not deleted from disk."
             }
         }
     }
@@ -18,14 +20,10 @@ public actor LibraryStore {
     private var assetsByID: [WallpaperID: WallpaperAsset] = [:]
 
     public init(rootURL: URL? = nil) throws {
-        let base = rootURL ?? FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0].appendingPathComponent("LumaWall", isDirectory: true)
+        let base = try StorePaths.appSupportBase(rootURL: rootURL)
         self.rootURL = base
         self.indexURL = base.appendingPathComponent("Library.json")
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        if let data = try? Data(contentsOf: indexURL),
-           let decoded = try? JSONDecoder.lumaWall.decode([WallpaperAsset].self, from: data) {
+        if let decoded: [WallpaperAsset] = StoreIO.readJSON(from: indexURL, as: [WallpaperAsset].self) {
             assetsByID = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
         }
     }
@@ -98,7 +96,17 @@ public actor LibraryStore {
     public func remove(id: WallpaperID) throws {
         guard let asset = assetsByID.removeValue(forKey: id) else { throw StoreError.missingAsset }
         try persist()
-        try? FileManager.default.removeItem(at: asset.mediaURL.deletingLastPathComponent())
+        // The media folder must be exactly this entry's own folder. A corrupt
+        // or hand-edited Library.json could otherwise point mediaURL at an
+        // arbitrary directory (or a sibling entry's folder) and this delete
+        // would wipe it. The index entry is already gone; refuse the disk
+        // delete loudly instead of silently honoring a bad path.
+        let folder = asset.mediaURL.deletingLastPathComponent().resolvingSymlinksInPath()
+        let expected = self.folder(for: id).resolvingSymlinksInPath()
+        guard folder == expected else {
+            throw StoreError.invalidLocation
+        }
+        try? FileManager.default.removeItem(at: folder)
     }
 
     public func folder(for id: WallpaperID) -> URL {
@@ -116,7 +124,6 @@ public actor LibraryStore {
 
     private func persist() throws {
         let values = assetsByID.values.sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
-        let data = try JSONEncoder.lumaWall.encode(values)
-        try data.write(to: indexURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try StoreIO.writeJSON(values, to: indexURL)
     }
 }

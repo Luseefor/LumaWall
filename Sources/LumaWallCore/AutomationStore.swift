@@ -88,10 +88,7 @@ public struct WallpaperAutomations: Codable, Equatable, Sendable {
         }
         let hour = calendar.component(.hour, from: date)
         if dayStartHour == nightStartHour { return true }
-        if dayStartHour < nightStartHour {
-            return hour >= dayStartHour && hour < nightStartHour
-        }
-        return hour >= dayStartHour || hour < nightStartHour
+        return Self.coversHour(hour, start: dayStartHour, end: nightStartHour)
     }
 
     public func allowsWeekday(at date: Date = .now, calendar: Calendar = .current) -> Bool {
@@ -104,6 +101,13 @@ public struct WallpaperAutomations: Codable, Equatable, Sendable {
         guard let start = doNotInterruptStartHour, let end = doNotInterruptEndHour else { return false }
         let hour = calendar.component(.hour, from: date)
         if start == end { return true }
+        return Self.coversHour(hour, start: start, end: end)
+    }
+
+    /// Half-open hour window `[start, end)`, wrapping past midnight when
+    /// `start > end`. Shared by the day/night and quiet-hours checks so the
+    /// overnight logic cannot drift between the two.
+    private static func coversHour(_ hour: Int, start: Int, end: Int) -> Bool {
         if start < end { return hour >= start && hour < end }
         return hour >= start || hour < end
     }
@@ -114,13 +118,9 @@ public actor AutomationStore {
     private var value = WallpaperAutomations()
 
     public init(rootURL: URL? = nil) throws {
-        let base = rootURL ?? FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0].appendingPathComponent("LumaWall", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let base = try StorePaths.appSupportBase(rootURL: rootURL)
         self.fileURL = base.appendingPathComponent("Automations.json")
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder.lumaWall.decode(WallpaperAutomations.self, from: data) {
+        if let decoded: WallpaperAutomations = StoreIO.readJSON(from: fileURL, as: WallpaperAutomations.self) {
             value = decoded
         }
     }
@@ -129,7 +129,6 @@ public actor AutomationStore {
 
     public func save(_ automations: WallpaperAutomations) throws {
         value = automations
-        let data = try JSONEncoder.lumaWall.encode(value)
-        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try StoreIO.writeJSON(value, to: fileURL)
     }
 }

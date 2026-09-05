@@ -37,13 +37,9 @@ public actor PlaylistStore {
     private var playlists: [PlaylistID: WallpaperPlaylist] = [:]
 
     public init(rootURL: URL? = nil) throws {
-        let base = rootURL ?? FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0].appendingPathComponent("LumaWall", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let base = try StorePaths.appSupportBase(rootURL: rootURL)
         self.fileURL = base.appendingPathComponent("Playlists.json")
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder.lumaWall.decode([WallpaperPlaylist].self, from: data) {
+        if let decoded: [WallpaperPlaylist] = StoreIO.readJSON(from: fileURL, as: [WallpaperPlaylist].self) {
             playlists = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
         }
     }
@@ -64,7 +60,6 @@ public actor PlaylistStore {
 
     private func persist() throws {
         let values = playlists.values.sorted { $0.createdAt > $1.createdAt }
-        let data = try JSONEncoder.lumaWall.encode(values)
-        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try StoreIO.writeJSON(values, to: fileURL)
     }
 }

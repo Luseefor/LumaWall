@@ -65,15 +65,15 @@ public struct CrashReport: Codable, Equatable, Identifiable, Sendable {
 /// Application Support and surfaced in Settings for the user to copy or clear.
 public final class CrashReportStore: @unchecked Sendable {
     public static let maxReports = 20
+    public static let maxDumpNameLength = 64
+    public static let maxDumpBacktraceLines = 256
 
     public let directoryURL: URL
     private let sentinelURL: URL
     private let queue = DispatchQueue(label: "app.lumawall.crashreports")
 
     public init(rootURL: URL? = nil) throws {
-        let base = rootURL ?? FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0].appendingPathComponent("LumaWall", isDirectory: true)
+        let base = try StorePaths.appSupportBase(rootURL: rootURL)
         directoryURL = base.appendingPathComponent("CrashReports", isDirectory: true)
         sentinelURL = directoryURL.appendingPathComponent("session.current")
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
@@ -110,9 +110,7 @@ public final class CrashReportStore: @unchecked Sendable {
                     detected = report
                 }
             }
-            if let data = try? JSONEncoder.lumaWall.encode(now) {
-                try? data.write(to: sentinelURL, options: .atomic)
-            }
+            StoreIO.tryWriteJSON(now, to: sentinelURL)
         }
         return detected
     }
@@ -144,6 +142,8 @@ public final class CrashReportStore: @unchecked Sendable {
     /// Converts raw signal-handler stack dumps (plain text, written with
     /// async-signal-safe calls at crash time) into structured reports.
     /// Dump format: line 1 signal name, line 2 unix timestamp, rest backtrace.
+    /// Lengths are capped: a corrupt multi-megabyte dump must not inflate a
+    /// persisted report or the Settings UI that renders it.
     public func ingestRawDumps(appVersion: String, osVersion: String) {
         queue.sync {
             let dumps = (try? FileManager.default.contentsOfDirectory(
@@ -154,14 +154,14 @@ public final class CrashReportStore: @unchecked Sendable {
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
                 guard lines.count >= 2 else { continue }
-                let name = lines[0].isEmpty ? "SIGNAL" : lines[0]
+                let name = lines[0].isEmpty ? "SIGNAL" : String(lines[0].prefix(Self.maxDumpNameLength))
                 let date = TimeInterval(lines[1]).map { Date(timeIntervalSince1970: $0) } ?? .now
                 let report = CrashReport(
                     date: date,
                     kind: .signal,
                     name: name,
                     reason: "The app was terminated by \(name).",
-                    backtrace: Array(lines.dropFirst(2)).filter { !$0.isEmpty },
+                    backtrace: Array(lines.dropFirst(2).lazy.filter { !$0.isEmpty }.prefix(Self.maxDumpBacktraceLines)),
                     appVersion: appVersion,
                     osVersion: osVersion
                 )
@@ -173,9 +173,8 @@ public final class CrashReportStore: @unchecked Sendable {
     // MARK: - Unsafe (must run on queue)
 
     private func unsafeSave(_ report: CrashReport) {
-        guard let data = try? JSONEncoder.lumaWall.encode(report) else { return }
         let url = directoryURL.appendingPathComponent("\(report.id.uuidString).crash.json")
-        try? data.write(to: url, options: .atomic)
+        StoreIO.tryWriteJSON(report, to: url)
         unsafePrune()
     }
 
