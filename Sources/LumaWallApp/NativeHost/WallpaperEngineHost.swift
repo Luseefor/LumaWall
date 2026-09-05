@@ -97,7 +97,13 @@ final class WallpaperEngine {
                 $0.isEnabled && (!$0.composition.usesDefaultCrop || $0.composition.spanningCanvas != nil)
             }
             if needsOverlay {
-                await overlay.restore(using: library)
+                // Split ownership: the overlay takes non-default displays
+                // (and leaves default-crop ones alone), the native host takes
+                // the default-crop ones. Either side touching the other's
+                // displays clobbers assignments (overlay posters) or leaks
+                // windows.
+                await overlay.restore(using: library, nativeHostActive: true)
+                await native.restore(using: library, onlyDefaultCrop: true)
             } else {
                 overlay.dismantleSessions()
                 await native.restore(using: library)

@@ -99,7 +99,10 @@ final class NativeWallpaperEngine {
         tiers[displayID] = tier
     }
 
-    func restore(using library: [WallpaperAsset]) async {
+    /// Restores persisted assignments through the system host. When the overlay
+    /// owns non-default displays (`onlyDefaultCrop`), those assignments are
+    /// left for the overlay engine — writing them here would fight it.
+    func restore(using library: [WallpaperAsset], onlyDefaultCrop: Bool = false) async {
         let snapshot = await assignments.current()
         let byID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         libraryByID = byID
@@ -110,6 +113,10 @@ final class NativeWallpaperEngine {
         for assignment in enabled {
             guard let wallpaperID = assignment.wallpaperID, let asset = byID[wallpaperID] else {
                 nativeHostLog.error("restore: wallpaper \(assignment.wallpaperID?.rawValue.uuidString ?? "nil", privacy: .public) not in library")
+                continue
+            }
+            if onlyDefaultCrop, (!assignment.composition.usesDefaultCrop
+                || assignment.composition.spanningCanvas != nil) {
                 continue
             }
             guard let display = connected.first(where: { $0.displayID == assignment.displayID }) else {

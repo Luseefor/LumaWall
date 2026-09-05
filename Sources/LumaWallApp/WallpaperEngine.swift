@@ -241,7 +241,7 @@ final class OverlayWallpaperEngine {
         return SharedPlaybackHub.activeDecoderCount + privateCount
     }
 
-    func restore(using library: [WallpaperAsset]) async {
+    func restore(using library: [WallpaperAsset], nativeHostActive: Bool = false) async {
         let snapshot = await assignments.current()
         let byID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         let connectedByID = Dictionary(uniqueKeysWithValues: displays.refresh().map { ($0.displayID, $0) })
@@ -272,6 +272,16 @@ final class OverlayWallpaperEngine {
         for assignment in restoredAssignments where assignment.isEnabled {
             guard let wallpaperID = assignment.wallpaperID, let asset = byID[wallpaperID] else { continue }
             guard connectedByID[assignment.displayID] != nil else { continue }
+            // In native mode the system host owns default-crop displays. The
+            // overlay must neither create sessions for them nor install system
+            // posters there: setDesktopImageURL rewrites the agent's Desktop
+            // entry to an Apple image choice, wiping the native video
+            // assignment (this left desktops showing stills/defaults).
+            if nativeHostActive, assignment.composition.usesDefaultCrop,
+               assignment.composition.spanningCanvas == nil {
+                dismantleSession(assignment.displayID)
+                continue
+            }
             synchronizedGroups[wallpaperID, default: []].append(assignment.displayID)
             if let session = sessions[assignment.displayID],
                session.asset.id == wallpaperID,
