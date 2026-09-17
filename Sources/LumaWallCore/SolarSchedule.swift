@@ -94,7 +94,12 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
     public func requestIfNeeded() {
         switch manager.authorizationStatus {
         case .notDetermined:
-            manager.requestAlwaysAuthorization()
+            // When-In-Use is all sunrise/sunset needs (one coarse fix), and it
+            // matches the declared plist keys + settings copy. Requesting Always
+            // here could never be granted (no Always usage-description key), so
+            // the status stayed `.notDetermined` and the system re-prompted on
+            // every launch.
+            manager.requestWhenInUseAuthorization()
         case .authorized, .authorizedAlways:
             manager.requestLocation()
         default:
