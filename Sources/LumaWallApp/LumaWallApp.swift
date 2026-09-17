@@ -2814,8 +2814,8 @@ extension PowerProfile {
         switch self {
         case .automatic: "Full fidelity on power, adaptive on battery."
         case .fullQuality: "Prefer source frame rate whenever possible."
-        case .batterySaver: "Use the lowest animated tier on battery."
-        case .staticOnBattery: "Hold a still frame until power returns."
+        case .batterySaver: "Always use the lowest animated tier."
+        case .staticOnBattery: "Hold a still frame until you switch back."
         }
     }
 

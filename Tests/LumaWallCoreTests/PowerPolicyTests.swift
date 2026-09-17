@@ -116,6 +116,24 @@ struct PowerPolicyTests {
         )) == .full)
     }
 
+    @Test func profilesApplyOnACPower() {
+        // Manual overrides stay usable on AC / battery-less desktops instead of
+        // silently resolving to .full ("nothing changes").
+        #expect(PlaybackPolicy.resolve(.init(profile: .batterySaver)) == .minimal)
+        #expect(PlaybackPolicy.resolve(.init(profile: .staticOnBattery)) == .staticFrame)
+        #expect(PlaybackPolicy.resolve(.init(profile: .fullQuality)) == .full)
+        #expect(PlaybackPolicy.resolve(.init(profile: .automatic)) == .full)
+    }
+
+    @Test func fullQualityOverridesLowPowerAndFairThermal() {
+        #expect(PlaybackPolicy.resolve(.init(profile: .fullQuality, lowPowerMode: true)) == .full)
+        #expect(PlaybackPolicy.resolve(.init(profile: .fullQuality, thermalState: .fair)) == .full)
+        // Hard protections still win over Full Quality.
+        #expect(PlaybackPolicy.resolve(.init(profile: .fullQuality, thermalState: .serious)) == .minimal)
+        #expect(PlaybackPolicy.resolve(.init(profile: .fullQuality, thermalState: .critical)) == .paused)
+        #expect(PlaybackPolicy.resolve(.init(profile: .fullQuality, userPaused: true)) == .paused)
+    }
+
     @Test func sessionLockPausesUnlessLiveOnLock() {
         #expect(PlaybackPolicy.resolve(.init(sessionIsLocked: true)) == .paused)
         // hideDesktopVideo without native lock support still pauses on lock.

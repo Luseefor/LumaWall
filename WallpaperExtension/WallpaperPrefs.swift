@@ -212,6 +212,10 @@ final class WallpaperPrefs: @unchecked Sendable {
     /// animated explicitly from updateBody().
     private func applyPauseState() {
         let state = WallpaperState.shared
+        // Prefs just changed (profile switch, pause toggle, occlusion update):
+        // re-read power now instead of trusting the ~30s poll cache, or the new
+        // profile evaluates against stale battery state and appears to do nothing.
+        PowerMonitor.shared.refreshNow()
         applyPolicies(
             presentationMode: state.presentationMode,
             activityState: state.activityState,

@@ -117,12 +117,21 @@ public enum PlaybackPolicy: PlaybackPolicyDeciding {
         if state.hideDesktopVideo { return .staticFrame }
         if state.thermalState == .critical || state.batteryPercent < PlaybackPolicyThresholds.batteryCritical { return .paused }
         if state.thermalState == .serious { return .minimal }
-        if state.isOnBattery {
-            switch state.profile {
-            case .fullQuality: break
-            case .batterySaver: return .minimal
-            case .staticOnBattery: return .staticFrame
-            case .automatic:
+        // Power profiles are manual overrides, so they apply on any power
+        // source — not just on battery. Otherwise the menu is dead on AC power
+        // (and on desktops without a battery, permanently): Automatic and Full
+        // Quality both resolve to .full there, and Battery Saver / Static never
+        // take effect, which reads as "nothing changes".
+        switch state.profile {
+        case .fullQuality:
+            // Prefer source fidelity: skip the battery-level, Low Power Mode,
+            // and fair-thermal downgrades below. Hard protections above
+            // (pauses, lock, serious/critical thermal) still win.
+            return .full
+        case .batterySaver: return .minimal
+        case .staticOnBattery: return .staticFrame
+        case .automatic:
+            if state.isOnBattery {
                 if state.lowPowerMode || state.batteryPercent < PlaybackPolicyThresholds.batteryLow { return .minimal }
                 return .reduced
             }

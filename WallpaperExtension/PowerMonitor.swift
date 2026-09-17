@@ -40,6 +40,15 @@ final class PowerMonitor: Sendable {
         state.withLock { $0 }
     }
 
+    /// Re-read battery + brightness now and notify subscribers on change.
+    /// The scheduled poll runs every ~30s, so without this a prefs change
+    /// (e.g. the user picking Battery Saver right after unplugging) applies
+    /// against stale power state and looks like "nothing changes".
+    func refreshNow() {
+        updateBatteryState()
+        updateBrightnessState()
+    }
+
     /// Whether power conditions require pausing playback.
     var shouldPause: Bool {
         state.withLock { $0.shouldPause }

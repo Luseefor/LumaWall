@@ -26,6 +26,11 @@ enum PlaybackPolicy: Int, Comparable {
     /// reduced budget + lower-res variant selection). `staticOnBattery` maps to
     /// `.paused` here (hold last frame) vs `.staticFrame` in-app (show poster).
     /// Both are still UX; do not "fix" one side without updating the other + tests.
+    /// Power profiles are manual overrides and apply on any power source (mirrors
+    /// `LumaWallCore.PlaybackPolicy`): gating them on `isOnBattery` left the menu
+    /// dead on AC power / battery-less desktops ("nothing changes").
+    /// `fullQuality` additionally skips the Low Power Mode and fair-thermal
+    /// downgrades; hard protections (pauses, serious/critical thermal) still win.
     static let batteryCriticalLevel = 10
     static let batteryLowLevel = 20
 
@@ -89,15 +94,19 @@ enum PlaybackPolicy: Int, Comparable {
         if thermalState == .serious { worst = max(worst, .minimal) }
         // User-selected battery behavior. Thermal, visibility, sleep, and Game
         // Mode protections above always remain in force, even in Full Quality.
-        if isOnBattery {
-            switch powerProfile {
-            case "fullQuality":
-                break
-            case "batterySaver":
-                worst = max(worst, .minimal)
-            case "staticOnBattery":
-                worst = max(worst, .paused)
-            default:
+        // Profiles are manual overrides: they apply on any power source so the
+        // menu stays usable on AC / battery-less desktops. `fullQuality` skips
+        // the battery, Low Power, and fair-thermal downgrades below.
+        let forcesFullQuality = powerProfile == "fullQuality"
+        switch powerProfile {
+        case "batterySaver":
+            worst = max(worst, .minimal)
+        case "staticOnBattery":
+            worst = max(worst, .paused)
+        case "fullQuality":
+            break
+        default:
+            if isOnBattery {
                 if batteryLevel < Self.batteryLowLevel {
                     worst = max(worst, .minimal)
                 } else {
@@ -105,10 +114,10 @@ enum PlaybackPolicy: Int, Comparable {
                 }
             }
         }
-        if isLowPowerModeEnabled { worst = max(worst, .minimal) }
+        if !forcesFullQuality, isLowPowerModeEnabled { worst = max(worst, .minimal) }
 
         // --- reduced tier ---
-        if thermalState == .fair { worst = max(worst, .reduced) }
+        if !forcesFullQuality, thermalState == .fair { worst = max(worst, .reduced) }
 
         return worst
     }

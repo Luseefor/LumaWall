@@ -458,36 +458,45 @@ final class DesktopVideoSession {
             // last frame. This matches the native extension host, where
             // `.minimal` resumes playback with a lower-res variant — previously
             // overlay blanked on batterySaver while native kept playing.
-            let reduced = tier != .full
-            let bitRate: Double = reduced ? 2_000_000 : 0
-            let maxResolution = reduced ? reducedResolution : .zero
+            // `.reduced` and `.minimal` deliberately differ (1080p/2Mbps vs
+            // 720p/1Mbps + battery variant) so Battery Saver is visibly and
+            // measurably cheaper than Automatic — identical budgets were why
+            // switching profiles "changed nothing".
+            let budget = decodeBudget(for: tier)
+            if tier != .full {
+                // Kick off the 720p sibling generation (async, cached): without
+                // it resolvedURL keeps falling back to the full file.
+                Task { await BatteryMediaVariant.ensure(for: asset) }
+            }
             if let sharedHub {
                 // If a previous pause unloaded the hub, re-attach a fresh decoder
                 // instead of playing an emptied player (black). The hub is
                 // re-acquired by reconcile; here just guard the loaded flag.
                 if !sharedHub.isLoaded {
-                    usePrivatePlayer()
-                    ensureDecoder(preferBatteryVariant: reduced)
-                    configureDecodeBudget(bitRate: bitRate, maximumResolution: maxResolution)
-                    root.setVideoVisible(root.playerLayer.isReadyForDisplay)
-                    player.rate = 1
-                    player.play()
+                    // The hub was emptied (stale retain): drop it and play
+                    // private on the tier's URL directly — going through
+                    // usePrivatePlayer first would build the full URL only for
+                    // playPrivate to immediately rebuild the battery variant.
+                    detachSharedHub()
+                    playPrivate(url: BatteryMediaVariant.resolvedURL(for: asset, tier: tier), budget: budget)
                 } else {
-                    sharedHub.setDecodeBudget(bitRate: bitRate, maximumResolution: maxResolution)
-                    sharedHub.play()
+                    sharedHub.setDecodeBudget(bitRate: budget.bitRate, maximumResolution: budget.maximumResolution)
+                    sharedHub.setLayerPaused(false, for: root.sharedVideoLayer)
                     root.setVideoVisible(true)
                 }
             } else {
-                ensureDecoder(preferBatteryVariant: reduced)
-                configureDecodeBudget(bitRate: bitRate, maximumResolution: maxResolution)
-                root.setVideoVisible(root.playerLayer.isReadyForDisplay)
-                player.rate = 1
-                player.play()
+                playPrivate(url: BatteryMediaVariant.resolvedURL(for: asset, tier: tier), budget: budget)
             }
             reassert()
         case .staticFrame:
-            sharedHub?.pause()
-            player.pause()
+            if let sharedHub {
+                // Stay attached but paused: detaching would drop the held frame
+                // and the hub (shared with playing siblings) must keep running
+                // for them. The layer hides so the poster still shows.
+                sharedHub.setLayerPaused(true, for: root.sharedVideoLayer)
+            } else {
+                player.pause()
+            }
             root.setVideoVisible(false)
             reassert()
             scheduleDecoderRelease(after: 2)
@@ -496,8 +505,15 @@ final class DesktopVideoSession {
             // code freed the decoder 10s after every pause (and emptied the
             // shared hub via unload()), so resume had to re-decode from disk:
             // black flash + spin-up on every pause/resume cycle.
-            sharedHub?.pause()
-            player.pause()
+            if let sharedHub {
+                // Per-layer hold: the hub keeps playing while any sibling is
+                // unpaused; this layer simply stops receiving new frames and
+                // keeps its last one. Pausing the shared player directly (old
+                // code) froze every display on the same video.
+                sharedHub.setLayerPaused(true, for: root.sharedVideoLayer)
+            } else {
+                player.pause()
+            }
             root.setVideoVisible(root.usesSharedFrames || root.playerLayer.isReadyForDisplay)
             reassert()
         }
@@ -516,37 +532,73 @@ final class DesktopVideoSession {
         window.orderOut(nil)
         window.close()
         decoderIsLoaded = false
+        privateURL = nil
     }
 
     func synchronize(atHostTime hostTime: CMTime, tier: PlaybackTier) {
         decoderReleaseWorkItem?.cancel()
         requestedTier = tier
         // `.minimal` plays motion (reduced budget), like `.reduced`.
-        let reduced = tier == .reduced || tier == .minimal
+        let budget = decodeBudget(for: tier)
         if let sharedHub {
             sharedHub.setDecodeBudget(
-                bitRate: reduced ? 2_000_000 : 0,
-                maximumResolution: reduced ? reducedResolution : .zero
+                bitRate: budget.bitRate,
+                maximumResolution: budget.maximumResolution
             )
             sharedHub.synchronize(atHostTime: hostTime)
             root.setVideoVisible(true)
             reassert()
             return
         }
-        ensureDecoder(preferBatteryVariant: reduced)
-        configureDecodeBudget(
-            bitRate: reduced ? 2_000_000 : 0,
-            maximumResolution: reduced ? reducedResolution : .zero
-        )
+        playPrivate(url: BatteryMediaVariant.resolvedURL(for: asset, tier: tier), budget: budget)
         root.setVideoVisible(root.playerLayer.isReadyForDisplay)
         reassert()
         player.setRate(1, time: .zero, atHostTime: hostTime)
+    }
+
+    private struct DecodeBudget {
+        var bitRate: Double
+        var maximumResolution: CGSize
+    }
+
+    private func decodeBudget(for tier: PlaybackTier) -> DecodeBudget {
+        switch tier {
+        case .full: DecodeBudget(bitRate: 0, maximumResolution: .zero)
+        case .reduced: DecodeBudget(bitRate: 2_000_000, maximumResolution: reducedResolution)
+        case .minimal: DecodeBudget(bitRate: 1_000_000, maximumResolution: minimalResolution)
+        case .staticFrame, .paused: DecodeBudget(bitRate: 0, maximumResolution: .zero)
+        }
     }
 
     private var reducedResolution: CGSize {
         let landscape = displayPixelSize.width >= displayPixelSize.height
         return landscape ? CGSize(width: 1_920, height: 1_080) : CGSize(width: 1_080, height: 1_920)
     }
+
+    private var minimalResolution: CGSize {
+        let landscape = displayPixelSize.width >= displayPixelSize.height
+        return landscape ? CGSize(width: 1_280, height: 720) : CGSize(width: 720, height: 1_280)
+    }
+
+    /// Play motion on the private player, switching to `url` first when it
+    /// differs from the loaded one. The old code only picked the battery
+    /// variant when no decoder was loaded, so flipping Full → Battery Saver
+    /// while playing kept the full-res URL with just a bitrate cap — visually
+    /// (and measurably) nothing changed.
+    private func playPrivate(url: URL, budget: DecodeBudget) {
+        if !decoderIsLoaded || privateURL != url {
+            configurePlayer(url: url)
+        }
+        configureDecodeBudget(bitRate: budget.bitRate, maximumResolution: budget.maximumResolution)
+        root.setVideoVisible(root.playerLayer.isReadyForDisplay)
+        player.rate = 1
+        player.play()
+    }
+
+    /// The media URL the private player was configured with, if any. Used to
+    /// detect variant switches (full ↔ battery) without rebuilding the decoder
+    /// when the URL is unchanged.
+    private var privateURL: URL?
 
     private func configureDecodeBudget(bitRate: Double, maximumResolution: CGSize) {
         for item in player.items() {
@@ -570,6 +622,7 @@ final class DesktopVideoSession {
         root.playerLayer.player = player
         root.playerLayer.videoGravity = gravity(for: composition.contentMode)
         decoderIsLoaded = true
+        privateURL = url
     }
 
     private func ensureDecoder(preferBatteryVariant: Bool = false) {
@@ -595,6 +648,7 @@ final class DesktopVideoSession {
         looper = nil
         root.playerLayer.player = nil
         decoderIsLoaded = false
+        privateURL = nil
     }
 
     func attachSharedHub(_ hub: SharedPlaybackHub) {
@@ -609,6 +663,10 @@ final class DesktopVideoSession {
         root.setUsesSharedFrames(true)
         hub.attach(root.sharedVideoLayer)
         decoderIsLoaded = hub.isLoaded
+        // The private URL is no longer loaded anywhere (player discarded
+        // below), so clear it: otherwise a later detach → private replay of
+        // the same URL would skip the rebuild it needs.
+        privateURL = nil
         player.pause()
         looper = nil
         root.playerLayer.player = nil
@@ -619,13 +677,23 @@ final class DesktopVideoSession {
     }
 
     func detachSharedHub() {
-        if let sharedHub {
-            sharedHub.detach(root.sharedVideoLayer)
-            sharedHub.release()
+        guard let sharedHub else {
+            root.setUsesSharedFrames(false)
+            return
         }
-        sharedHub = nil
+        sharedHub.detach(root.sharedVideoLayer)
+        sharedHub.release()
+        self.sharedHub = nil
         root.setUsesSharedFrames(false)
-        root.sharedVideoLayer.contents = nil
+        // Keep the layer's last contents: clearing it here black-flashed every
+        // shared session on each reconcile, and wiped the held frame a paused
+        // session is supposed to keep. The layer is destroyed with the session
+        // on teardown, so nothing leaks.
+        // The private decoder was discarded when this session attached to the
+        // hub — without resetting the flag, the next private play would
+        // early-return thinking a decoder is loaded and resume an empty player
+        // (black glitch on pause → resume transitions).
+        decoderIsLoaded = false
     }
 
     func usePrivatePlayer() {
@@ -651,6 +719,7 @@ final class DesktopVideoSession {
             player = AVQueuePlayer()
             player.isMuted = true
             decoderIsLoaded = false
+            privateURL = nil
         }
         decoderReleaseWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
