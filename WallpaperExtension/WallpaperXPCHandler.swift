@@ -278,7 +278,24 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // accumulation, no orphan). Only swap the video if the choice actually
         // changed; re-selecting the same wallpaper is a no-op.
         if let existing = WallpaperState.shared.context(for: key) {
-            traceLog("  [acquire] REUSE ctx=\(existing.contextId) display=\(key.displayID) storedVideoID=\(existing.videoID ?? "nil") newChoice=\(choiceConfiguration ?? "nil") renderer=\(existing.renderer.map { "#\($0.debugID)" } ?? "nil") videoURL=\(findVideoURL(forChoice: choiceConfiguration)?.lastPathComponent ?? "nil")")
+            traceLog("  [acquire] REUSE ctx=\(existing.contextId) display=\(key.displayID) storedVideoID=\(existing.videoID ?? "nil") newChoice=\(choiceConfiguration ?? "nil") renderer=\(existing.renderer.map { "#\($0.debugID)" } ?? "nil") videoURL=\(findVideoURL(forChoice: choiceConfiguration)?.lastPathComponent ?? "nil") dest=\(destSize) @\(scaleFactor)x isPreview=\(isPreview) (surface isPreview=\(existing.isPreview))")
+
+            // A same-key acquire from the OTHER role (a Settings preview of the
+            // current wallpaper reusing the live surface id, or an id-less
+            // thumbnail probe collapsing onto the fallback key) must never
+            // mutate the live surface: its small viewport would shrink the
+            // desktop renderer to a stuck quarter-size rect over the
+            // full-bleed still (and a different choice would flip the desktop
+            // video to the previewed one). Reply with the context and leave
+            // the surface alone — the requester still gets a live picture.
+            guard isPreview == existing.isPreview else {
+                guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
+                    reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
+                }
+                reply(replyObj, nil)
+                extensionLog("  [acquire] REUSE role mismatch (surface isPreview=\(existing.isPreview), request isPreview=\(isPreview), dest=\(destSize)) → reply only, no resize/switch")
+                return
+            }
 
             // Geometry may have changed since this surface was created — a bigger/smaller
             // display reconnected, or the same display switched resolution. The REUSE path
@@ -294,7 +311,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 CATransaction.commit()
                 CATransaction.flush()
                 resized.renderer?.resize(to: destSize, scale: scaleFactor)
-                extensionLog("  [acquire] REUSE geometry changed → resized surface on display \(key.displayID) to \(destSize) @\(scaleFactor)x")
+                extensionLog("  [acquire] REUSE geometry changed (same role) → resized surface on display \(key.displayID) to \(destSize) @\(scaleFactor)x")
             }
 
             guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
