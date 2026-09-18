@@ -100,15 +100,6 @@ final class SharedPlaybackHub {
         isLoaded = false
     }
 
-    func play(rate: Float = 1) {
-        player.rate = rate
-        player.play()
-    }
-
-    func pause() {
-        player.pause()
-    }
-
     func setDecodeBudget(bitRate: Double, maximumResolution: CGSize) {
         for item in player.items() {
             item.preferredPeakBitRate = bitRate
@@ -118,14 +109,6 @@ final class SharedPlaybackHub {
 
     func synchronize(atHostTime hostTime: CMTime) {
         player.setRate(1, time: .zero, atHostTime: hostTime)
-    }
-
-    func unload() {
-        stopPump()
-        player.pause()
-        looper = nil
-        player.replaceCurrentItem(with: nil)
-        isLoaded = false
     }
 
     static var activeDecoderCount: Int { hubs.count }
