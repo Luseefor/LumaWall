@@ -164,11 +164,15 @@ final class WallpaperState: Sendable {
     /// laid out. The common re-acquire (display wake, quick Space revisit, a switch that
     /// reuses the id) carries the same size and returns nil — no relayout. A
     /// disconnect→reconnect at a different resolution, or a bare mode change, returns the
-    /// slot so the caller can re-frame the layer tree.
+    /// slot so the caller can re-frame the layer tree. Sizes compare with a small
+    /// tolerance: the agent occasionally reports sub-point jitter for an unchanged
+    /// display, and exact equality would re-frame (and re-log) every revisit.
     func updateGeometryIfChanged(destSize: CGSize, scaleFactor: CGFloat, for key: DisplayKey) -> ActiveWallpaper? {
         lock.withLock { state -> ActiveWallpaper? in
             guard var context = state.contexts[key] else { return nil }
-            if context.destSize == destSize, context.scaleFactor == scaleFactor { return nil }
+            if abs(context.destSize.width - destSize.width) < 0.5,
+               abs(context.destSize.height - destSize.height) < 0.5,
+               abs(context.scaleFactor - scaleFactor) < 0.01 { return nil }
             context.destSize = destSize
             context.scaleFactor = scaleFactor
             state.contexts[key] = context

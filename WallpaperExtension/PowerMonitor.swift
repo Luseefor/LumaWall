@@ -24,13 +24,6 @@ final class PowerMonitor: Sendable {
         /// Backlight brightness of the built-in display, 0.0–1.0. Defaults to 1.0
         /// when the value can't be read (external displays, headless, etc.).
         var displayBrightness: Float = 1.0
-
-        var shouldPause: Bool {
-            if thermalState == .critical || thermalState == .serious { return true }
-            if isOnBattery, batteryLevel < 20 { return true }
-            if displayBrightness < PlaybackPolicy.brightnessPauseThreshold { return true }
-            return false
-        }
     }
 
     private init() {}
@@ -47,11 +40,6 @@ final class PowerMonitor: Sendable {
     func refreshNow() {
         updateBatteryState()
         updateBrightnessState()
-    }
-
-    /// Whether power conditions require pausing playback.
-    var shouldPause: Bool {
-        state.withLock { $0.shouldPause }
     }
 
     /// AsyncStream that yields whenever any component of power state changes.
@@ -147,7 +135,7 @@ final class PowerMonitor: Sendable {
         state.withLock { $0.thermalState = ProcessInfo.processInfo.thermalState }
         let current = state.withLock { $0 }
         guard previous != current else { return }
-        extensionLog("[PowerMonitor] Thermal → shouldPause: \(current.shouldPause)")
+        extensionLog("[PowerMonitor] Thermal → \(current.thermalState.rawValue)")
         yieldToSubscribers(current)
     }
 
@@ -181,7 +169,7 @@ final class PowerMonitor: Sendable {
         }
         let current = state.withLock { $0 }
         guard previous != current else { return }
-        extensionLog("[PowerMonitor] Battery → shouldPause: \(current.shouldPause)")
+        extensionLog("[PowerMonitor] Battery → level=\(current.batteryLevel) onBattery=\(current.isOnBattery)")
         yieldToSubscribers(current)
     }
 
@@ -194,7 +182,7 @@ final class PowerMonitor: Sendable {
         state.withLock { $0.displayBrightness = brightness }
         let current = state.withLock { $0 }
         guard previous != current else { return }
-        extensionLog("[PowerMonitor] Brightness → \(brightness), shouldPause: \(current.shouldPause)")
+        extensionLog("[PowerMonitor] Brightness → \(brightness)")
         yieldToSubscribers(current)
     }
 

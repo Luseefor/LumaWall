@@ -31,6 +31,8 @@ enum PlaybackPolicy: Int, Comparable {
     /// dead on AC power / battery-less desktops ("nothing changes").
     /// `fullQuality` additionally skips the Low Power Mode and fair-thermal
     /// downgrades; hard protections (pauses, serious/critical thermal) still win.
+    /// `staticOnBattery` accumulates past serious thermal to `.paused` here,
+    /// matching Core where Static returns before the serious-thermal downgrade.
     static let batteryCriticalLevel = 10
     static let batteryLowLevel = 20
 

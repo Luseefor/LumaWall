@@ -125,6 +125,13 @@ struct PowerPolicyTests {
         #expect(PlaybackPolicy.resolve(.init(profile: .automatic)) == .full)
     }
 
+    @Test func staticProfileWinsOverSeriousThermal() {
+        // A still frame decodes nothing, so Static stays a still even when the
+        // system is hot — matching the extension host (paused outranks minimal).
+        #expect(PlaybackPolicy.resolve(.init(profile: .staticOnBattery, thermalState: .serious)) == .staticFrame)
+        #expect(PlaybackPolicy.resolve(.init(profile: .batterySaver, thermalState: .serious)) == .minimal)
+    }
+
     @Test func fullQualityOverridesLowPowerAndFairThermal() {
         #expect(PlaybackPolicy.resolve(.init(profile: .fullQuality, lowPowerMode: true)) == .full)
         #expect(PlaybackPolicy.resolve(.init(profile: .fullQuality, thermalState: .fair)) == .full)

@@ -78,6 +78,7 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
     private let manager = CLLocationManager()
     private let lock = NSLock()
     private var _coordinate: CLLocationCoordinate2D?
+    private var _lastRequestAt: Date?
 
     public var coordinate: CLLocationCoordinate2D? {
         lock.lock()
@@ -91,6 +92,12 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
         manager.desiredAccuracy = kCLLocationAccuracyKilometer
     }
 
+    /// Minimum age of the last fix before asking again. Coordinates only feed
+    /// sunrise/sunset math, which barely moves within minutes — without this,
+    /// every automation evaluation (clock, appearance, workspace events) wakes
+    /// location hardware for a fix we already have.
+    private static let fixThrottle: TimeInterval = 15 * 60
+
     public func requestIfNeeded() {
         switch manager.authorizationStatus {
         case .notDetermined:
@@ -101,6 +108,14 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
             // every launch.
             manager.requestWhenInUseAuthorization()
         case .authorized, .authorizedAlways:
+            lock.lock()
+            let haveFix = _coordinate != nil
+            let recent = _lastRequestAt.map { Date().timeIntervalSince($0) < Self.fixThrottle } ?? false
+            if !recent { _lastRequestAt = Date() }
+            lock.unlock()
+            // Always take the first fix (automation has nothing without it);
+            // afterwards at most one fix per throttle window.
+            if haveFix, recent { return }
             manager.requestLocation()
         default:
             break

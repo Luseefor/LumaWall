@@ -123,6 +123,10 @@ public enum PlaybackPolicy: PlaybackPolicyDeciding {
         }
         if state.hideDesktopVideo { return .staticFrame }
         if state.thermalState == .critical || state.batteryPercent < PlaybackPolicyThresholds.batteryCritical { return .paused }
+        // A still frame is cheaper than even the minimal decode budget, so the
+        // Static profile wins over serious thermal too — matching the extension
+        // host, where staticOnBattery accumulates to `.paused` past `.minimal`.
+        if state.profile == .staticOnBattery { return .staticFrame }
         if state.thermalState == .serious { return .minimal }
         // Power profiles are manual overrides, so they apply on any power
         // source — not just on battery. Otherwise the menu is dead on AC power

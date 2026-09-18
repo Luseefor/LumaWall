@@ -192,9 +192,9 @@ final class OverlayWallpaperEngine {
         // Each detach cleared layer.contents (black flash) and reset playback,
         // so applying to N displays flickered N times. Only touch sessions
         // whose sharing state actually changed.
-        var groups: [String: [DesktopVideoSession]] = [:]
-        for session in sessions.values {
-            groups[session.mediaKey, default: []].append(session)
+        var groups: [String: [(DisplayID, DesktopVideoSession)]] = [:]
+        for (id, session) in sessions {
+            groups[session.mediaKey, default: []].append((id, session))
         }
         var desiredHubKey: [ObjectIdentifier: String?] = [:]
         for session in sessions.values {
@@ -219,16 +219,20 @@ final class OverlayWallpaperEngine {
             session.detachSharedHub()
         }
         for (_, group) in groups {
-            if group.count >= 2, let url = group.first?.asset.mediaURL {
+            if group.count >= 2, let url = group.first?.1.asset.mediaURL {
                 let hub = SharedPlaybackHub.acquire(url: url)
                 for _ in 1..<group.count {
                     _ = SharedPlaybackHub.acquire(url: url)
                 }
-                for session in group {
+                for (_, session) in group {
                     session.attachSharedHub(hub)
                 }
-            } else {
-                group.first?.usePrivatePlayer()
+            } else if let (id, session) = group.first {
+                // Build the tier's variant up front so the trailing apply pass
+                // doesn't immediately throw it away and rebuild (one wasted
+                // decoder per regroup on reduced/minimal tiers).
+                let tier = tiers[id] ?? .full
+                session.usePrivatePlayer(preferBatteryVariant: tier != .full)
             }
         }
         for (id, session) in sessions {
@@ -502,9 +506,9 @@ final class DesktopVideoSession {
             scheduleDecoderRelease(after: 2)
         case .paused:
             // Hold the last frame AND the decoder for instant resume. The old
-            // code freed the decoder 10s after every pause (and emptied the
-            // shared hub via unload()), so resume had to re-decode from disk:
-            // black flash + spin-up on every pause/resume cycle.
+            // code freed the decoder 10s after every pause, so resume had to
+            // re-decode from disk: black flash + spin-up on every pause/resume
+            // cycle.
             if let sharedHub {
                 // Per-layer hold: the hub keeps playing while any sibling is
                 // unpaused; this layer simply stops receiving new frames and
@@ -696,19 +700,18 @@ final class DesktopVideoSession {
         decoderIsLoaded = false
     }
 
-    func usePrivatePlayer() {
+    func usePrivatePlayer(preferBatteryVariant: Bool = false) {
         detachSharedHub()
-        ensureDecoder()
+        ensureDecoder(preferBatteryVariant: preferBatteryVariant)
     }
 
     private func scheduleDecoderRelease(after delay: TimeInterval) {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             if sharedHub != nil {
-                // Do NOT unload() the shared hub here: unload() empties its
-                // player (replaceCurrentItem(nil)), so the next play() resumed
-                // a dead pipeline → black until full re-create. Shared decoders
-                // stay paused with the last frame retained; memory is reclaimed
+                // Shared decoders stay paused with the last frame retained;
+                // emptying the shared player here would force every sibling
+                // display to re-decode from disk on resume. Memory is reclaimed
                 // by teardown / releaseWorkingMemory instead.
                 return
             }
@@ -866,6 +869,7 @@ private final class SessionRootView: NSView {
     }
 
     private static let disabledActions: [String: CAAction] = [
+        "anchorPoint": NSNull(),
         "bounds": NSNull(),
         "contents": NSNull(),
         "hidden": NSNull(),
