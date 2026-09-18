@@ -132,6 +132,42 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             ?? UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     }
 
+    /// Clamp a non-preview acquire viewport to the live display geometry when it
+    /// is far smaller than the display. Desktop/lock/Idle surfaces always cover
+    /// their display, so a much smaller request is a stale probe or a
+    /// thumbnail-size acquire on a reused key — serving it as-is would mint a
+    /// stuck half-scale surface the agent hosts small over the full-bleed
+    /// still. Returns the input unchanged for previews, unknown/offline
+    /// displays, and sizes within tolerance (covers rounding and transient
+    /// mode-change differences).
+    static func validatedGeometry(
+        destSize: CGSize, scaleFactor: CGFloat,
+        displayID: UInt32?, isPreview: Bool
+    ) -> (CGSize, CGFloat) {
+        guard !isPreview,
+              let did = displayID,
+              destSize.width > 0, destSize.height > 0
+        else { return (destSize, scaleFactor) }
+        // CGDisplayBounds is rotation-aware (a 270° portrait panel reports
+        // 1080x1920); PixelsWide/High report unrotated hardware pixels.
+        let live = CGDisplayBounds(did)
+        guard live.width > 0, live.height > 0 else { return (destSize, scaleFactor) }
+        let liveArea = live.width * live.height
+        let reqArea = destSize.width * destSize.height
+        guard reqArea < liveArea * 0.75 else { return (destSize, scaleFactor) }
+        let pxW = CGFloat(CGDisplayPixelsWide(did)), pxH = CGFloat(CGDisplayPixelsHigh(did))
+        var scale = scaleFactor
+        if pxW > 0, pxH > 0 {
+            let landscapeLive = live.width >= live.height
+            let pw = landscapeLive ? max(pxW, pxH) : min(pxW, pxH)
+            let ph = landscapeLive ? min(pxW, pxH) : max(pxW, pxH)
+            let derived = ((pw / live.width) + (ph / live.height)) / 2
+            if derived > 0, derived.isFinite { scale = derived }
+        }
+        extensionLog("  [acquire] viewport \(destSize) @\(scaleFactor)x far below live display \(live.size) → clamping to live geometry @\(scale)x")
+        return (CGSize(width: live.width, height: live.height), scale)
+    }
+
     func acquire(withId id: Any?, request: Any?, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
         markServed()
         nonisolated(unsafe) let unsafeRequest = request
@@ -188,6 +224,19 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 extensionLog("  [acquire] geometry Mirror missed — fell back to live display \(did): \(destSize) @\(scaleFactor)x")
             }
         }
+        // Ground-truth guard: a non-preview surface must cover its display. A
+        // stale probe or thumbnail-size acquire reusing a desktop key would
+        // otherwise mint a stuck half-scale surface (e.g. 1280x720 on a 1440p
+        // display): the agent hosts it small over the full-bleed still, and
+        // nothing ever heals it because later same-size re-acquires read as
+        // "unchanged". Clamp clear outliers to the live display geometry.
+        // Previews keep their small sizes. This also heals already-shrunken
+        // surfaces: the next same-role full-size re-acquire now differs from
+        // the stored size, so the REUSE path re-frames to full.
+        (destSize, scaleFactor) = Self.validatedGeometry(
+            destSize: destSize, scaleFactor: scaleFactor,
+            displayID: displayID, isPreview: isPreview
+        )
         // Extract choice configuration and files from descriptor via Mirror traversal
         // Path: WallpaperCreationRequestXPC.rawValue.descriptor.{configuration, files}
         var choiceConfiguration: String?
