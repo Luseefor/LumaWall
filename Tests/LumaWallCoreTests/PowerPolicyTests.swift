@@ -141,4 +141,33 @@ struct PowerPolicyTests {
             sessionIsLocked: true, hideDesktopVideo: true, allowLiveOnLock: false
         )) == .paused)
     }
+
+    @Test func hysteresisThresholdsArePinned() {
+        #expect(PlaybackPolicyThresholds.occlusionRelease == 0.975)
+        #expect(PlaybackPolicyThresholds.fullscreenRelease == 0.97)
+    }
+
+    @Test func occlusionLatchHoldsUntilRelease() {
+        let id = DisplayID(rawValue: "test-display")
+        var latch = OcclusionLatch()
+        // Below enter: stays clear.
+        latch.update(displayID: id, ratio: 0.98, rawCovered: false, rawFullscreen: false)
+        #expect(latch.covered.isEmpty)
+        // At/above enter: latches on.
+        latch.update(displayID: id, ratio: 0.99, rawCovered: true, rawFullscreen: true)
+        #expect(latch.covered == [id])
+        #expect(latch.fullscreen == [id])
+        // Between release and enter with raw clear: holds (no strobing).
+        latch.update(displayID: id, ratio: 0.98, rawCovered: false, rawFullscreen: false)
+        #expect(latch.covered == [id])
+        #expect(latch.fullscreen == [id])
+        // Below release: clears.
+        latch.update(displayID: id, ratio: 0.5, rawCovered: false, rawFullscreen: false)
+        #expect(latch.covered.isEmpty)
+        #expect(latch.fullscreen.isEmpty)
+        // Prune drops disconnected displays.
+        latch.update(displayID: id, ratio: 0.99, rawCovered: true, rawFullscreen: false)
+        latch.prune(to: [])
+        #expect(latch.covered.isEmpty)
+    }
 }

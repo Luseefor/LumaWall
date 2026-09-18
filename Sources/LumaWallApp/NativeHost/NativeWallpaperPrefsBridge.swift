@@ -6,7 +6,7 @@ enum NativeWallpaperPrefsBridge {
         WallpaperHostCapabilities.extensionDocumentsURL.appendingPathComponent("lumawall-prefs.json")
     }
 
-    private struct PrefsFile: Codable {
+    private struct PrefsFile: Codable, Equatable {
         var userPaused: Bool
         var alwaysPauseDesktop: Bool
         var pauseWhenOccluded: Bool
@@ -17,6 +17,11 @@ enum NativeWallpaperPrefsBridge {
         var screenSaverIsOurs: Bool?
         var powerProfile: String?
     }
+
+    /// Last values actually written. Policy re-evaluates on a 30s timer plus
+    /// every workspace event; without coalescing, every tick rewrites the file
+    /// and pings the extension even when nothing changed.
+    private static var lastWritten: PrefsFile?
 
     static func write(
         userPaused: Bool,
@@ -46,7 +51,12 @@ enum NativeWallpaperPrefsBridge {
             powerProfile: powerProfile
         )
         guard let data = try? JSONEncoder().encode(file) else { return }
+        // The extension reloads this file at init, so skipping an identical
+        // rewrite loses nothing — and spares a Darwin-notify round trip plus
+        // a full policy recompute on every unchanged evaluation.
+        guard file != lastWritten else { return }
         try? data.write(to: prefsURL, options: .atomic)
+        lastWritten = file
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         CFNotificationCenterPostNotification(
             center,

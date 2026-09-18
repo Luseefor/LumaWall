@@ -35,6 +35,13 @@ public enum PlaybackPolicyThresholds: Sendable {
     public static let occlusionCovered: CGFloat = 0.985
     /// A single window owns the display only at full coverage + matching size.
     public static let fullscreenCoverage: CGFloat = 0.99
+    /// Release thresholds (hysteresis): once occlusion/fullscreen has paused a
+    /// display, coverage must fall back past these before it resumes. Without
+    /// a gap, a window sitting at the enter boundary strobes pause/resume on
+    /// every policy evaluation (observed as 2s minimal↔paused flip-flops with
+    /// a deep-pause/free/recreate cycle each time).
+    public static let occlusionRelease: CGFloat = 0.975
+    public static let fullscreenRelease: CGFloat = 0.97
     /// Width/height tolerance (points) for fullscreen size match.
     public static let fullscreenWidthTolerance: CGFloat = 2
     public static let fullscreenHeightTolerance: CGFloat = 4
@@ -139,5 +146,36 @@ public enum PlaybackPolicy: PlaybackPolicyDeciding {
         if state.lowPowerMode { return .minimal }
         if state.thermalState == .fair { return .reduced }
         return .full
+    }
+}
+
+/// Latched occlusion verdicts with enter/exit hysteresis. The raw analysis
+/// flips the instant a window crosses the enter threshold; holding the paused
+/// verdict until coverage falls below the release threshold stops strobing
+/// when a window sits at the boundary. Pure value type so policy tests can
+/// pin the behavior; the app owns one and feeds it every evaluation.
+public struct OcclusionLatch: Sendable {
+    public private(set) var covered: Set<DisplayID> = []
+    public private(set) var fullscreen: Set<DisplayID> = []
+
+    public init() {}
+
+    public mutating func update(displayID: DisplayID, ratio: CGFloat, rawCovered: Bool, rawFullscreen: Bool) {
+        if rawCovered {
+            covered.insert(displayID)
+        } else if ratio < PlaybackPolicyThresholds.occlusionRelease {
+            covered.remove(displayID)
+        }
+        if rawFullscreen {
+            fullscreen.insert(displayID)
+        } else if ratio < PlaybackPolicyThresholds.fullscreenRelease {
+            fullscreen.remove(displayID)
+        }
+    }
+
+    /// Drop verdicts for disconnected displays so a reattached display starts fresh.
+    public mutating func prune(to displayIDs: Set<DisplayID>) {
+        covered.formIntersection(displayIDs)
+        fullscreen.formIntersection(displayIDs)
     }
 }

@@ -838,6 +838,11 @@ final class AppModel {
 
     private var displayRefreshWorkItem: DispatchWorkItem?
 
+    /// Latched occlusion verdicts (see OcclusionLatch): raw window coverage is
+    /// evaluated every policy tick, but the paused verdict holds until coverage
+    /// falls back past the release thresholds.
+    private var occlusionLatch = OcclusionLatch()
+
     private func scheduleDebouncedDisplayRefresh(delay: TimeInterval = 0.6) {
         displayRefreshWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.refreshDisplays() }
@@ -1430,10 +1435,24 @@ final class AppModel {
         batteryPercent = power.percent
         isOnBattery = power.isOnBattery
         let coverage = DisplayOcclusion.analysis(in: displays)
+        // Hysteresis: hold the paused verdict until coverage falls back past
+        // the release thresholds, so a window sitting at the enter boundary
+        // can't strobe pause/resume on every evaluation.
+        occlusionLatch.prune(to: Set(displays.map(\.displayID)))
+        for display in displays {
+            occlusionLatch.update(
+                displayID: display.displayID,
+                ratio: coverage.coverage[display.displayID] ?? 0,
+                rawCovered: coverage.covered.contains(display.displayID),
+                rawFullscreen: coverage.fullscreen.contains(display.displayID)
+            )
+        }
+        let coveredDisplays = occlusionLatch.covered
+        let fullscreenDisplays = occlusionLatch.fullscreen
         let allowLiveOnLock = engine.mode == .native
         for display in displays {
-            let obscured = (pauseWhenObscured && coverage.covered.contains(display.displayID))
-                || coverage.fullscreen.contains(display.displayID)
+            let obscured = (pauseWhenObscured && coveredDisplays.contains(display.displayID))
+                || fullscreenDisplays.contains(display.displayID)
             let conditions = PlaybackConditions(
                 profile: powerProfile,
                 isOnBattery: power.isOnBattery,
@@ -1453,8 +1472,8 @@ final class AppModel {
         }
         if engine.mode == .native {
             let pausedCG = Set(pausedDisplayIDs.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
-            let coveredCG = Set(coverage.covered.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
-            let fullscreenCG = Set(coverage.fullscreen.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
+            let coveredCG = Set(coveredDisplays.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
+            let fullscreenCG = Set(fullscreenDisplays.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
             NativeWallpaperPrefsBridge.write(
                 userPaused: userPaused,
                 pauseWhenOccluded: pauseWhenObscured,
@@ -1462,7 +1481,7 @@ final class AppModel {
                 pausedDisplays: pausedCG,
                 occludedDisplays: coveredCG,
                 fullscreenDisplays: fullscreenCG,
-                desktopOccluded: coverage.covered.count == displays.count && !displays.isEmpty,
+                desktopOccluded: coveredDisplays.count == displays.count && !displays.isEmpty,
                 screenSaverIsOurs: WallpaperStoreProbe.screenSaverIsOurs(),
                 powerProfile: powerProfile.rawValue
             )
@@ -1497,6 +1516,8 @@ private enum DisplayOcclusion {
     struct Analysis {
         var covered: Set<DisplayID>
         var fullscreen: Set<DisplayID>
+        /// Max single-window coverage ratio per display, for hysteresis.
+        var coverage: [DisplayID: CGFloat]
     }
 
     static func analysis(in displays: [ConnectedDisplay]) -> Analysis {
@@ -1504,7 +1525,7 @@ private enum DisplayOcclusion {
         let desktop = displays.map(\.frame).reduce(CGRect.null) { $0.union($1) }
         guard !desktop.isNull,
               let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
-        else { return Analysis(covered: [], fullscreen: []) }
+        else { return Analysis(covered: [], fullscreen: [], coverage: [:]) }
 
         var windows: [(rect: CGRect, layer: Int)] = []
         for dict in info {
@@ -1522,12 +1543,15 @@ private enum DisplayOcclusion {
 
         var covered: Set<DisplayID> = []
         var fullscreen: Set<DisplayID> = []
+        var coverage: [DisplayID: CGFloat] = [:]
         for display in displays {
             let rects = windows.map(\.rect)
+            let ratio = ScreenGeometry.coverageRatio(screen: display.frame, windows: rects)
+            coverage[display.displayID] = ratio
             // Require near-total occlusion before auto-pausing (see
             // PlaybackPolicyThresholds). Lower values flap pause/resume on
             // maximized windows with menu bar/dock visible (~96% coverage).
-            if ScreenGeometry.isCovered(screen: display.frame, windows: rects, threshold: PlaybackPolicyThresholds.occlusionCovered) {
+            if ratio >= PlaybackPolicyThresholds.occlusionCovered {
                 covered.insert(display.displayID)
             }
             let ownsFullscreen = windows.contains { window in
@@ -1539,6 +1563,6 @@ private enum DisplayOcclusion {
                 fullscreen.insert(display.displayID)
             }
         }
-        return Analysis(covered: covered, fullscreen: fullscreen)
+        return Analysis(covered: covered, fullscreen: fullscreen, coverage: coverage)
     }
 }

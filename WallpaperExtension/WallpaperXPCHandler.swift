@@ -684,7 +684,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             reply(nil); return
         }
         guard let key = WallpaperState.shared.resolveWallpaperKey(uuid) else {
-            extensionLog("=== INVALIDATE === UUID \(uuid) unknown (not ours / already forgotten) → ignore")
+            if WallpaperState.shared.wasRecentlyForgotten(uuid) {
+                extensionLog("=== INVALIDATE === UUID \(uuid) already torn down here → ignore")
+            } else {
+                extensionLog("=== INVALIDATE === UUID \(uuid) never registered in this process → ignore (possible cross-process orphan still decoding elsewhere)")
+            }
             reply(nil); return
         }
         WallpaperState.shared.forgetWallpaperID(uuid)

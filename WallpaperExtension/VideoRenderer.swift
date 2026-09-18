@@ -29,8 +29,47 @@ final class VideoRenderer: @unchecked Sendable {
     private var videoTrack: AVAssetTrack
     private let queue = DispatchQueue(label: "video-renderer", qos: .userInitiated)
     private var isRunning = true
-    private(set) var isPaused = false
-    private var currentPolicy: PlaybackPolicy = .full
+    /// Playback intent flags. `pause()`/`resume()`/`applyPolicy()` arrive from
+    /// any thread (Darwin-notify thread, Lifecycle queue, main), while the
+    /// feed loop and timers read them on `queue` — so they live behind a lock
+    /// instead of as plain vars (which raced). Timer creation/cancellation and
+    /// reader checks all happen on `queue`; the serial ordering there preserves
+    /// pause-then-resume semantics without needing synchronous flips.
+    private let stateLock = OSAllocatedUnfairLock(initialState: PlaybackState())
+    private struct PlaybackState {
+        var isPaused = false
+        var policy: PlaybackPolicy = .full
+        var variantSelector: (@Sendable () -> URL)?
+    }
+    /// Read-only view of the pause flag; all writes go through
+    /// `takePaused()`/`takeResumed()` so claim races serialize.
+    private var isPaused: Bool {
+        stateLock.withLock { $0.isPaused }
+    }
+    private var currentPolicy: PlaybackPolicy {
+        get { stateLock.withLock { $0.policy } }
+        set { stateLock.withLock { $0.policy = newValue } }
+    }
+
+    /// Atomically claim the paused state (true = newly paused). Paired with
+    /// `takeResumed()` so concurrent pause/resume arrivals serialize to one
+    /// winner instead of interleaving check-then-set across threads.
+    private func takePaused() -> Bool {
+        stateLock.withLock { state in
+            guard !state.isPaused else { return false }
+            state.isPaused = true
+            return true
+        }
+    }
+
+    /// Atomically claim the playing state (true = newly resumed).
+    private func takeResumed() -> Bool {
+        stateLock.withLock { state in
+            guard state.isPaused else { return false }
+            state.isPaused = false
+            return true
+        }
+    }
     private var rampTimer: (any DispatchSourceTimer)?
     private var deepPauseTimer: (any DispatchSourceTimer)?
 
@@ -58,7 +97,12 @@ final class VideoRenderer: @unchecked Sendable {
     private var nominalFrameRate: Double = 60
 
     /// Called at each loop boundary to select the video URL for the next iteration.
-    var variantSelector: (@Sendable () -> URL)?
+    /// Written from the Lifecycle queue, read on the renderer queue — lock-backed
+    /// for the same reason as the pause flags above. Same API as before.
+    var variantSelector: (@Sendable () -> URL)? {
+        get { stateLock.withLock { $0.variantSelector } }
+        set { stateLock.withLock { $0.variantSelector = newValue } }
+    }
 
     static func create(
         rootLayer: CALayer,
@@ -317,12 +361,14 @@ final class VideoRenderer: @unchecked Sendable {
     }
 
     /// Stop playback. Dispatches synchronously to the renderer queue to ensure
-    /// no callback is mid-flight before canceling the reader.
+    /// no callback is mid-flight before canceling the reader. Timer teardown
+    /// joins the same hop so a pending pause/resume can't arm a timer after us.
     func stop() {
         extensionLog("  [stop #\(debugID)] stopping renderer for \(asset.url.lastPathComponent)")
-        cancelRamp()
-        cancelDeepPauseTimer()
-        queue.sync {
+        queue.sync { [weak self] in
+            guard let self else { return }
+            cancelRamp()
+            cancelDeepPauseTimer()
             isRunning = false
             renderer.stopRequestingMediaData()
             currentReader?.cancelReading()
@@ -340,32 +386,35 @@ final class VideoRenderer: @unchecked Sendable {
     }
 
     func pause() {
-        guard !isPaused else { return }
+        guard takePaused() else { return }
         traceLog("  [pause #\(debugID)]")
-        isPaused = true
-        cancelRamp()
-        CMTimebaseSetRate(timebase, rate: 0.0)
-        generateStillFrame()
-        scheduleDeepPause()
+        // The serial queue preserves pause-then-resume ordering, so the flag
+        // (logical state) still flips synchronously while the rate follows on
+        // the queue — no caller can strand a mid-ramp rate anymore.
+        queue.async { [weak self] in
+            guard let self, isRunning else { return }
+            cancelRamp()
+            CMTimebaseSetRate(timebase, rate: 0.0)
+            generateStillFrame()
+            scheduleDeepPause()
+        }
     }
 
     func resume() {
-        guard isPaused else { return }
-        traceLog("  [resume #\(debugID)] currentReader=\(currentReader == nil ? "nil(deep)" : "live") asset=\(asset.url.lastPathComponent) rate→1")
-        isPaused = false
-        cancelRamp()
-        cancelDeepPauseTimer()
-        stillFrameLayer.opacity = 0
-        if currentReader == nil {
-            // Woke from deep pause — readers were freed. Recreate CONTINUING from the paused
-            // position (seamless, no black) so a screen-lock/display-sleep wake resumes the
-            // same video instead of restarting it.
-            queue.async { [weak self] in
-                guard let self, isRunning else { return }
+        guard takeResumed() else { return }
+        traceLog("  [resume #\(debugID)] asset=\(asset.url.lastPathComponent) rate→1")
+        queue.async { [weak self] in
+            guard let self, isRunning else { return }
+            cancelRamp()
+            cancelDeepPauseTimer()
+            stillFrameLayer.opacity = 0
+            if currentReader == nil {
+                // Woke from deep pause — readers were freed. Recreate CONTINUING from the paused
+                // position (seamless, no black) so a screen-lock/display-sleep wake resumes the
+                // same video instead of restarting it. (Reader state is queue-confined;
+                // checking it here instead of on the caller thread also closes a race.)
                 recreatePlayback(seamlessResume: true)
-                CMTimebaseSetRate(timebase, rate: 1.0)
             }
-        } else {
             CMTimebaseSetRate(timebase, rate: 1.0)
         }
     }
@@ -409,37 +458,40 @@ final class VideoRenderer: @unchecked Sendable {
     /// resume()/rampUp()'s `isPaused` guards and did nothing, stranding the rate
     /// wherever the cancelled ramp left it (visibly slow-motion playback).
     private func rampDown() {
-        guard !isPaused else { return }
-        isPaused = true
-        cancelDeepPauseTimer()
-        ramp(to: 0.0, over: Self.rampDownDuration) { [weak self] in
-            guard let self else { return }
-            generateStillFrame()
-            scheduleDeepPause()
+        guard takePaused() else { return }
+        queue.async { [weak self] in
+            guard let self, isRunning else { return }
+            cancelDeepPauseTimer()
+            ramp(to: 0.0, over: Self.rampDownDuration) { [weak self] in
+                guard let self else { return }
+                generateStillFrame()
+                scheduleDeepPause()
+            }
         }
     }
 
     /// Gradually raise the timebase rate to 1.0 — from wherever it is now, so
     /// reversing a mid-flight ramp-down accelerates from the current speed.
     private func rampUp() {
-        guard isPaused else { return }
-        isPaused = false
-        cancelDeepPauseTimer()
-        stillFrameLayer.opacity = 0
+        guard takeResumed() else { return }
+        queue.async { [weak self] in
+            guard let self, isRunning else { return }
+            cancelDeepPauseTimer()
+            stillFrameLayer.opacity = 0
 
-        if currentReader == nil {
-            // Deep-paused: no frames to ramp into. Wake instantly (continuing from the paused
-            // position, seamless) instead of running a ramp against an empty pipeline.
-            cancelRamp()
-            queue.async { [weak self] in
-                guard let self, isRunning else { return }
+            if currentReader == nil {
+                // Deep-paused: no frames to ramp into. Wake instantly (continuing from the paused
+                // position, seamless) instead of running a ramp against an empty pipeline.
+                // (Reader state is queue-confined; checking it here instead of on the
+                // caller thread also closes a race.)
+                cancelRamp()
                 recreatePlayback(seamlessResume: true)
                 CMTimebaseSetRate(timebase, rate: 1.0)
+                return
             }
-            return
-        }
 
-        ramp(to: 1.0, over: Self.rampUpDuration)
+            ramp(to: 1.0, over: Self.rampUpDuration)
+        }
     }
 
     /// Ease the timebase rate from its CURRENT value to `target`.
@@ -448,6 +500,9 @@ final class VideoRenderer: @unchecked Sendable {
     /// mid-flight travels the remaining distance in proportionally less time,
     /// keeping the rate curve continuous instead of replaying a full schedule
     /// from 1.0 or 0 (which made a paused wallpaper leap to speed and decelerate).
+    ///
+    /// Queue-confined: `rampTimer` is created, cancelled, and cleared here and
+    /// in `cancelRamp`, so both must run on `queue` (all callers hop first).
     private func ramp(to target: Double, over fullDuration: TimeInterval, then completion: (@Sendable () -> Void)? = nil) {
         cancelRamp()
         let start = Double(CMTimebaseGetRate(timebase))
@@ -502,6 +557,7 @@ final class VideoRenderer: @unchecked Sendable {
 
     private static let deepPauseDelay: TimeInterval = 30
 
+    /// Queue-confined with `cancelDeepPauseTimer` (see `rampTimer` above).
     private func scheduleDeepPause() {
         cancelDeepPauseTimer()
         let timer = DispatchSource.makeTimerSource(queue: queue)

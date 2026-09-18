@@ -63,6 +63,12 @@ final class WallpaperState: Sendable {
         /// resolve which surface context to tear down. Each surface owns its context, so an
         /// invalidate tears down only that surface — no cross-surface interference.
         var keyForWallpaperUUID: [UUID: DisplayKey] = [:]
+        /// Recently torn-down surface UUIDs (bounded ring). Lets an invalidate
+        /// for an unknown UUID distinguish "already torn down here" (benign
+        /// double-invalidate) from "never registered in this process" (the
+        /// surface may belong to a sibling extension process and still be
+        /// decoding — a cross-process orphan worth logging).
+        var recentlyForgotten: [UUID] = []
         var cachedThumbnailURL: URL?
         var cacheDirectoryURL: URL?
         var currentVideoID: String? = UserDefaults.standard.string(forKey: WallpaperState.selectedVideoKey)
@@ -259,7 +265,20 @@ final class WallpaperState: Sendable {
 
     /// Drop a WallpaperID mapping once its instance is invalidated.
     func forgetWallpaperID(_ uuid: UUID) {
-        lock.withLock { _ = $0.keyForWallpaperUUID.removeValue(forKey: uuid) }
+        lock.withLock { state in
+            _ = state.keyForWallpaperUUID.removeValue(forKey: uuid)
+            state.recentlyForgotten.append(uuid)
+            if state.recentlyForgotten.count > 32 {
+                state.recentlyForgotten.removeFirst(state.recentlyForgotten.count - 32)
+            }
+        }
+    }
+
+    /// True when this process tore the surface down itself (a repeat
+    /// invalidate is then benign). False means the surface was never
+    /// registered here — likely owned by a sibling extension process.
+    func wasRecentlyForgotten(_ uuid: UUID) -> Bool {
+        lock.withLock { $0.recentlyForgotten.contains(uuid) }
     }
 
     /// Per-surface teardown (the invalidate grace timer fired with no re-acquire — the Space
