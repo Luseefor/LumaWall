@@ -48,6 +48,10 @@ enum Lifecycle {
     /// Pending per-display teardown timers. Touched ONLY on `queue`.
     nonisolated(unsafe) static var teardownTimers: [DisplayKey: DispatchWorkItem] = [:]
 
+    /// Periodic geometry-audit timer (see `auditSurfaceGeometry`). Created once
+    /// on `queue` and never touched elsewhere.
+    nonisolated(unsafe) static var geometryAuditTimer: (any DispatchSourceTimer)?
+
     /// Grace between an invalidate of a display's LIVE wallpaper and actually tearing it
     /// down. A re-acquire (display woke / switched) cancels it; only a display that stays
     /// gone (asleep/removed) lets it fire. Short enough to save power promptly, long enough
@@ -132,6 +136,30 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             ?? UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     }
 
+    /// Fraction of the live display area below which a non-preview surface
+    /// counts as shrunken (stuck transitional/poisoned geometry) rather than a
+    /// legitimate size. Desktop/lock/Idle surfaces always cover their display;
+    /// legitimate desktop acquires match it exactly (verified in the field).
+    private static let shrunkenSurfaceFraction: CGFloat = 0.75
+
+    /// Live display geometry in points (rotation-aware via CGDisplayBounds)
+    /// plus the backing scale derived from hardware pixels, or nil when the
+    /// display can't be resolved (offline, mid-handshake mirroring).
+    static func liveDisplayGeometry(displayID: UInt32) -> (size: CGSize, scale: CGFloat)? {
+        let live = CGDisplayBounds(displayID)
+        guard live.width > 0, live.height > 0 else { return nil }
+        let pxW = CGFloat(CGDisplayPixelsWide(displayID)), pxH = CGFloat(CGDisplayPixelsHigh(displayID))
+        var scale: CGFloat = 1
+        if pxW > 0, pxH > 0 {
+            let landscapeLive = live.width >= live.height
+            let pw = landscapeLive ? max(pxW, pxH) : min(pxW, pxH)
+            let ph = landscapeLive ? min(pxW, pxH) : max(pxW, pxH)
+            let derived = ((pw / live.width) + (ph / live.height)) / 2
+            if derived > 0, derived.isFinite { scale = derived }
+        }
+        return (CGSize(width: live.width, height: live.height), scale)
+    }
+
     /// Clamp a non-preview acquire viewport to the live display geometry when it
     /// is far smaller than the display. Desktop/lock/Idle surfaces always cover
     /// their display, so a much smaller request is a stale probe or a
@@ -146,26 +174,55 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
     ) -> (CGSize, CGFloat) {
         guard !isPreview,
               let did = displayID,
-              destSize.width > 0, destSize.height > 0
+              destSize.width > 0, destSize.height > 0,
+              let live = liveDisplayGeometry(displayID: did)
         else { return (destSize, scaleFactor) }
-        // CGDisplayBounds is rotation-aware (a 270° portrait panel reports
-        // 1080x1920); PixelsWide/High report unrotated hardware pixels.
-        let live = CGDisplayBounds(did)
-        guard live.width > 0, live.height > 0 else { return (destSize, scaleFactor) }
-        let liveArea = live.width * live.height
+        let liveArea = live.size.width * live.size.height
         let reqArea = destSize.width * destSize.height
-        guard reqArea < liveArea * 0.75 else { return (destSize, scaleFactor) }
-        let pxW = CGFloat(CGDisplayPixelsWide(did)), pxH = CGFloat(CGDisplayPixelsHigh(did))
-        var scale = scaleFactor
-        if pxW > 0, pxH > 0 {
-            let landscapeLive = live.width >= live.height
-            let pw = landscapeLive ? max(pxW, pxH) : min(pxW, pxH)
-            let ph = landscapeLive ? min(pxW, pxH) : max(pxW, pxH)
-            let derived = ((pw / live.width) + (ph / live.height)) / 2
-            if derived > 0, derived.isFinite { scale = derived }
+        guard reqArea < liveArea * shrunkenSurfaceFraction else { return (destSize, scaleFactor) }
+        extensionLog("  [acquire] viewport \(destSize) @\(scaleFactor)x far below live display \(live.size) → clamping to live geometry @\(live.scale)x")
+        return (live.size, live.scale)
+    }
+
+    /// Start the periodic geometry audit (once per process). See `auditSurfaceGeometry`.
+    static func startGeometryAudit() {
+        Lifecycle.queue.async {
+            guard Lifecycle.geometryAuditTimer == nil else { return }
+            let timer = DispatchSource.makeTimerSource(queue: Lifecycle.queue)
+            timer.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(15))
+            timer.setEventHandler { WallpaperXPCHandler.auditSurfaceGeometry() }
+            Lifecycle.geometryAuditTimer = timer
+            timer.resume()
         }
-        extensionLog("  [acquire] viewport \(destSize) @\(scaleFactor)x far below live display \(live.size) → clamping to live geometry @\(scale)x")
-        return (CGSize(width: live.width, height: live.height), scale)
+    }
+
+    /// Re-frame any non-preview surface whose stored geometry is far smaller
+    /// than its live display (a transitional acquire minted it small and no
+    /// later re-acquire healed it — the stuck half-scale wallpaper). Reuses
+    /// the REUSE path's own re-frame, so a healed surface is indistinguishable
+    /// from a display mode change. Must run on `Lifecycle.queue`. Quiet unless
+    /// it heals something. Renderer-less and preview surfaces are skipped:
+    /// the former heal through the normal REUSE path on next acquire, the
+    /// latter are intentionally small.
+    static func auditSurfaceGeometry() {
+        for surface in WallpaperState.shared.surfaceGeometries() {
+            guard !surface.isPreview, surface.hasRenderer else { continue }
+            guard let live = liveDisplayGeometry(displayID: surface.displayID) else { continue }
+            let liveArea = live.size.width * live.size.height
+            let curArea = surface.destSize.width * surface.destSize.height
+            guard curArea > 0, curArea < liveArea * shrunkenSurfaceFraction else { continue }
+            guard let resized = WallpaperState.shared.updateGeometryIfChanged(
+                destSize: live.size, scaleFactor: live.scale, for: surface.key
+            ) else { continue }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            resized.rootLayer.frame = CGRect(origin: .zero, size: live.size)
+            resized.rootLayer.contentsScale = live.scale
+            CATransaction.commit()
+            CATransaction.flush()
+            resized.renderer?.resize(to: live.size, scale: live.scale)
+            extensionLog("  [audit] healed shrunken surface on display \(surface.displayID): \(surface.destSize) → \(live.size)")
+        }
     }
 
     func acquire(withId id: Any?, request: Any?, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {

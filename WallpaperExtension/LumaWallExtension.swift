@@ -28,6 +28,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             observeDisplaySleepWake()
             observeScreenLockState()
             WallpaperPrefs.shared.observeChanges()
+            WallpaperXPCHandler.startGeometryAudit()
             PowerMonitor.shared.startMonitoring()
             Task {
                 for await powerState in PowerMonitor.shared.stateChanges() {

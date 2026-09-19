@@ -659,6 +659,8 @@ final class AppModel {
         coverageTimer = nil
         displayRefreshWorkItem?.cancel()
         displayRefreshWorkItem = nil
+        nativeRestoreWorkItem?.cancel()
+        nativeRestoreWorkItem = nil
         gameModeMonitor.stop()
         let center = NotificationCenter.default
         let workspaceCenter = NSWorkspace.shared.notificationCenter
@@ -830,13 +832,17 @@ final class AppModel {
         displays = displayCoordinator.refresh()
         refreshActive()
         Task {
-            await engine.restore(using: assets)
+            // Overlay geometry tracks the burst immediately (kill-free);
+            // the native half waits for the topology to settle (below).
+            await engine.restoreOverlay(using: assets)
             refreshActive()
             applyPlaybackPolicy()
         }
+        scheduleSettledNativeRestore()
     }
 
     private var displayRefreshWorkItem: DispatchWorkItem?
+    private var nativeRestoreWorkItem: DispatchWorkItem?
 
     /// Latched occlusion verdicts (see OcclusionLatch): raw window coverage is
     /// evaluated every policy tick, but the paused verdict holds until coverage
@@ -847,6 +853,26 @@ final class AppModel {
         displayRefreshWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.refreshDisplays() }
         displayRefreshWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Native restore after the topology goes quiet. A monitor handshake flips
+    /// modes (and momentarily drops the display) several times over a few
+    /// seconds; restoring + killing WallpaperAgent on each flip orphans
+    /// in-flight surfaces and strands half-negotiated ones on screen. Waiting
+    /// for 2.5s of quiet collapses the burst into a single restore of the
+    /// settled topology. Re-armed by every screen-parameters event.
+    private func scheduleSettledNativeRestore(delay: TimeInterval = 2.5) {
+        nativeRestoreWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.engine.restoreNative(using: self.assets)
+                self.refreshActive()
+                self.applyPlaybackPolicy()
+            }
+        }
+        nativeRestoreWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
@@ -1196,10 +1222,13 @@ final class AppModel {
         await restorePlaylistPlaybackState()
         automations = await automationStore.current()
         displays = displayCoordinator.refresh()
-        await engine.restore(using: assets)
+        await engine.restoreOverlay(using: assets)
         refreshActive()
         refreshStats()
         applyPlaybackPolicy()
+        // Native side follows after settle, like any other topology event —
+        // at login the displays may still be negotiating modes.
+        scheduleSettledNativeRestore()
         syncDayNightTimer()
         evaluateAutomations(force: false)
         notePlaylistLoginIfNeeded()

@@ -90,27 +90,48 @@ final class WallpaperEngine {
         overlay.apply(tier: tier, to: displayID)
     }
 
-    func restore(using library: [WallpaperAsset]) async {
-        if mode == .native, let native {
-            let snapshot = await assignments.current()
-            let needsOverlay = snapshot.assignments.contains {
-                $0.isEnabled && (!$0.composition.usesDefaultCrop || $0.composition.spanningCanvas != nil)
-            }
-            if needsOverlay {
-                // Split ownership: the overlay takes non-default displays
-                // (and leaves default-crop ones alone), the native host takes
-                // the default-crop ones. Either side touching the other's
-                // displays clobbers assignments (overlay posters) or leaks
-                // windows.
+    /// Overlay half of a display-topology restore. Kill-free (window geometry
+    /// and posters only), so it runs immediately on every screen-parameters
+    /// burst. See `restoreNative(using:)` for why the native half waits.
+    func restoreOverlay(using library: [WallpaperAsset]) async {
+        if mode == .native {
+            if await needsOverlaySplit() {
                 await overlay.restore(using: library, nativeHostActive: true)
-                await native.restore(using: library, onlyDefaultCrop: true)
             } else {
                 overlay.dismantleSessions()
-                await native.restore(using: library)
             }
             return
         }
         await overlay.restore(using: library)
+    }
+
+    /// Native half of a display-topology restore. Rewriting Index.plist
+    /// restarts WallpaperAgent, so callers must let the topology settle first
+    /// (see `AppModel.scheduleSettledNativeRestore`): killing the agent once
+    /// per mode-flip of a monitor handshake orphans in-flight surfaces and
+    /// leaves the new agent hosting a mix of stale and fresh contexts.
+    /// Split ownership with the overlay (which takes non-default displays and
+    /// leaves default-crop ones alone): either side touching the other's
+    /// displays clobbers assignments (overlay posters) or leaks windows.
+    func restoreNative(using library: [WallpaperAsset]) async {
+        guard mode == .native, let native else { return }
+        if await needsOverlaySplit() {
+            await native.restore(using: library, onlyDefaultCrop: true)
+        } else {
+            await native.restore(using: library)
+        }
+    }
+
+    private func needsOverlaySplit() async -> Bool {
+        let snapshot = await assignments.current()
+        return snapshot.assignments.contains {
+            $0.isEnabled && (!$0.composition.usesDefaultCrop || $0.composition.spanningCanvas != nil)
+        }
+    }
+
+    func restore(using library: [WallpaperAsset]) async {
+        await restoreOverlay(using: library)
+        await restoreNative(using: library)
     }
 
     func reapplyAssignments() {

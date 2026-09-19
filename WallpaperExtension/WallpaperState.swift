@@ -311,6 +311,34 @@ final class WallpaperState: Sendable {
         }
     }
 
+    /// Point-in-time geometry snapshot for the periodic audit (see
+    /// `WallpaperXPCHandler.auditSurfaceGeometry`): one entry per surface with
+    /// everything needed to detect a stuck shrunken layer tree without holding
+    /// the lock during the re-frame.
+    struct SurfaceGeometry: Sendable {
+        let key: DisplayKey
+        let displayID: UInt32
+        let isPreview: Bool
+        let destSize: CGSize
+        let scaleFactor: CGFloat
+        let hasRenderer: Bool
+    }
+
+    func surfaceGeometries() -> [SurfaceGeometry] {
+        lock.withLock { state in
+            state.contexts.map { key, context in
+                SurfaceGeometry(
+                    key: key,
+                    displayID: key.displayID,
+                    isPreview: context.isPreview,
+                    destSize: context.destSize,
+                    scaleFactor: context.scaleFactor,
+                    hasRenderer: context.renderer != nil
+                )
+            }
+        }
+    }
+
     /// Get active context info for each unique display.
     func activeDisplayContexts() -> [(displayID: UInt32, videoID: String?)] {
         lock.withLock { state in
