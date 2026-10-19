@@ -77,7 +77,7 @@ enum NativeWallpaperDeployment {
 
     /// Content-hash cache keyed by file path. Restores call `ensureDeployed`
     /// once per display, and without this each of them re-hashes the same
-    /// multi-GB source — stalling multi-monitor restores and burning battery
+    /// multi-GB source, stalling multi-monitor restores and burning battery
     /// to prove what the first hash already proved. Entries are validated by
     /// size + mtime; only touched on MainActor (all callers are).
     @MainActor
@@ -239,7 +239,7 @@ enum NativeWallpaperDeployment {
     /// Transcode the reduced (1080p) / minimal (720p) siblings the battery
     /// tiers play, and record them in metadata.json. Idempotent: skips tiers
     /// whose file already exists, drops stale entries, regenerates missing
-    /// ones. Runs detached in the background — a multi-GB 4K transcode must
+    /// ones. Runs detached in the background. A multi-GB 4K transcode must
     /// never block applying the wallpaper.
     ///
     /// Without these files the extension's variant selector always falls back

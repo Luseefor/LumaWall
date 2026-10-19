@@ -1,7 +1,7 @@
 import AppKit
 
 /// The LumaWall status item glyph: a luminous crescent sweeping around a core
-/// dot — the app icon reduced to a crisp monochrome template so it matches
+/// dot, the app icon reduced to a crisp monochrome template so it matches
 /// every other menu bar icon in light and dark appearances.
 enum MenuBarIcon {
     static func image(badge: Bool = false) -> NSImage {

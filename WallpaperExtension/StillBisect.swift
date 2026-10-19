@@ -4,7 +4,7 @@ import QuartzCore
 
 enum Bisect {
     /// Read per-acquire (a cheap stat) so the mode can be flipped by adding/removing the
-    /// marker file and relaunching the Agent — no rebuild.
+    /// marker file and relaunching the Agent, no rebuild.
     static var stillOnly: Bool {
         let url = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents/BISECT_STILL")
@@ -17,7 +17,7 @@ enum Bisect {
 
 /// Put a single still frame on the display's root layer (creating/reusing one AVSBDL per
 /// display). The frame is the choice's cached BMP snapshot if present, else one decoded
-/// video frame — either way IOSurface-backed so it composites in the Agent's CALayerHost
+/// video frame, either way IOSurface-backed so it composites in the Agent's CALayerHost
 /// (a plain `CALayer.contents` does not). Tagged `DisplayImmediately` so a switch replaces
 /// the prior still with no flush. Must run on `Lifecycle.queue`.
 func bisectShowStill(videoURL: URL?, cachedStill: CGImage?, rootLayer: CALayer, for key: DisplayKey) {
@@ -55,7 +55,7 @@ func bisectShowStill(videoURL: URL?, cachedStill: CGImage?, rootLayer: CALayer, 
     extensionLog("  [bisect] display \(key.displayID): enqueued still (src=\(source))")
 }
 
-/// Decode exactly one frame from a video — no reader kept, no feed loop. Blocks the
+/// Decode exactly one frame from a video, no reader kept, no feed loop. Blocks the
 /// caller (`Lifecycle.queue`) briefly, like the video path's blocking track load.
 /// Must never run on the main thread. Diagnostic-only path.
 private func decodeFirstSampleBuffer(_ url: URL) -> CMSampleBuffer? {

@@ -104,6 +104,54 @@ public struct WallpaperAutomations: Codable, Equatable, Sendable {
         return Self.coversHour(hour, start: start, end: end)
     }
 
+    /// Moments after `date` that can change the automation verdict. The timer
+    /// arms the earliest of these: period boundaries (solar transitions when
+    /// they drive the period and a fix is known, fixed day/night hours
+    /// otherwise), quiet-hours end (a boundary skipped while quiet must apply
+    /// when quiet lifts), and midnight (weekday re-entry and date changes).
+    /// Pure so the scheduling contract is pinned by tests.
+    public func nextEvaluationDates(
+        after date: Date = .now,
+        calendar: Calendar = .current,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) -> [Date] {
+        var dates: [Date] = []
+        if useSunriseSunset, let latitude, let longitude,
+           let solar = SolarSchedule.nextTransition(after: date, latitude: latitude, longitude: longitude, calendar: calendar) {
+            dates.append(solar)
+        } else {
+            let nextDay = calendar.nextDate(
+                after: date,
+                matching: DateComponents(hour: dayStartHour, minute: 0, second: 0),
+                matchingPolicy: .nextTime
+            )
+            let nextNight = calendar.nextDate(
+                after: date,
+                matching: DateComponents(hour: nightStartHour, minute: 0, second: 0),
+                matchingPolicy: .nextTime
+            )
+            dates.append(contentsOf: [nextDay, nextNight].compactMap { $0 })
+        }
+        if let start = doNotInterruptStartHour,
+           let end = doNotInterruptEndHour, start != end,
+           let quietEnd = calendar.nextDate(
+               after: date,
+               matching: DateComponents(hour: end, minute: 0, second: 0),
+               matchingPolicy: .nextTime
+           ) {
+            dates.append(quietEnd)
+        }
+        if let midnight = calendar.nextDate(
+            after: date,
+            matching: DateComponents(hour: 0, minute: 0, second: 0),
+            matchingPolicy: .nextTime
+        ) {
+            dates.append(midnight)
+        }
+        return dates.sorted()
+    }
+
     /// Half-open hour window `[start, end)`, wrapping past midnight when
     /// `start > end`. Shared by the day/night and quiet-hours checks so the
     /// overnight logic cannot drift between the two.

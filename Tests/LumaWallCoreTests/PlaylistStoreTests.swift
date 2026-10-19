@@ -2,8 +2,8 @@ import Foundation
 import LumaWallCore
 import Testing
 
-/// PlaylistStore had zero coverage. All cases use an isolated temp directory —
-/// never production data — and each test is independently runnable.
+/// PlaylistStore had zero coverage. All cases use an isolated temp directory,
+/// never production data, and each test runs independently.
 struct PlaylistStoreTests {
     @Test func upsertedPlaylistsListNewestFirst() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

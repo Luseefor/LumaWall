@@ -1,7 +1,7 @@
 import Foundation
 
 enum PathSafety {
-    /// True if `id` is a well-formed UUID string — the only form a library
+    /// True if `id` is a well-formed UUID string, the only form a library
     /// entry directory ever takes (see `VideoLibrary.addVideo`). Rejecting
     /// non-UUID names neutralizes `..`, absolute paths, and stray files.
     static func isValidEntryID(_ id: String) -> Bool {
@@ -22,7 +22,7 @@ enum PathSafety {
 
     /// Returns `child` only if, after standardizing `..` and symlinks, it is
     /// `base` itself or a descendant of it. The final gate before any filesystem
-    /// mutation derived from untrusted metadata — defense in depth even when the
+    /// mutation derived from untrusted metadata, defense in depth even when the
     /// individual components already passed `isSafeComponent`.
     static func contained(_ child: URL, in base: URL) -> Bool {
         let basePath = base.standardizedFileURL.resolvingSymlinksInPath().path

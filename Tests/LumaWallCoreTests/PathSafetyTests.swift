@@ -4,7 +4,7 @@ import Testing
 
 /// Security tests for library path validation.
 ///
-/// Every case asserts a specific outcome for a concrete attack or edge input —
+/// Every case asserts a specific outcome for a concrete attack or edge input,
 /// never bare truthiness. Fixtures are inline literals, never production data.
 struct PathSafetyTests {
     // MARK: - Entry IDs (happy + attack)
@@ -73,7 +73,7 @@ struct PathSafetyTests {
 
     @Test func siblingPrefixIsNotContained() {
         // "/tmp/LumaWall-lib-evil" shares a string prefix with the base but is
-        // NOT inside it — the trailing-slash check must reject it.
+        // NOT inside it. The trailing-slash check must reject it.
         let base = URL(fileURLWithPath: "/tmp/LumaWall-lib", isDirectory: true)
         #expect(!PathSafety.contained(
             URL(fileURLWithPath: "/tmp/LumaWall-lib-evil/x.mov"),

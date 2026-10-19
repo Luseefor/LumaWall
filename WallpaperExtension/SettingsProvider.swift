@@ -45,7 +45,7 @@ func buildSettingsViewModelsXPC() async -> AnyObject? {
             ),
         )
 
-        // Generate thumbnail — skip entry if extraction fails
+        // Generate thumbnail. Skip the entry if extraction fails.
         guard let thumbnailURL = await library.generateThumbnail(for: entry) else {
             continue
         }
@@ -138,7 +138,7 @@ func buildSettingsViewModelsXPC() async -> AnyObject? {
 
     // Never serve an empty group: the host caches this response on disk and (on
     // macOS 26.6) reuses it on every Settings launch, only re-querying after a
-    // reinstall or OS update — a cached empty group hides the LumaWall section
+    // After a reinstall or OS update, a cached empty group hides the LumaWall section
     // until then (issue #27). The first query fires at registration, before the
     // user has added any video, so a fresh install always passes through here.
     if items.isEmpty, let placeholder = makeAddVideoItem(bundleID: bundleID, contextMenu: addVideoMenu) {
@@ -316,8 +316,8 @@ private func makeAutomationItem(
 }
 
 /// The tile shown while the library is empty. Selecting it renders the acquire
-/// path's gradient fallback (it has no video file); its context menu — and its
-/// description — route the user to adding a video.
+/// path's gradient fallback (it has no video file). Its context menu and
+/// description route the user to adding a video.
 private func makeAddVideoItem(bundleID: String, contextMenu: ContextMenu) -> SettingsItem? {
     guard let thumbnailURL = placeholderThumbnailURL() else { return nil }
     let id = "add-video-placeholder"
@@ -414,7 +414,7 @@ func makeEmptyGroupsResponse() -> AnyObject? {
 /// `ShimViewModelsXPC` and decode it back as the private `WallpaperSettingsViewModelsXPC`
 /// via `setClass(_:forClassName:)`, a substitution secure coding is designed to
 /// forbid. This is safe because the archive is never persisted or received over
-/// any boundary — it is produced and consumed in-process within this one function
+/// any boundary. It is produced and consumed in-process within this one function
 /// from values we just constructed, so there is no untrusted input to defend
 /// against. The decoded object is handed straight back to WallpaperAgent.
 private func remapToRealXPC(_ viewModels: SettingsViewModels) -> AnyObject? {

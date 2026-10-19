@@ -7,7 +7,7 @@
 // Apple-signed platform binary.
 //
 // Posture: reject callers we can positively identify as non-Apple. Accept Apple
-// platform binaries — logging when the signer isn't the expected WallpaperAgent
+// platform binaries, logging when the signer isn't the expected WallpaperAgent
 // rather than rejecting, since the settings surfaces are also Apple-hosted.
 // Fail *open* only when peer identity genuinely can't be obtained, so an OS
 // change to the audit-token SPI degrades to today's behavior instead of
@@ -19,7 +19,7 @@ import Security
 enum CallerValidation {
     static func isAcceptable(_ connection: NSXPCConnection) -> Bool {
         guard connection.responds(to: NSSelectorFromString("auditToken")) else {
-            extensionLog("  [Caller] auditToken SPI unavailable — accepting (fail-open)")
+            extensionLog("  [Caller] auditToken SPI unavailable, accepting (fail-open)")
             return true
         }
 
@@ -30,12 +30,12 @@ enum CallerValidation {
         var code: SecCode?
         let status = SecCodeCopyGuestWithAttributes(nil, attrs, [], &code)
         guard status == errSecSuccess, let code else {
-            extensionLog("  [Caller] Could not derive peer SecCode (status \(status)) — accepting (fail-open)")
+            extensionLog("  [Caller] Could not derive peer SecCode (status \(status)), accepting (fail-open)")
             return true
         }
 
         guard let appleReq = requirement("anchor apple") else {
-            extensionLog("  [Caller] Could not build anchor-apple requirement — accepting (fail-open)")
+            extensionLog("  [Caller] Could not build anchor-apple requirement, accepting (fail-open)")
             return true
         }
 
@@ -47,7 +47,7 @@ enum CallerValidation {
 
         if let agentReq = requirement("identifier \"com.apple.wallpaper.agent\""),
            SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), agentReq) != errSecSuccess {
-            extensionLog("  [Caller] Apple caller is not WallpaperAgent — accepting with note")
+            extensionLog("  [Caller] Apple caller is not WallpaperAgent, accepting with note")
         }
         return true
     }

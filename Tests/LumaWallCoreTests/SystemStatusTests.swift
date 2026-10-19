@@ -3,7 +3,7 @@ import LumaWallCore
 import Testing
 
 /// Read-only system queries: mach CPU sampling, power-source snapshot, login
-/// item status. No mutations, no fixtures — each asserts sane bounds on live
+/// item status. No mutations, no fixtures, each asserts sane bounds on live
 /// (but side-effect-free) values.
 struct SystemStatusTests {
     @Test func cpuSamplesStayWithinPercentBounds() {

@@ -113,9 +113,38 @@ final class AppModel {
     private var coverageTimer: Timer?
     private var lockObservers: [NSObjectProtocol] = []
     private var powerObservers: [NSObjectProtocol] = []
-    /// IOKit power-source runloop source for AC↔battery transitions. Kept alive
-    /// here, scheduled on the main runloop, removed in shutdown.
-    private var powerSourceRunLoopSource: CFRunLoopSource?
+    /// Owns the IOKit power-source runloop source. A lock-guarded box rather
+    /// than a bare property so both MainActor teardown and nonisolated
+    /// deinit can release it: the notify context holds an unretained self
+    /// pointer, so a source outliving the model would crash on the next
+    /// power event. Removal runs on whatever thread deinit lands on;
+    /// CFRunLoopRemoveSource is thread-safe.
+    private final class PowerSourceRegistration: @unchecked Sendable {
+        private let lock = NSLock()
+        private var source: CFRunLoopSource?
+
+        func set(_ source: CFRunLoopSource?) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.source = source
+        }
+
+        /// Removes the source from the main runloop and forgets it. Idempotent.
+        /// The lock is released before touching the runloop: never call out
+        /// while holding it.
+        func invalidate() {
+            lock.lock()
+            let current = source
+            source = nil
+            lock.unlock()
+            if let current {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), current, .defaultMode)
+            }
+        }
+
+        deinit { invalidate() }
+    }
+    private let powerSourceRegistration = PowerSourceRegistration()
     private var sessionLocked = false
     private var displaysAsleep = false
     private var cpuSampler = CPUSampler()
@@ -242,6 +271,7 @@ final class AppModel {
             startStatsPolling()
             observeAppearanceChanges()
             observeAutomationClockChanges()
+            observeFirstLocationFix()
             observeReduceMotion()
             observeScreenChanges()
             observeDesktopCoverage()
@@ -375,7 +405,7 @@ final class AppModel {
             var notes: [String] = []
             for url in urls {
                 // NOTE: `defer` inside a loop defers to the enclosing scope, not
-                // the iteration — the old code held all security-scoped refs until
+                // the iteration, the old code held all security-scoped refs until
                 // every import finished. Per-URL helper scopes each access.
                 notes += await importOneVideo(url)
             }
@@ -443,7 +473,7 @@ final class AppModel {
                 await reload()
                 applyPlaybackPolicy()
             } catch {
-                present("Couldn’t apply wallpaper", error.localizedDescription)
+                present("Couldn't apply wallpaper", error.localizedDescription)
             }
             isApplying = false
         }
@@ -464,7 +494,7 @@ final class AppModel {
                 await reload()
                 applyPlaybackPolicy()
             } catch {
-                present("Couldn’t apply wallpaper", error.localizedDescription)
+                present("Couldn't apply wallpaper", error.localizedDescription)
             }
             isApplying = false
         }
@@ -481,7 +511,7 @@ final class AppModel {
                 await reload()
                 applyPlaybackPolicy()
             } catch {
-                present("Couldn’t span wallpaper", error.localizedDescription)
+                present("Couldn't span wallpaper", error.localizedDescription)
             }
             isApplying = false
         }
@@ -666,10 +696,7 @@ final class AppModel {
         nativeRestoreWorkItem?.cancel()
         nativeRestoreWorkItem = nil
         gameModeMonitor.stop()
-        if let source = powerSourceRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
-            powerSourceRunLoopSource = nil
-        }
+        powerSourceRegistration.invalidate()
         let center = NotificationCenter.default
         let workspaceCenter = NSWorkspace.shared.notificationCenter
         let distributedCenter = DistributedNotificationCenter.default()
@@ -1102,17 +1129,17 @@ final class AppModel {
         guard automations.dayNightEnabled else { return }
         let now = Date()
         let calendar = Calendar.autoupdatingCurrent
-        let nextDay = calendar.nextDate(
+        let coordinate = LocationDaylightProvider.shared.coordinate
+        // The timer used to arm only the fixed day/night hours, but the
+        // verdict can also flip on solar transitions, quiet-hours end, and
+        // weekday re-entry — none of which that covered, so switches landed
+        // late, were skipped in quiet hours, or never fired at all.
+        guard let fireDate = automations.nextEvaluationDates(
             after: now,
-            matching: DateComponents(hour: automations.dayStartHour, minute: 0, second: 0),
-            matchingPolicy: .nextTime
-        )
-        let nextNight = calendar.nextDate(
-            after: now,
-            matching: DateComponents(hour: automations.nightStartHour, minute: 0, second: 0),
-            matchingPolicy: .nextTime
-        )
-        guard let fireDate = [nextDay, nextNight].compactMap({ $0 }).min() else { return }
+            calendar: calendar,
+            latitude: coordinate?.latitude,
+            longitude: coordinate?.longitude
+        ).first else { return }
         let interval = max(1, fireDate.timeIntervalSince(now))
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -1154,6 +1181,19 @@ final class AppModel {
                     }
                 }
             )
+        }
+    }
+
+    /// Re-evaluate when the first location fix lands. Solar automations start
+    /// on the hour-based fallback (no coordinate yet); without this they sit
+    /// there until the next armed boundary instead of switching to true
+    /// sunrise/sunset immediately.
+    private func observeFirstLocationFix() {
+        LocationDaylightProvider.shared.onFirstFix = { [weak self] in
+            Task { @MainActor in
+                self?.syncDayNightTimer()
+                self?.evaluateAutomations(force: false)
+            }
         }
     }
 
@@ -1234,7 +1274,7 @@ final class AppModel {
         refreshActive()
         refreshStats()
         applyPlaybackPolicy()
-        // Native side follows after settle, like any other topology event —
+        // Native side follows after settle, like any other topology event,
         // at login the displays may still be negotiating modes.
         scheduleSettledNativeRestore()
         syncDayNightTimer()
@@ -1264,7 +1304,7 @@ final class AppModel {
         guard let asset else {
             present("Shortcuts", pending == "__featured__"
                 ? "No wallpaper is ready to apply."
-                : "No wallpaper matched “\(pending)”.")
+                : "No wallpaper matched \"\(pending)\".")
             return
         }
         stopPlaylistRotation()
@@ -1445,20 +1485,27 @@ final class AppModel {
 
     /// Event-driven AC↔battery (and capacity) transitions via IOKit. The
     /// notifications above cover thermal and Low Power Mode, but nothing posts
-    /// for unplug/replug — without this, Automatic only noticed the switch at
+    /// for unplug/replug, without this, Automatic only noticed the switch at
     /// the next 15s stats tick (or never, if the tick's power comparison was
     /// skipped), which reads as "Automatic does nothing".
     private func observePowerSourceChanges() {
         let callback: IOPowerSourceCallbackType = { context in
             guard let context else { return }
             let model = Unmanaged<AppModel>.fromOpaque(context).takeUnretainedValue()
-            Task { @MainActor in model.applyPlaybackPolicy() }
+            Task { @MainActor in
+                model.applyPlaybackPolicy()
+                // Power-source rules gate automations: re-evaluate so unplug /
+                // replug applies (or lifts) the rule instead of waiting for
+                // the next timer. Dedup inside evaluate keeps this a no-op
+                // when the target is unchanged.
+                model.evaluateAutomations(force: false)
+            }
         }
         guard let source = IOPSNotificationCreateRunLoopSource(
             callback,
             Unmanaged.passUnretained(self).toOpaque()
         )?.takeRetainedValue() else { return }
-        powerSourceRunLoopSource = source
+        powerSourceRegistration.set(source)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
     }
 
@@ -1554,7 +1601,7 @@ final class AppModel {
     }
 
     private func present(_ title: String, _ message: String) {
-        nativeHostLog.error("alert: \(title, privacy: .public) — \(message, privacy: .public)")
+        nativeHostLog.error("alert: \(title, privacy: .public), \(message, privacy: .public)")
         let alert = AppAlert(title: title, message: message)
         if activeAlert == nil {
             activeAlert = alert
@@ -1582,7 +1629,7 @@ private enum DisplayOcclusion {
         let desktop = displays.map(\.frame).reduce(CGRect.null) { $0.union($1) }
         // Mirror Quartz rects around the PRIMARY display's top (see
         // ScreenGeometry.cocoaWindow): the union's maxY is only correct when
-        // no display extends above the primary — a taller sidecar or stacked
+        // no display extends above the primary. A taller sidecar or stacked
         // layout otherwise shifts every window rect and coverage misfires.
         let primaryHeight = displays.first(where: \.isMain)?.frame.height ?? desktop.maxY
         guard !desktop.isNull,

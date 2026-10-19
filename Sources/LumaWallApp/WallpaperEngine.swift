@@ -38,7 +38,7 @@ final class OverlayWallpaperEngine {
             // didChangeScreenParameters fires in bursts during a join/cut/mode
             // probe, and a display can flicker out for a single event. Pruning
             // sessions on every fire destroys windows for displays that are
-            // still there (and rebuilds them a moment later — the visible
+            // still there (and rebuilds them a moment later, the visible
             // glitch loop). Debounce so only the settled topology applies.
             Task { @MainActor in self?.scheduleGeometryRebuild() }
         })
@@ -115,7 +115,8 @@ final class OverlayWallpaperEngine {
         if let existing = sessions[displayID] {
             existing.replace(asset: asset, composition: composition, screen: screen, connected: connected)
         } else {
-            let session = DesktopVideoSession(asset: asset, composition: composition, screen: screen, connected: connected)
+            let tier = tiers[displayID] ?? .full
+            let session = DesktopVideoSession(asset: asset, composition: composition, screen: screen, connected: connected, tier: tier)
             sessions[displayID] = session
             session.show()
         }
@@ -176,7 +177,7 @@ final class OverlayWallpaperEngine {
 
     /// Tears down overlay windows without touching the shared assignment
     /// store. Used when the native host takes over rendering the same
-    /// assignments — clearing the store here would wipe what native restore
+    /// assignments, clearing the store here would wipe what native restore
     /// is about to read.
     func dismantleSession(_ displayID: DisplayID) {
         sessions.removeValue(forKey: displayID)?.tearDown()
@@ -290,7 +291,7 @@ final class OverlayWallpaperEngine {
         // main display's wallpaper so it shows something immediately instead
         // of the system default (and so the native half below can claim it).
         // This runs BEFORE the canvas refresh so the new display is included
-        // in the recomputed union — otherwise it inherits a canvas computed
+        // in the recomputed union. Otherwise it inherits a canvas computed
         // over the old display set and renders the wrong crop until the next
         // topology event.
         var snapshot = await assignments.current()
@@ -385,7 +386,7 @@ final class OverlayWallpaperEngine {
         }
         // Tiers must go too. `apply(tier:to:)` early-returns when the tier is
         // unchanged, so keeping them would make the policy pass that follows
-        // "Clear RAM" a no-op — every session would stay decoderless (black)
+        // "Clear RAM" a no-op. Every session would stay decoderless (black)
         // until some unrelated event happened to flip a tier.
         tiers.removeAll()
     }
@@ -476,9 +477,10 @@ final class DesktopVideoSession {
     var currentComposition: DisplayComposition { composition }
     var usesSharedDecoder: Bool { sharedHub != nil }
 
-    init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
+    init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay, tier: PlaybackTier = .full) {
         self.asset = asset
         self.composition = composition
+        self.requestedTier = tier
         displayPixelSize = connected.pixelSize
         window = DesktopSurfaceWindow(
             contentRect: .zero,
@@ -507,7 +509,10 @@ final class DesktopVideoSession {
             }
         }
         root.apply(composition: composition, poster: asset.posterURL, displayFrame: connected.frame)
-        configurePlayer(url: asset.mediaURL)
+        // Configure the tier-resolved URL up front: the trailing apply() then
+        // only sets the budget and plays instead of building a full-res
+        // decoder just to throw it away for the variant.
+        configurePlayer(url: BatteryMediaVariant.resolvedURL(for: asset, tier: tier))
         relayout(screen: screen, connected: connected)
     }
 
@@ -521,7 +526,9 @@ final class DesktopVideoSession {
         self.asset = asset
         self.composition = composition
         relayout(screen: screen, connected: connected)
-        configurePlayer(url: asset.mediaURL)
+        // Same single-build reasoning as init: the trailing apply() reuses
+        // this decoder when the URL already matches the tier.
+        configurePlayer(url: BatteryMediaVariant.resolvedURL(for: asset, tier: requestedTier))
         apply(tier: requestedTier)
         reassert()
     }
@@ -561,11 +568,11 @@ final class DesktopVideoSession {
             // motion at a reduced decode budget, exactly like `.reduced`. Only
             // `.staticFrame` hides video (poster still) and `.paused` holds the
             // last frame. This matches the native extension host, where
-            // `.minimal` resumes playback with a lower-res variant — previously
+            // `.minimal` resumes playback with a lower-res variant. Previously,
             // overlay blanked on batterySaver while native kept playing.
             // `.reduced` and `.minimal` deliberately differ (1080p/2Mbps vs
             // 720p/1Mbps + battery variant) so Battery Saver is visibly and
-            // measurably cheaper than Automatic — identical budgets were why
+            // measurably cheaper than Automatic. Identical budgets were why
             // switching profiles "changed nothing".
             let budget = decodeBudget(for: tier)
             if tier != .full {
@@ -579,7 +586,7 @@ final class DesktopVideoSession {
                 // re-acquired by reconcile; here just guard the loaded flag.
                 if !sharedHub.isLoaded {
                     // The hub was emptied (stale retain): drop it and play
-                    // private on the tier's URL directly — going through
+                    // private on the tier's URL directly, going through
                     // usePrivatePlayer first would build the full URL only for
                     // playPrivate to immediately rebuild the battery variant.
                     detachSharedHub()
@@ -688,7 +695,7 @@ final class DesktopVideoSession {
     /// Play motion on the private player, switching to `url` first when it
     /// differs from the loaded one. The old code only picked the battery
     /// variant when no decoder was loaded, so flipping Full → Battery Saver
-    /// while playing kept the full-res URL with just a bitrate cap — visually
+    /// while playing kept the full-res URL with just a bitrate cap. Visually
     /// (and measurably) nothing changed.
     private func playPrivate(url: URL, budget: DecodeBudget) {
         if !decoderIsLoaded || privateURL != url {
@@ -795,7 +802,7 @@ final class DesktopVideoSession {
         // session is supposed to keep. The layer is destroyed with the session
         // on teardown, so nothing leaks.
         // The private decoder was discarded when this session attached to the
-        // hub — without resetting the flag, the next private play would
+        // hub, without resetting the flag, the next private play would
         // early-return thinking a decoder is loaded and resume an empty player
         // (black glitch on pause → resume transitions).
         decoderIsLoaded = false
@@ -852,7 +859,7 @@ private extension PlaybackTier {
 private final class DesktopSurfaceWindow: NSWindow {
     // AppKit queries these on its window list at any time (key recalculation
     // during modal sessions, Spaces switches). They must never touch Swift
-    // executors or session state — a plain answer keeps the ObjC entry path
+    // executors or session state. A plain answer keeps the ObjC entry path
     // thunk-free no matter how the SDK annotates NSWindow members.
     override nonisolated var canBecomeKey: Bool { false }
     override nonisolated var canBecomeMain: Bool { false }

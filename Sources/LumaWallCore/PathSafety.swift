@@ -5,14 +5,14 @@ import Foundation
 /// Pure `Foundation` logic shared via `LumaWallCore` so it is unit-testable.
 /// The wallpaper extension carries an identical copy
 /// (`WallpaperExtension/PathSafety.swift`) because an appex cannot import the
-/// app's Core framework — keep the two in sync; `PathSafetyTests` pins this
+/// app's Core framework. Keep the two in sync; `PathSafetyTests` pins this
 /// side.
 ///
 /// Threat model: entry IDs and filenames originate from `metadata.json` files
 /// that live in a shared container. A corrupt or hand-edited file must never
 /// steer a delete/copy (`removeItem`, `copyItem`) outside the library tree.
 public enum PathSafety {
-    /// True for well-formed UUID strings — the only form a library entry
+    /// True for well-formed UUID strings, the only form a library entry
     /// directory ever takes. Rejects `..`, absolute paths, and stray files.
     public static func isValidEntryID(_ id: String) -> Bool { UUID(uuidString: id) != nil }
 

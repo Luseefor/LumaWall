@@ -11,10 +11,10 @@ import QuartzCore
 ///   • sweep FREEZES mid-travel     → the compositor pauses our layer for the transition.
 ///   • sweep JUMPS / snaps to start  → a reset (our layer/animation is being re-added).
 ///   • area goes BLACK               → the surface is being cleared to black, i.e. the
-///     problem is the context, not the video — a much deeper issue.
+///     problem is the context, not the video. The cause sits deeper.
 ///
 /// Toggle by adding/removing `~Documents/COLOR_DIAG` in the extension container and
-/// relaunching the Agent (`killall WallpaperAgent`) — no rebuild, mirrors `Bisect`.
+/// relaunching the Agent (`killall WallpaperAgent`), no rebuild, mirrors `Bisect`.
 enum ColorDiag {
     static var enabled: Bool {
         let url = FileManager.default.homeDirectoryForCurrentUser

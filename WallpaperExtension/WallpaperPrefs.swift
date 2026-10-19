@@ -64,7 +64,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         reload()
     }
 
-    // MARK: - Public (Prefs — app → extension)
+    // MARK: - Public (Prefs, app → extension)
 
     var userPaused: Bool {
         lock.withLock { $0.userPaused }
@@ -87,7 +87,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         lock.withLock { $0.occludedDisplays ?? [] }
     }
 
-    /// Whether this display's wallpaper is invisible behind windows — either its
+    /// Whether this display's wallpaper is invisible behind windows, either its
     /// own display is covered or every display is (global signal from an app
     /// version that predates per-display occlusion).
     func isOccluded(displayID: UInt32) -> Bool {
@@ -115,7 +115,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         lock.withLock { $0.screenSaverIsOurs ?? false }
     }
 
-    // MARK: - Public (State — extension → app)
+    // MARK: - Public (State, extension → app)
 
     /// Call when the extension gains or loses active wallpaper contexts.
     func setActive(_ active: Bool) {
@@ -155,7 +155,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         do {
             data = try Data(contentsOf: Self.prefsURL)
         } catch {
-            return // File doesn't exist yet — normal on first launch
+            return // File doesn't exist yet, normal on first launch
         }
         do {
             let prefs = try JSONDecoder().decode(PrefsFile.self, from: data)
@@ -224,7 +224,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         )
     }
 
-    /// Compute and apply the playback policy to every renderer — per display
+    /// Compute and apply the playback policy to every renderer, per display
     /// when per-display info exists, so per-display pause and occlusion survive
     /// global recomputes (thermal, battery, lock, presentation changes).
     func applyPolicies(
@@ -253,7 +253,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         }
 
         if displayIDs.isEmpty {
-            // No per-display info — apply globally (backward compat). Live
+            // Without per-display info, apply globally (backward compat). Live
             // surfaces only; previews are exempt (see forEachLiveRenderer).
             let global = policy(for: nil)
             state.forEachLiveRenderer { renderer in

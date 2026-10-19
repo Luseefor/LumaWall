@@ -5,7 +5,7 @@ import LumaWallCore
 /// Installs process-wide crash handlers. Uncaught exceptions are written as
 /// structured reports immediately; fatal signals write a plain-text stack dump
 /// with async-signal-safe calls, which `CrashReportStore.ingestRawDumps`
-/// converts into a report on the next launch. Everything stays on disk —
+/// converts into a report on the next launch. Everything stays on disk.
 /// LumaWall never uploads diagnostics.
 enum CrashMonitor {
     private nonisolated(unsafe) static var store: CrashReportStore?

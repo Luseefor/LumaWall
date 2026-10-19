@@ -3,7 +3,7 @@
 Play local video files as macOS wallpapers, with per-display assignments,
 scheduled playlists, and playback rules for power use and Reduce Motion.
 
-**Build locally:** a signed, notarized download is not available yet.
+No signed, notarized download is available yet.
 See [Build](#build) for setup and [Production DMG](#production-dmg) for distribution requirements.
 
 ## Requirements
@@ -17,7 +17,7 @@ See [Build](#build) for setup and [Production DMG](#production-dmg) for distribu
 
 Import MP4 or MOV. Audio is stripped. Apply to one display or all of them.
 
-Home, Library, Displays, and Settings cover browsing, tags, favorites, recents, playlists, and day/night or light/dark pairs. Automations cover sunrise/sunset (approximate location), weekday masks, do-not-interrupt hours, and power-source rules. Lock screen can take the Idle poster through the native wallpaper store when the system allows it.
+Home, Library, Displays, and Settings cover browsing, tags, favorites, recents, and playlists. Day/night and light/dark pairs switch automatically. Automations cover sunrise/sunset (approximate location), weekday masks, do-not-interrupt hours, and power-source rules. Lock screen can take the Idle poster through the native wallpaper store when the system allows it.
 
 Shared overlay decoders reuse one player when the same media hits multiple screens. Reduce Motion freezes to a static frame. Game Mode pauses playback. On battery, a 720p variant can replace the full file. Shortcuts can apply a wallpaper. English and Spanish ship in the string catalog. Settings includes an Energy Log with a 24h sample window for soak checks.
 
@@ -29,7 +29,7 @@ defaults write app.lumawall.personal lumawall.forceOverlay -bool YES
 
 ## How apply works
 
-On macOS 26+ with the wallpaper extension embedded under `Contents/Extensions`, LumaWall deploys the video into the extension container and assigns it through the system wallpaper store (`com.apple.wallpaper`). WallpaperAgent hosts playback. Lock-screen live video depends on what the OS allows that day.
+On macOS 26+ with the wallpaper extension embedded under `Contents/Extensions`, LumaWall deploys the video into the extension container and assigns it through the system wallpaper store (`com.apple.wallpaper`). WallpaperAgent hosts playback. Lock-screen live video depends on what the OS allows.
 
 On macOS 15–25, or in SwiftPM overlay-only builds, LumaWall sets the desktop image to the poster for that screen and plays a muted looping video over it.
 

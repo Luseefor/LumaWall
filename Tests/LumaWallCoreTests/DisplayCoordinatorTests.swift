@@ -5,7 +5,7 @@ import LumaWallCore
 import Testing
 
 /// Display topology invariants against the live screen list. Assertions hold
-/// for any display count (including zero headless screens) — no hardcoded
+/// for any display count (including zero headless screens), no hardcoded
 /// geometry, so the tests stay valid on every machine.
 @Suite(.serialized)
 @MainActor
@@ -13,7 +13,7 @@ struct DisplayCoordinatorTests {
     @Test func refreshMirrorsLiveScreens() {
         let coordinator = DisplayCoordinator()
         let displays = coordinator.refresh()
-        // compactMap may drop invalid entries, so count is bounded — never more.
+        // compactMap may drop invalid entries, so count is bounded, never more.
         #expect(displays.count <= NSScreen.screens.count)
         #expect(coordinator.displays.count == displays.count)
     }

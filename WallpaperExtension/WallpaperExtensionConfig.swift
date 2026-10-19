@@ -6,7 +6,7 @@ struct WallpaperExtensionConfig: AppExtensionConfiguration {
         traceLog("XPC from PID=\(connection.processIdentifier)")
 
         // Validate the caller before building interfaces, exporting the handler,
-        // or resuming — an unexpected (non-Apple) process never reaches our
+        // or resuming, an unexpected (non-Apple) process never reaches our
         // exported methods.
         guard CallerValidation.isAcceptable(connection) else {
             extensionLog("XPC rejected: untrusted caller")
@@ -117,21 +117,21 @@ struct WallpaperExtensionConfig: AppExtensionConfiguration {
                 SpiralRecovery.noteHealthyConnection()
             } else {
                 SpiralRecovery.noteEmptyConnection(pid: pid)
-                extensionLog("XPC invalidated (pid: \(pid)) — EMPTY (no method served)")
+                extensionLog("XPC invalidated (pid: \(pid)). EMPTY (no method served)")
             }
 
             // Context-reuse model: DO NOT tear down contexts on connection drop.
             // Every wallpaper pick (and idle transition) drops the connection holding
             // the current render and re-acquires ~1s later. Our contexts are keyed by
             // display slot (not by connection) and outlive the connection, so the
-            // re-acquire reuses the SAME CAContext (returns the same contextId) — the
+            // re-acquire reuses the SAME CAContext (returns the same contextId), the
             // Agent never drops its host, so there's no gray gap and no exit/recovery
             // is needed. A destroy-on-drop is exactly what caused issue #13 (a routine
             // preview/thumbnail disconnect killing the live wallpaper) and the
             // escalating gray. Contexts are only freed when their video is removed
             // (`removeChoiceRequest`); a genuinely idle process is suspended by
             // RunningBoard, which pauses the renderers at no cost.
-            traceLog("XPC invalidated (pid: \(pid)) — kept \(WallpaperState.shared.activeContextCount) context(s) for reuse")
+            traceLog("XPC invalidated (pid: \(pid)), kept \(WallpaperState.shared.activeContextCount) context(s) for reuse")
         }
 
         // Publish the proxy before resuming so an early incoming callback can't

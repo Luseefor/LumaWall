@@ -40,7 +40,7 @@ public final class DisplayCoordinator {
     public private(set) var displays: [ConnectedDisplay] = []
     // Tokens are non-Sendable; storage is nonisolated(unsafe) so nonisolated
     // deinit can remove the observer. Written once in init, read once in
-    // deinit — no concurrent access.
+    // deinit. No concurrent access.
     nonisolated(unsafe) private var screenParametersObserver: NSObjectProtocol?
 
     public init() {
@@ -96,7 +96,7 @@ public final class DisplayCoordinator {
         let scale = screen.backingScaleFactor
         // NOTE: NSScreen.main follows the key window (whichever display hosts the
         // focused window), NOT the menu-bar / primary display. Using it as "main"
-        // makes "Apply to Main Display" jump between monitors as focus changes —
+        // makes "Apply to Main Display" jump between monitors as focus changes,
         // reported as "when i put one it goes another". The primary display is
         // CGMainDisplayID() (equivalently NSScreen.screens[0]).
         let mainCGID = CGMainDisplayID()

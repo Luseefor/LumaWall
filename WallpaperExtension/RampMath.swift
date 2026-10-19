@@ -1,6 +1,6 @@
 import Foundation
 
-/// The pure math of the playback-rate ramps — separated from `VideoRenderer`'s
+/// The pure math of the playback-rate ramps, separated from `VideoRenderer`'s
 /// timers so the continuity invariants can be tested: a ramp starts at the live
 /// rate, ends exactly on its target, and its duration shrinks in proportion to
 /// the distance it still has to travel.
