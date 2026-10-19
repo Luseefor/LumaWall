@@ -271,6 +271,7 @@ final class AppModel {
             startStatsPolling()
             observeAppearanceChanges()
             observeAutomationClockChanges()
+            observeFirstLocationFix()
             observeReduceMotion()
             observeScreenChanges()
             observeDesktopCoverage()
@@ -1128,17 +1129,17 @@ final class AppModel {
         guard automations.dayNightEnabled else { return }
         let now = Date()
         let calendar = Calendar.autoupdatingCurrent
-        let nextDay = calendar.nextDate(
+        let coordinate = LocationDaylightProvider.shared.coordinate
+        // The timer used to arm only the fixed day/night hours, but the
+        // verdict can also flip on solar transitions, quiet-hours end, and
+        // weekday re-entry — none of which that covered, so switches landed
+        // late, were skipped in quiet hours, or never fired at all.
+        guard let fireDate = automations.nextEvaluationDates(
             after: now,
-            matching: DateComponents(hour: automations.dayStartHour, minute: 0, second: 0),
-            matchingPolicy: .nextTime
-        )
-        let nextNight = calendar.nextDate(
-            after: now,
-            matching: DateComponents(hour: automations.nightStartHour, minute: 0, second: 0),
-            matchingPolicy: .nextTime
-        )
-        guard let fireDate = [nextDay, nextNight].compactMap({ $0 }).min() else { return }
+            calendar: calendar,
+            latitude: coordinate?.latitude,
+            longitude: coordinate?.longitude
+        ).first else { return }
         let interval = max(1, fireDate.timeIntervalSince(now))
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -1180,6 +1181,19 @@ final class AppModel {
                     }
                 }
             )
+        }
+    }
+
+    /// Re-evaluate when the first location fix lands. Solar automations start
+    /// on the hour-based fallback (no coordinate yet); without this they sit
+    /// there until the next armed boundary instead of switching to true
+    /// sunrise/sunset immediately.
+    private func observeFirstLocationFix() {
+        LocationDaylightProvider.shared.onFirstFix = { [weak self] in
+            Task { @MainActor in
+                self?.syncDayNightTimer()
+                self?.evaluateAutomations(force: false)
+            }
         }
     }
 
@@ -1478,7 +1492,14 @@ final class AppModel {
         let callback: IOPowerSourceCallbackType = { context in
             guard let context else { return }
             let model = Unmanaged<AppModel>.fromOpaque(context).takeUnretainedValue()
-            Task { @MainActor in model.applyPlaybackPolicy() }
+            Task { @MainActor in
+                model.applyPlaybackPolicy()
+                // Power-source rules gate automations: re-evaluate so unplug /
+                // replug applies (or lifts) the rule instead of waiting for
+                // the next timer. Dedup inside evaluate keeps this a no-op
+                // when the target is unchanged.
+                model.evaluateAutomations(force: false)
+            }
         }
         guard let source = IOPSNotificationCreateRunLoopSource(
             callback,

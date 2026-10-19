@@ -11,16 +11,70 @@ public enum SolarSchedule: Sendable {
     ) -> Bool {
         let day = calendar.ordinality(of: .day, in: .year, for: date) ?? 1
         let timezoneOffsetHours = Double(calendar.timeZone.secondsFromGMT(for: date)) / 3_600
-        let lngHour = longitude / 15
-        let tRise = Double(day) + ((6 - lngHour) / 24)
-        let tSet = Double(day) + ((18 - lngHour) / 24)
-        let rise = solarTime(t: tRise, latitude: latitude, longitude: longitude, rising: true, timezoneOffsetHours: timezoneOffsetHours)
-        let set = solarTime(t: tSet, latitude: latitude, longitude: longitude, rising: false, timezoneOffsetHours: timezoneOffsetHours)
+        let (rise, set) = sunMinutes(
+            dayOfYear: day,
+            timezoneOffsetHours: timezoneOffsetHours,
+            latitude: latitude,
+            longitude: longitude
+        )
         let minutes = calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
         if rise <= set {
             return minutes >= rise && minutes < set
         }
         return minutes >= rise || minutes < set
+    }
+
+    /// Next sunrise/sunset strictly after `date`, or nil when neither occurs
+    /// in the next two days (polar day/night). The day/night timer arms this
+    /// instead of the fixed start hours when sunrise/sunset drives the
+    /// period — otherwise transitions fall between two fixed boundaries and
+    /// no timer ever fires for them.
+    public static func nextTransition(
+        after date: Date = .now,
+        latitude: Double,
+        longitude: Double,
+        calendar: Calendar = .current
+    ) -> Date? {
+        var candidates: [Date] = []
+        for dayOffset in 0...2 {
+            guard let dayDate = calendar.date(byAdding: .day, value: dayOffset, to: date) else { continue }
+            let day = calendar.ordinality(of: .day, in: .year, for: dayDate) ?? 1
+            let timezoneOffsetHours = Double(calendar.timeZone.secondsFromGMT(for: dayDate)) / 3_600
+            let (rise, set) = sunMinutes(
+                dayOfYear: day,
+                timezoneOffsetHours: timezoneOffsetHours,
+                latitude: latitude,
+                longitude: longitude
+            )
+            // Degenerate polar pairs never transition; skip the day.
+            if (rise == 0 && set == 24 * 60) || (rise == 24 * 60 && set == 0) { continue }
+            for minutes in [rise, set] {
+                let hour = minutes / 60
+                let minute = minutes % 60
+                if let candidate = calendar.date(
+                    bySettingHour: hour, minute: minute, second: 0, of: dayDate
+                ), candidate.timeIntervalSince(date) > 60 {
+                    candidates.append(candidate)
+                }
+            }
+        }
+        return candidates.min()
+    }
+
+    /// Sunrise/sunset minutes after midnight for a day of the year. Shared by
+    /// the daylight check and the transition forecast so the two cannot drift.
+    private static func sunMinutes(
+        dayOfYear day: Int,
+        timezoneOffsetHours: Double,
+        latitude: Double,
+        longitude: Double
+    ) -> (rise: Int, set: Int) {
+        let lngHour = longitude / 15
+        let tRise = Double(day) + ((6 - lngHour) / 24)
+        let tSet = Double(day) + ((18 - lngHour) / 24)
+        let rise = solarTime(t: tRise, latitude: latitude, longitude: longitude, rising: true, timezoneOffsetHours: timezoneOffsetHours)
+        let set = solarTime(t: tSet, latitude: latitude, longitude: longitude, rising: false, timezoneOffsetHours: timezoneOffsetHours)
+        return (rise, set)
     }
 
     private static func solarTime(
@@ -79,6 +133,25 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
     private let lock = NSLock()
     private var _coordinate: CLLocationCoordinate2D?
     private var _lastRequestAt: Date?
+    private var _onFirstFix: (() -> Void)?
+
+    /// Called once, when the first location fix arrives. The app uses it to
+    /// re-evaluate solar automations immediately: the fix lands
+    /// asynchronously after launch, and without this the sunrise/sunset mode
+    /// would sit on the hour-based fallback until the next fixed boundary
+    /// (up to 12 hours off).
+    public var onFirstFix: (() -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onFirstFix
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _onFirstFix = newValue
+        }
+    }
 
     public var coordinate: CLLocationCoordinate2D? {
         lock.lock()
@@ -133,8 +206,11 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         lock.lock()
-        defer { lock.unlock() }
+        let isFirst = _coordinate == nil
         _coordinate = locations.last?.coordinate
+        let handler = _onFirstFix
+        lock.unlock()
+        if isFirst { handler?() }
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
