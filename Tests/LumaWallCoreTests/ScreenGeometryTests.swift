@@ -13,6 +13,25 @@ struct ScreenGeometryTests {
         #expect(back.size == cocoa.size)
     }
 
+    @Test func cocoaWindowMirrorsAroundPrimaryTop() {
+        // Primary 1920x1080 with a taller 2560x1440 sidecar, bottoms aligned:
+        // the sidecar extends 360pt above the primary, so the union's maxY
+        // (1440) is NOT the mirror line — the primary height (1080) is.
+        // A primary-fullscreen window in Quartz coords (y-down from primary
+        // top) must map back onto the primary Cocoa frame exactly.
+        let primary = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let quartzFullscreen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let mapped = ScreenGeometry.cocoaWindow(fromQuartz: quartzFullscreen, primaryHeight: primary.height)
+        #expect(abs(mapped.minX - primary.minX) < 0.001)
+        #expect(abs(mapped.minY - primary.minY) < 0.001)
+        #expect(abs(mapped.width - primary.width) < 0.001)
+        #expect(abs(mapped.height - primary.height) < 0.001)
+        // The old union-mirrored conversion shifts it by the 360pt overhang.
+        let union = CGRect(x: 0, y: 0, width: 4480, height: 1440)
+        let shifted = ScreenGeometry.cocoa(fromQuartz: quartzFullscreen, desktop: union)
+        #expect(abs(shifted.minY - primary.minY) > 100)
+    }
+
     @Test func fullscreenWindowCoversScreen() {
         let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
         #expect(ScreenGeometry.isCovered(screen: screen, windows: [screen]))

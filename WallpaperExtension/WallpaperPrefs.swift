@@ -234,7 +234,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         animated: Bool = false,
     ) {
         let state = WallpaperState.shared
-        let displayIDs = state.uniqueDisplayIDs()
+        let displayIDs = state.liveDisplayIDs()
 
         func policy(for displayID: UInt32?) -> PlaybackPolicy {
             PlaybackPolicy.compute(
@@ -253,15 +253,16 @@ final class WallpaperPrefs: @unchecked Sendable {
         }
 
         if displayIDs.isEmpty {
-            // No per-display info — apply globally (backward compat)
+            // No per-display info — apply globally (backward compat). Live
+            // surfaces only; previews are exempt (see forEachLiveRenderer).
             let global = policy(for: nil)
-            state.forEachRenderer { renderer in
+            state.forEachLiveRenderer { renderer in
                 renderer.applyPolicy(global, animated: animated)
             }
         } else {
             for displayID in displayIDs {
                 let displayPolicy = policy(for: displayID)
-                state.forRenderers(displayID: displayID) { renderer in
+                state.forLiveRenderers(displayID: displayID) { renderer in
                     renderer.applyPolicy(displayPolicy, animated: animated)
                 }
             }

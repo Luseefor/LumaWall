@@ -200,6 +200,22 @@ final class WallpaperState: Sendable {
         }
     }
 
+    /// Execute a closure for renderers on live (non-preview) surfaces.
+    /// Playback policy (pause, battery tiers, occlusion) is about the desktop
+    /// surfaces — preview surfaces (Settings picker, prewarm) must keep
+    /// playing what the user is looking at, not freeze because a fullscreen
+    /// app covers the desktop or a per-display pause targets it. Sleep and
+    /// teardown paths deliberately keep using `forEachRenderer` (nothing
+    /// should decode while displays sleep).
+    func forEachLiveRenderer(_ body: (VideoRenderer) -> Void) {
+        let renderers = lock.withLock { state in
+            state.contexts.values.filter { !$0.isPreview }.compactMap(\.renderer)
+        }
+        for renderer in renderers {
+            body(renderer)
+        }
+    }
+
     /// Whether ANY acquired context tracks the given choice id. Scans every context —
     /// `activeDisplayContexts()` samples one arbitrary context per display, which
     /// misreports when desktop, lock-screen, and preview surfaces coexist on one
@@ -225,6 +241,19 @@ final class WallpaperState: Sendable {
         let renderers = lock.withLock { state in
             state.contexts.values
                 .filter { $0.displayID == displayID }
+                .compactMap(\.renderer)
+        }
+        for renderer in renderers {
+            body(renderer)
+        }
+    }
+
+    /// Execute a closure for renderers on live (non-preview) surfaces of a
+    /// display. See `forEachLiveRenderer` for why policy skips previews.
+    func forLiveRenderers(displayID: UInt32, _ body: (VideoRenderer) -> Void) {
+        let renderers = lock.withLock { state in
+            state.contexts.values
+                .filter { $0.displayID == displayID && !$0.isPreview }
                 .compactMap(\.renderer)
         }
         for renderer in renderers {
@@ -308,6 +337,15 @@ final class WallpaperState: Sendable {
     func uniqueDisplayIDs() -> Set<UInt32> {
         lock.withLock { state in
             Set(state.contexts.values.compactMap(\.displayID))
+        }
+    }
+
+    /// Display IDs with at least one live (non-preview) surface. Policy
+    /// fan-out uses this: a display showing only a Settings preview has no
+    /// desktop surface to govern.
+    func liveDisplayIDs() -> Set<UInt32> {
+        lock.withLock { state in
+            Set(state.contexts.values.filter { !$0.isPreview }.compactMap(\.displayID))
         }
     }
 
