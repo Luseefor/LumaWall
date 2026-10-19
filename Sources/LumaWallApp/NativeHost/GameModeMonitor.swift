@@ -3,33 +3,43 @@ import notify
 
 @MainActor
 final class GameModeMonitor {
-    private static let name = "com.apple.gamepolicy.currentGameplayState"
-    private var token = NOTIFY_TOKEN_INVALID
+    /// gamepolicyd state-carrying Darwin notification name. The extension host
+    /// historically used `com.apple.gamepolicy.game-mode-session`; keep both
+    /// registered so a wrong guess on either side fails open instead of
+    /// silently never pausing for Game Mode.
+    private static let names = [
+        "com.apple.gamepolicy.currentGameplayState",
+        "com.apple.gamepolicy.game-mode-session",
+    ]
+    private var tokens: [Int32] = []
     private(set) var isActive = false
     var onChange: (() -> Void)?
 
     func start() {
-        guard token == NOTIFY_TOKEN_INVALID else { return }
-        var registered = NOTIFY_TOKEN_INVALID
-        // notify_register_dispatch invokes the block off-actor. Hop back to
-        // MainActor before touching isActive/onChange (Swift 6 race otherwise).
-        let status = notify_register_dispatch(Self.name, &registered, DispatchQueue.main) { [weak self] token in
-            Task { @MainActor in self?.update(token: token) }
+        guard tokens.isEmpty else { return }
+        for name in Self.names {
+            var registered = NOTIFY_TOKEN_INVALID
+            // notify_register_dispatch invokes the block off-actor. Hop back to
+            // MainActor before touching isActive/onChange (Swift 6 race otherwise).
+            let status = notify_register_dispatch(name, &registered, DispatchQueue.main) { [weak self] token in
+                Task { @MainActor in self?.update(token: token) }
+            }
+            guard status == NOTIFY_STATUS_OK else { continue }
+            tokens.append(registered)
+            update(token: registered)
         }
-        guard status == NOTIFY_STATUS_OK else { return }
-        token = registered
-        update(token: registered)
     }
 
-    /// Cancel the notify registration. Call on teardown; also guards `deinit`.
+    /// Cancel the notify registrations. Call on teardown; also guards `deinit`.
     func stop() {
-        guard token != NOTIFY_TOKEN_INVALID else { return }
-        notify_cancel(token)
-        token = NOTIFY_TOKEN_INVALID
+        for token in tokens {
+            notify_cancel(token)
+        }
+        tokens.removeAll()
     }
 
     deinit {
-        if token != NOTIFY_TOKEN_INVALID {
+        for token in tokens {
             notify_cancel(token)
         }
     }

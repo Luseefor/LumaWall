@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Darwin
+import IOKit.ps
 import LumaWallCore
 import Observation
 import UniformTypeIdentifiers
@@ -112,6 +113,9 @@ final class AppModel {
     private var coverageTimer: Timer?
     private var lockObservers: [NSObjectProtocol] = []
     private var powerObservers: [NSObjectProtocol] = []
+    /// IOKit power-source runloop source for AC↔battery transitions. Kept alive
+    /// here, scheduled on the main runloop, removed in shutdown.
+    private var powerSourceRunLoopSource: CFRunLoopSource?
     private var sessionLocked = false
     private var displaysAsleep = false
     private var cpuSampler = CPUSampler()
@@ -662,6 +666,10 @@ final class AppModel {
         nativeRestoreWorkItem?.cancel()
         nativeRestoreWorkItem = nil
         gameModeMonitor.stop()
+        if let source = powerSourceRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
+            powerSourceRunLoopSource = nil
+        }
         let center = NotificationCenter.default
         let workspaceCenter = NSWorkspace.shared.notificationCenter
         let distributedCenter = DistributedNotificationCenter.default()
@@ -1432,6 +1440,26 @@ final class AppModel {
                 }
             )
         }
+        observePowerSourceChanges()
+    }
+
+    /// Event-driven AC↔battery (and capacity) transitions via IOKit. The
+    /// notifications above cover thermal and Low Power Mode, but nothing posts
+    /// for unplug/replug — without this, Automatic only noticed the switch at
+    /// the next 15s stats tick (or never, if the tick's power comparison was
+    /// skipped), which reads as "Automatic does nothing".
+    private func observePowerSourceChanges() {
+        let callback: IOPowerSourceCallbackType = { context in
+            guard let context else { return }
+            let model = Unmanaged<AppModel>.fromOpaque(context).takeUnretainedValue()
+            Task { @MainActor in model.applyPlaybackPolicy() }
+        }
+        guard let source = IOPSNotificationCreateRunLoopSource(
+            callback,
+            Unmanaged.passUnretained(self).toOpaque()
+        )?.takeRetainedValue() else { return }
+        powerSourceRunLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
     }
 
     private func observeDesktopCoverage() {
@@ -1552,6 +1580,11 @@ private enum DisplayOcclusion {
     static func analysis(in displays: [ConnectedDisplay]) -> Analysis {
         let desktopLayer = Int(CGWindowLevelForKey(.desktopIconWindow))
         let desktop = displays.map(\.frame).reduce(CGRect.null) { $0.union($1) }
+        // Mirror Quartz rects around the PRIMARY display's top (see
+        // ScreenGeometry.cocoaWindow): the union's maxY is only correct when
+        // no display extends above the primary — a taller sidecar or stacked
+        // layout otherwise shifts every window rect and coverage misfires.
+        let primaryHeight = displays.first(where: \.isMain)?.frame.height ?? desktop.maxY
         guard !desktop.isNull,
               let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
         else { return Analysis(covered: [], fullscreen: [], coverage: [:]) }
@@ -1567,7 +1600,7 @@ private enum DisplayOcclusion {
                 width: bounds["Width"] ?? 0,
                 height: bounds["Height"] ?? 0
             )
-            windows.append((ScreenGeometry.cocoa(fromQuartz: quartz, desktop: desktop), layer))
+            windows.append((ScreenGeometry.cocoaWindow(fromQuartz: quartz, primaryHeight: primaryHeight), layer))
         }
 
         var covered: Set<DisplayID> = []

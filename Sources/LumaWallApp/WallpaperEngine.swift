@@ -16,6 +16,9 @@ final class OverlayWallpaperEngine {
     nonisolated(unsafe) private var recoveryWorkItems: [DispatchWorkItem] = []
     nonisolated(unsafe) private var notificationTokens: [NSObjectProtocol] = []
     nonisolated(unsafe) private var workspaceTokens: [NSObjectProtocol] = []
+    /// Debounced geometry rebuild (see `scheduleGeometryRebuild`). Same
+    /// init-once/deinit-once discipline as the tokens above.
+    nonisolated(unsafe) private var geometryWorkItem: DispatchWorkItem?
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
         self.displays = displays
@@ -32,7 +35,12 @@ final class OverlayWallpaperEngine {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.rebuildGeometry() }
+            // didChangeScreenParameters fires in bursts during a join/cut/mode
+            // probe, and a display can flicker out for a single event. Pruning
+            // sessions on every fire destroys windows for displays that are
+            // still there (and rebuilds them a moment later — the visible
+            // glitch loop). Debounce so only the settled topology applies.
+            Task { @MainActor in self?.scheduleGeometryRebuild() }
         })
         let workspace = NSWorkspace.shared.notificationCenter
         workspaceTokens.append(workspace.addObserver(
@@ -63,6 +71,7 @@ final class OverlayWallpaperEngine {
         for work in recoveryWorkItems {
             work.cancel()
         }
+        geometryWorkItem?.cancel()
     }
 
     var activeDisplayIDs: Set<DisplayID> { Set(sessions.keys) }
@@ -110,6 +119,10 @@ final class OverlayWallpaperEngine {
             sessions[displayID] = session
             session.show()
         }
+        // Kick off the 720p sibling now (async, cached): by the time the user
+        // flips to Battery Saver / unplugs on Automatic, the variant exists and
+        // the tier switch moves to it immediately instead of transcoding first.
+        Task { await BatteryMediaVariant.ensure(for: asset) }
         apply(tier: tiers[displayID] ?? .full, to: displayID)
         reconcileSharedDecoders()
     }
@@ -192,14 +205,30 @@ final class OverlayWallpaperEngine {
         // Each detach cleared layer.contents (black flash) and reset playback,
         // so applying to N displays flickered N times. Only touch sessions
         // whose sharing state actually changed.
+        //
+        // Groups key on the tier-resolved URL (full file vs. 720p battery
+        // sibling), not the raw media path: a display on Battery Saver must
+        // share the downscaled decode with other saver displays, while a Full
+        // Quality display keeps the full-res one. Variants that don't exist
+        // yet resolve to the full file, so grouping degrades to the old
+        // behavior until the background transcode lands (which then regroups).
         var groups: [String: [(DisplayID, DesktopVideoSession)]] = [:]
         for (id, session) in sessions {
-            groups[session.mediaKey, default: []].append((id, session))
+            let tier = tiers[id] ?? .full
+            if tier != .full {
+                Task { await BatteryMediaVariant.ensure(for: session.asset) }
+            }
+            let key = BatteryMediaVariant.resolvedURL(for: session.asset, tier: tier)
+                .standardizedFileURL.path
+            groups[key, default: []].append((id, session))
         }
         var desiredHubKey: [ObjectIdentifier: String?] = [:]
-        for session in sessions.values {
-            let group = groups[session.mediaKey] ?? []
-            desiredHubKey[ObjectIdentifier(session)] = group.count >= 2 ? session.mediaKey : nil
+        for (id, session) in sessions {
+            let tier = tiers[id] ?? .full
+            let key = BatteryMediaVariant.resolvedURL(for: session.asset, tier: tier)
+                .standardizedFileURL.path
+            let group = groups[key] ?? []
+            desiredHubKey[ObjectIdentifier(session)] = group.count >= 2 ? key : nil
         }
         var alreadyCorrect = true
         for session in sessions.values {
@@ -218,8 +247,9 @@ final class OverlayWallpaperEngine {
         for session in sessions.values {
             session.detachSharedHub()
         }
-        for (_, group) in groups {
-            if group.count >= 2, let url = group.first?.1.asset.mediaURL {
+        for (key, group) in groups {
+            if group.count >= 2 {
+                let url = URL(fileURLWithPath: key)
                 let hub = SharedPlaybackHub.acquire(url: url)
                 for _ in 1..<group.count {
                     _ = SharedPlaybackHub.acquire(url: url)
@@ -246,31 +276,39 @@ final class OverlayWallpaperEngine {
     }
 
     func restore(using library: [WallpaperAsset], nativeHostActive: Bool = false) async {
-        let snapshot = await assignments.current()
+        let connected = displays.refresh()
+        let connectedByID = Dictionary(uniqueKeysWithValues: connected.map { ($0.displayID, $0) })
+        let connectedIDs = Set(connectedByID.keys)
+        // Drop sessions for removed displays now: their borderless windows
+        // would otherwise linger over the remaining topology as glitchy
+        // "overlay" rects until the next debounced geometry pass.
+        for id in Array(sessions.keys) where !connectedIDs.contains(id) {
+            sessions.removeValue(forKey: id)?.tearDown()
+            tiers.removeValue(forKey: id)
+        }
+        // A newly attached display has no stored assignment yet. Inherit the
+        // main display's wallpaper so it shows something immediately instead
+        // of the system default (and so the native half below can claim it).
+        // This runs BEFORE the canvas refresh so the new display is included
+        // in the recomputed union — otherwise it inherits a canvas computed
+        // over the old display set and renders the wrong crop until the next
+        // topology event.
+        var snapshot = await assignments.current()
+        let inherited = DisplayTopology.inheritedAssignments(
+            stored: snapshot.assignments,
+            connectedIDs: connectedIDs,
+            mainDisplayID: displays.mainDisplay()?.displayID
+        )
+        if !inherited.isEmpty {
+            try? await assignments.upsert(inherited)
+        }
+        // Canvases go stale the moment the topology changes; refresh before
+        // comparing session compositions so spanning sessions relayout to the
+        // live union instead of rendering the old canvas half off-screen.
+        await refreshSpanningCanvases(connected: connected)
+        snapshot = await assignments.current()
         let byID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
-        let connectedByID = Dictionary(uniqueKeysWithValues: displays.refresh().map { ($0.displayID, $0) })
-        var restoredAssignments = snapshot.assignments
-        var topologyChanged = false
-
-        let spanningWallpaperIDs = Set(restoredAssignments.compactMap { assignment in
-            assignment.composition.spanningCanvas == nil ? nil : assignment.wallpaperID
-        })
-        for wallpaperID in spanningWallpaperIDs {
-            let indices = restoredAssignments.indices.filter { index in
-                restoredAssignments[index].wallpaperID == wallpaperID
-                    && restoredAssignments[index].composition.spanningCanvas != nil
-                    && connectedByID[restoredAssignments[index].displayID] != nil
-            }
-            let frames = indices.compactMap { connectedByID[restoredAssignments[$0].displayID]?.frame }
-            guard let canvas = SpanningGeometry.canvas(for: frames) else { continue }
-            for index in indices where restoredAssignments[index].composition.spanningCanvas != canvas {
-                restoredAssignments[index].composition.spanningCanvas = canvas
-                topologyChanged = true
-            }
-        }
-        if topologyChanged {
-            try? await assignments.replaceAll(with: restoredAssignments)
-        }
+        let restoredAssignments = snapshot.assignments
 
         var synchronizedGroups: [WallpaperID: [DisplayID]] = [:]
         for assignment in restoredAssignments where assignment.isEnabled {
@@ -299,6 +337,36 @@ final class OverlayWallpaperEngine {
         }
     }
 
+    /// Recompute spanning canvases against live display frames and persist when
+    /// they changed. Shared by the restore path and the debounced fast geometry
+    /// path so both converge on the same union.
+    private func refreshSpanningCanvases(connected: [ConnectedDisplay]) async {
+        let snapshot = await assignments.current()
+        let framesByID = Dictionary(uniqueKeysWithValues: connected.map { ($0.displayID, $0.frame) })
+        var stored = snapshot.assignments
+        var topologyChanged = false
+
+        let spanningWallpaperIDs = Set(stored.compactMap { assignment in
+            assignment.composition.spanningCanvas == nil ? nil : assignment.wallpaperID
+        })
+        for wallpaperID in spanningWallpaperIDs {
+            let indices = stored.indices.filter { index in
+                stored[index].wallpaperID == wallpaperID
+                    && stored[index].composition.spanningCanvas != nil
+                    && framesByID[stored[index].displayID] != nil
+            }
+            let frames = indices.compactMap { framesByID[stored[$0].displayID] }
+            guard let canvas = SpanningGeometry.canvas(for: frames) else { continue }
+            for index in indices where stored[index].composition.spanningCanvas != canvas {
+                stored[index].composition.spanningCanvas = canvas
+                topologyChanged = true
+            }
+        }
+        if topologyChanged {
+            try? await assignments.replaceAll(with: stored)
+        }
+    }
+
     func reapplyAssignments() {
         displays.refresh()
         for (id, session) in sessions {
@@ -315,6 +383,11 @@ final class OverlayWallpaperEngine {
         for session in sessions.values {
             session.releaseDecoderNow()
         }
+        // Tiers must go too. `apply(tier:to:)` early-returns when the tier is
+        // unchanged, so keeping them would make the policy pass that follows
+        // "Clear RAM" a no-op — every session would stay decoderless (black)
+        // until some unrelated event happened to flip a tier.
+        tiers.removeAll()
     }
 
     private func reassertAll() {
@@ -334,18 +407,40 @@ final class OverlayWallpaperEngine {
         }
     }
 
-    private func rebuildGeometry() {
-        let connectedIDs = Set(displays.refresh().map(\.displayID))
+    private func scheduleGeometryRebuild(delay: TimeInterval = 0.6) {
+        geometryWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            Task { @MainActor in await self?.rebuildGeometry() }
+        }
+        geometryWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func rebuildGeometry() async {
+        let connected = displays.refresh()
+        let connectedIDs = Set(connected.map(\.displayID))
         // Snapshot the keys: removing while iterating the live view corrupts
         // the dictionary (see dismantleSessions).
         for id in Array(sessions.keys) where !connectedIDs.contains(id) {
             sessions.removeValue(forKey: id)?.tearDown()
             tiers.removeValue(forKey: id)
         }
+        // The cached spanning canvas is in the old coordinate space after a
+        // join/cut/mode change; relayouting survivors with it renders the
+        // video half off-screen. Refresh (and persist) first.
+        await refreshSpanningCanvases(connected: connected)
+        let snapshot = await assignments.current()
+        let compositionByID = Dictionary(
+            uniqueKeysWithValues: snapshot.assignments.map { ($0.displayID, $0.composition) }
+        )
         for (id, session) in sessions {
             guard let screen = displays.screen(for: id),
                   let connected = displays.display(id: id) else { continue }
             session.relayout(screen: screen, connected: connected)
+            if let composition = compositionByID[id],
+               composition != session.currentComposition {
+                session.updateComposition(composition, screen: screen, connected: connected)
+            }
             session.apply(tier: tiers[id] ?? .full)
         }
     }
@@ -379,7 +474,6 @@ final class DesktopVideoSession {
     private var requestedTier: PlaybackTier = .full
     private var displayPixelSize = CGSize.zero
     var currentComposition: DisplayComposition { composition }
-    var mediaKey: String { asset.mediaURL.standardizedFileURL.path }
     var usesSharedDecoder: Bool { sharedHub != nil }
 
     init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
@@ -442,6 +536,13 @@ final class DesktopVideoSession {
         window.setFrame(connected.frame, display: true)
         root.bounds = CGRect(origin: .zero, size: connected.frame.size)
         root.apply(composition: composition, poster: asset.posterURL, displayFrame: connected.frame)
+    }
+
+    /// Adopt a new composition (e.g. a refreshed spanning canvas) without
+    /// rebuilding the decoder: the crop only affects layer geometry.
+    func updateComposition(_ composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
+        self.composition = composition
+        relayout(screen: screen, connected: connected)
     }
 
     func reassert() {

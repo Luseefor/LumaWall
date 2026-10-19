@@ -3,12 +3,14 @@ import LumaWallCore
 
 @MainActor
 final class WallpaperEngine {
+    private let displays: DisplayCoordinator
     private let overlay: OverlayWallpaperEngine
     private let native: NativeWallpaperEngine?
     private let assignments: AssignmentStore
     private(set) var mode: WallpaperHostMode
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
+        self.displays = displays
         self.assignments = assignments
         self.overlay = OverlayWallpaperEngine(displays: displays, assignments: assignments)
         self.mode = WallpaperHostCapabilities.preferredMode
@@ -123,9 +125,15 @@ final class WallpaperEngine {
     }
 
     private func needsOverlaySplit() async -> Bool {
+        // Only CONNECTED displays count. Assignments for disconnected
+        // displays are kept for reconnect resume, but letting them hold split
+        // mode on leaves the overlay owning nothing while the native host
+        // skips displays it should claim.
+        let connectedIDs = Set(displays.refresh().map(\.displayID))
         let snapshot = await assignments.current()
         return snapshot.assignments.contains {
-            $0.isEnabled && (!$0.composition.usesDefaultCrop || $0.composition.spanningCanvas != nil)
+            $0.isEnabled && connectedIDs.contains($0.displayID)
+                && (!$0.composition.usesDefaultCrop || $0.composition.spanningCanvas != nil)
         }
     }
 

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import LumaWallCore
 import os
@@ -11,11 +12,20 @@ final class NativeWallpaperEngine {
     private var active: [DisplayID: (WallpaperID, DisplayComposition)] = [:]
     private var tiers: [DisplayID: PlaybackTier] = [:]
     private var libraryByID: [WallpaperID: WallpaperAsset] = [:]
-    /// Last (cgDisplayID → entryID) map actually written to Index.plist.
+    /// Last (stable display UUID → entryID) map actually written to Index.plist.
     /// Restores that resolve to the identical map skip the plist rewrite +
     /// WallpaperAgent kill — those are what black-flash every display on a
     /// join/cut burst or redundant refresh.
-    private var lastWrittenMap: [UInt32: String] = [:]
+    ///
+    /// Keyed by the CG display UUID, NOT the CGDirectDisplayID: numeric IDs
+    /// shift when monitors join/leave (and get reused), so a cg-keyed map can
+    /// compare equal after a topology change and skip a rewrite the new
+    /// topology actually needs.
+    private var lastWrittenMap: [String: String] = [:]
+
+    private func stableUUID(for cgDisplayID: CGDirectDisplayID) -> String? {
+        NativeWallpaperAssignmentService.stableUUID(for: cgDisplayID)
+    }
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
         self.displays = displays
@@ -53,7 +63,9 @@ final class NativeWallpaperEngine {
         nativeHostLog.info("apply: \(asset.name, privacy: .public) → display \(displayID.rawValue, privacy: .public)")
         libraryByID[asset.id] = asset
         active[displayID] = (asset.id, composition)
-        lastWrittenMap[connected.cgDisplayID] = entry.id
+        if let uuid = stableUUID(for: connected.cgDisplayID) {
+            lastWrittenMap[uuid] = entry.id
+        }
         try await assignments.upsert(
             DisplayAssignment(displayID: displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
         )
@@ -72,7 +84,9 @@ final class NativeWallpaperEngine {
         libraryByID[asset.id] = asset
         for display in connected {
             active[display.displayID] = (asset.id, composition)
-            lastWrittenMap[display.cgDisplayID] = entry.id
+            if let uuid = stableUUID(for: display.cgDisplayID) {
+                lastWrittenMap[uuid] = entry.id
+            }
         }
         try await assignments.upsert(connected.map {
             DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
@@ -82,8 +96,9 @@ final class NativeWallpaperEngine {
     func clear(_ displayID: DisplayID) async throws {
         active.removeValue(forKey: displayID)
         tiers.removeValue(forKey: displayID)
-        if let cg = displays.display(id: displayID)?.cgDisplayID {
-            lastWrittenMap.removeValue(forKey: cg)
+        if let cg = displays.display(id: displayID)?.cgDisplayID,
+           let uuid = stableUUID(for: cg) {
+            lastWrittenMap.removeValue(forKey: uuid)
         }
         try await assignments.clear(displayID: displayID)
     }
@@ -103,10 +118,33 @@ final class NativeWallpaperEngine {
     /// owns non-default displays (`onlyDefaultCrop`), those assignments are
     /// left for the overlay engine — writing them here would fight it.
     func restore(using library: [WallpaperAsset], onlyDefaultCrop: Bool = false) async {
-        let snapshot = await assignments.current()
+        let connected = displays.refresh()
+        let connectedIDs = Set(connected.map(\.displayID))
+        let connectedUUIDs = Set(connected.compactMap { stableUUID(for: $0.cgDisplayID) })
+        // Drop bookkeeping for removed displays so stale entries can't make
+        // the restore look like a no-op (or leak ghost wallpapers into the UI).
+        for id in Array(active.keys) where !connectedIDs.contains(id) {
+            active.removeValue(forKey: id)
+            tiers.removeValue(forKey: id)
+        }
+        lastWrittenMap = lastWrittenMap.filter { uuid, _ in
+            connectedUUIDs.contains(uuid)
+        }
+        var snapshot = await assignments.current()
+        // A newly attached display has no stored assignment yet. Inherit the
+        // main display's wallpaper so it joins the current setup instead of
+        // keeping whatever macOS put there.
+        let inherited = DisplayTopology.inheritedAssignments(
+            stored: snapshot.assignments,
+            connectedIDs: connectedIDs,
+            mainDisplayID: displays.mainDisplay()?.displayID
+        )
+        if !inherited.isEmpty {
+            try? await assignments.upsert(inherited)
+            snapshot = await assignments.current()
+        }
         let byID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         libraryByID = byID
-        let connected = displays.refresh()
         let enabled = snapshot.assignments.filter(\.isEnabled)
         nativeHostLog.info("restore: \(enabled.count) enabled assignment(s), \(connected.count) display(s)")
         var map: [UInt32: NativeWallpaperDeployment.EntryInfo] = [:]
@@ -135,7 +173,11 @@ final class NativeWallpaperEngine {
             nativeHostLog.info("restore: nothing to assign")
             return
         }
-        let fingerprint = map.mapValues(\.id)
+        let fingerprint = Dictionary(
+            uniqueKeysWithValues: map.compactMap { cg, entry in
+                stableUUID(for: cg).map { ($0, entry.id) }
+            }
+        )
         if fingerprint == lastWrittenMap {
             nativeHostLog.info("restore: assignments unchanged — skipping Index.plist rewrite + agent restart")
             return

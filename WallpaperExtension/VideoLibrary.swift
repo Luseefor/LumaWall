@@ -73,6 +73,7 @@ final class VideoLibrary: Sendable {
         guard let chosen = VariantSelection.variant(
             for: policy,
             sourceFPS: Int(entry.fps.rounded()),
+            sourceResolution: entry.resolution,
             variants: entry.variants ?? [],
         ) else {
             return videoURL(for: entry)

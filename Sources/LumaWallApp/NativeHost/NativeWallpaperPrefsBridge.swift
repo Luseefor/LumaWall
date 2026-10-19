@@ -53,8 +53,11 @@ enum NativeWallpaperPrefsBridge {
         guard let data = try? JSONEncoder().encode(file) else { return }
         // The extension reloads this file at init, so skipping an identical
         // rewrite loses nothing — and spares a Darwin-notify round trip plus
-        // a full policy recompute on every unchanged evaluation.
-        guard file != lastWritten else { return }
+        // a full policy recompute on every unchanged evaluation. The existence
+        // check covers an externally deleted container (clear caches, fresh
+        // install over a running app): without it we'd skip the rewrite
+        // forever because the in-memory fingerprint still matches.
+        if file == lastWritten, FileManager.default.fileExists(atPath: prefsURL.path) { return }
         try? data.write(to: prefsURL, options: .atomic)
         lastWritten = file
         let center = CFNotificationCenterGetDarwinNotifyCenter()

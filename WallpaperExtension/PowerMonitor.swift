@@ -9,11 +9,16 @@ final class PowerMonitor: Sendable {
     private let state = OSAllocatedUnfairLock(initialState: PowerState())
     private let continuations = OSAllocatedUnfairLock(initialState: [UUID: AsyncStream<PowerState>.Continuation]())
     private nonisolated(unsafe) var _batteryScheduler: NSBackgroundActivityScheduler?
-    private let gameModeToken = OSAllocatedUnfairLock(initialState: NOTIFY_TOKEN_INVALID)
+    private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
 
     /// gamepolicyd's state-carrying Darwin notification for Game Mode sessions
     /// (name recovered from the gamepolicyd binary; posted with notify_set_state).
-    private static let gameModeNotification = "com.apple.gamepolicy.game-mode-session"
+    /// The app host historically used `...currentGameplayState`; watch both so
+    /// a wrong guess on either side fails open instead of never pausing.
+    private static let gameModeNotifications = [
+        "com.apple.gamepolicy.game-mode-session",
+        "com.apple.gamepolicy.currentGameplayState",
+    ]
 
     struct PowerState: Equatable {
         var thermalState: ProcessInfo.ThermalState = .nominal
@@ -109,19 +114,21 @@ final class PowerMonitor: Sendable {
 
         // Game Mode — event-driven via gamepolicyd's state-carrying notification.
         // Reaches the sandboxed extension: com.apple.* notify names aren't filtered.
-        var token = NOTIFY_TOKEN_INVALID
-        let status = notify_register_dispatch(
-            Self.gameModeNotification, &token,
-            DispatchQueue.global(qos: .utility),
-        ) { [weak self] token in
-            self?.updateGameModeState(token: token)
-        }
-        if status == UInt32(NOTIFY_STATUS_OK) {
-            let registered = token
-            gameModeToken.withLock { $0 = registered }
-            updateGameModeState(token: registered)
-        } else {
-            extensionLog("[PowerMonitor] Game Mode notify registration failed (status \(status))")
+        for name in Self.gameModeNotifications {
+            var token = NOTIFY_TOKEN_INVALID
+            let status = notify_register_dispatch(
+                name, &token,
+                DispatchQueue.global(qos: .utility),
+            ) { [weak self] token in
+                self?.updateGameModeState(token: token)
+            }
+            if status == UInt32(NOTIFY_STATUS_OK) {
+                let registered = token
+                gameModeTokens.withLock { $0.append(registered) }
+                updateGameModeState(token: registered)
+            } else {
+                extensionLog("[PowerMonitor] Game Mode notify registration failed for \(name) (status \(status))")
+            }
         }
 
         let thermal = ProcessInfo.processInfo.thermalState.rawValue
@@ -150,22 +157,32 @@ final class PowerMonitor: Sendable {
 
     private func updateBatteryState() {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [Any],
-              let first = sources.first,
-              let desc = IOPSGetPowerSourceDescription(snapshot, first as CFTypeRef)?.takeUnretainedValue() as? [String: Any]
+              let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
         else { return }
 
-        let isOnBattery: Bool = if let powerSource = desc[kIOPSPowerSourceStateKey] as? String {
-            powerSource == kIOPSBatteryPowerValue
-        } else {
-            false
+        // Walk EVERY source: the list mixes battery + AC adapter entries, and
+        // the adapter entry carries no capacity and reports AC state. Reading
+        // only `sources.first` (the old code) pinned the host to AC/100% on
+        // machines where the adapter sorts first — Automatic never saw battery,
+        // and every profile evaluated against stale AC power ("does nothing").
+        var percent = 100
+        var onBattery = false
+        for source in sources {
+            guard let desc = IOPSGetPowerSourceDescription(snapshot, source)?.takeUnretainedValue() as? [String: Any]
+            else { continue }
+            if let value = desc[kIOPSCurrentCapacityKey] as? Int {
+                percent = min(percent, max(0, value))
+            }
+            if let state = desc[kIOPSPowerSourceStateKey] as? String {
+                onBattery = onBattery || state == kIOPSBatteryPowerValue
+            }
         }
-        let batteryLevel = desc[kIOPSCurrentCapacityKey] as? Int ?? 100
 
+        let resolved = (onBattery: onBattery, percent: percent)
         let previous = state.withLock { $0 }
         state.withLock { s in
-            s.isOnBattery = isOnBattery
-            s.batteryLevel = batteryLevel
+            s.isOnBattery = resolved.onBattery
+            s.batteryLevel = resolved.percent
         }
         let current = state.withLock { $0 }
         guard previous != current else { return }
