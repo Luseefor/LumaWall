@@ -433,6 +433,18 @@ final class VideoRenderer: @unchecked Sendable {
                 pause()
             }
         case .full, .reduced, .minimal:
+            // Battery tiers resolve to downscaled siblings via variantSelector,
+            // but the selector is otherwise consulted only at loop boundaries —
+            // without this, flipping to Battery Saver (or unplugging on
+            // Automatic) kept playing the full file until the clip looped, up
+            // to a minute later. Switch now when the URL differs; the trailing
+            // resume/ramp then continues on the right variant.
+            if let selector = variantSelector {
+                let url = selector()
+                if url != asset.url {
+                    switchVideo(to: url)
+                }
+            }
             if animated {
                 rampUp()
             } else {

@@ -4,6 +4,11 @@ import LumaWallCore
 
 /// Silent 1280x720 library sibling used on reduced and minimal tiers.
 enum BatteryMediaVariant {
+    /// Tracks assets with a transcode currently running (see `ensure`).
+    /// MainActor-guarded: every caller is MainActor-isolated.
+    @MainActor
+    private static var inFlight = Set<String>()
+
     static func url(for asset: WallpaperAsset) -> URL {
         asset.mediaURL.deletingLastPathComponent().appendingPathComponent("Wallpaper.battery.mov")
     }
@@ -23,9 +28,17 @@ enum BatteryMediaVariant {
     static func ensure(for asset: WallpaperAsset) async {
         let dest = url(for: asset)
         if FileManager.default.fileExists(atPath: dest.path) { return }
-        guard asset.framesPerSecond > 30
-            || max(asset.pixelSize.width, asset.pixelSize.height) > 1_920
+        // Transcode anything above 720p: the sibling is what reduced/minimal
+        // tiers actually play, so without it those profiles only move a bitrate
+        // hint and look like they "do nothing". 720p and below play as-is.
+        guard max(asset.pixelSize.width, asset.pixelSize.height) > 1_280
         else { return }
+        // Applies fan out one ensure per display/session; without this two of
+        // them transcode the same source at once (all callers are MainActor,
+        // so a plain set suffices).
+        let key = asset.mediaURL.standardizedFileURL.path
+        guard inFlight.insert(key).inserted else { return }
+        defer { inFlight.remove(key) }
 
         let source = AVURLAsset(url: asset.mediaURL)
         guard let export = AVAssetExportSession(asset: source, presetName: AVAssetExportPreset1280x720)
