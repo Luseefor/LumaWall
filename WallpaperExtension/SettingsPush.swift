@@ -2,8 +2,8 @@ import Foundation
 
 /// Pushes freshly built settings view models to every live host connection.
 ///
-/// The system caches each provider's view models on disk and — on macOS 26.6, unlike
-/// 26.5 — serves that cache on every Settings launch, re-querying the extension only
+/// The system caches each provider's view models on disk and, on macOS 26.6, unlike
+/// 26.5, serves that cache on every Settings launch, re-querying the extension only
 /// after an extension (re)installation or an OS update. Without a push, a library
 /// change made between queries never becomes visible; in particular, the first query
 /// fires at registration, before the user has added any video, so a fresh install
@@ -36,7 +36,7 @@ enum SettingsPush {
         handlers.removeAll { $0.handler == nil || $0.handler === handler }
     }
 
-    /// Pending debounce work. Touched only on the main thread — Darwin
+    /// Pending debounce work. Touched only on the main thread. Darwin
     /// notifications are delivered on the registering thread's run loop, and the
     /// observer is registered from the extension's init on main.
     private nonisolated(unsafe) static var pending: DispatchWorkItem?
@@ -54,7 +54,7 @@ enum SettingsPush {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
-    /// Snapshot the live proxies synchronously — `NSLock` may not be taken from an
+    /// Snapshot the live proxies synchronously. `NSLock` may not be taken from an
     /// async context.
     private static func liveProxies() -> [any WallpaperExtensionProxyXPCProtocol] {
         lock.lock()
@@ -65,12 +65,12 @@ enum SettingsPush {
     /// Build the current view models once and send them over every live connection.
     static func push() async {
         guard let models = await buildSettingsViewModelsXPC() else {
-            extensionLog("[SettingsPush] Build failed — nothing pushed")
+            extensionLog("[SettingsPush] Build failed, nothing pushed")
             return
         }
         let proxies = liveProxies()
         guard !proxies.isEmpty else {
-            extensionLog("[SettingsPush] No live host connection — cache refreshes on the next query")
+            extensionLog("[SettingsPush] No live host connection, cache refreshes on the next query")
             return
         }
         extensionLog("[SettingsPush] Pushing view models to \(proxies.count) connection(s)")

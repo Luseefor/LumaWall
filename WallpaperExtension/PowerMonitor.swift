@@ -71,7 +71,7 @@ final class PowerMonitor: Sendable {
         updateBatteryState()
         updateBrightnessState()
 
-        // Thermal state — event-driven via notification
+        // Thermal state, event-driven via notification
         NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification,
             object: nil, queue: nil,
@@ -85,7 +85,7 @@ final class PowerMonitor: Sendable {
             self?.handleLowPowerModeChange()
         }
 
-        // Battery + brightness — OS-managed periodic check.
+        // Battery and brightness use an OS-managed periodic check.
         // Brightness needs polling because IODisplay doesn't broadcast a
         // notification when the user drags the slider, and `screensDidSleep`
         // doesn't fire when brightness is held at zero manually.
@@ -112,7 +112,7 @@ final class PowerMonitor: Sendable {
         }
         _batteryScheduler = scheduler
 
-        // Game Mode — event-driven via gamepolicyd's state-carrying notification.
+        // Game Mode, event-driven via gamepolicyd's state-carrying notification.
         // Reaches the sandboxed extension: com.apple.* notify names aren't filtered.
         for name in Self.gameModeNotifications {
             var token = NOTIFY_TOKEN_INVALID
@@ -163,7 +163,7 @@ final class PowerMonitor: Sendable {
         // Walk EVERY source: the list mixes battery + AC adapter entries, and
         // the adapter entry carries no capacity and reports AC state. Reading
         // only `sources.first` (the old code) pinned the host to AC/100% on
-        // machines where the adapter sorts first — Automatic never saw battery,
+        // machines where the adapter sorts first. Automatic never saw battery,
         // and every profile evaluated against stale AC power ("does nothing").
         var percent = 100
         var onBattery = false

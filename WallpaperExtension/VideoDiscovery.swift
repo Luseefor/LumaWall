@@ -2,9 +2,9 @@ import AVFoundation
 import ImageIO
 
 /// Resolve a video URL for a specific choice. Each rendering context owns
-/// its own choice — never read the process-wide "current" selection here,
-/// or concurrent acquires for different displays will race and a renderer
-/// can end up initialized with the wrong monitor's video.
+/// its own choice. Never read the process-wide "current" selection here.
+/// Concurrent acquires for different displays would otherwise race, and a
+/// renderer can end up initialized with the wrong monitor's video.
 ///
 /// Returns nil when the exact choice is unavailable. Callers show a static
 /// gradient fallback in that case. Deliberately NO fallback to "first video
@@ -16,7 +16,7 @@ func findVideoURL(forChoice videoID: String?) -> URL? {
           FileManager.default.fileExists(atPath: url.path)
     else {
         if videoID != nil {
-            extensionLog("  [VideoDiscovery] no file for choice \(videoID ?? "nil") — returning nil (no wrong-video fallback)")
+            extensionLog("  [VideoDiscovery] no file for choice \(videoID ?? "nil"), returning nil (no wrong-video fallback)")
         }
         return nil
     }
@@ -25,7 +25,7 @@ func findVideoURL(forChoice videoID: String?) -> URL? {
 
 /// Compatibility wrapper for callers without a per-context choice (snapshot
 /// requests that don't carry a wallpaperID, etc.). Uses the last user-picked
-/// video as a best-effort hint — do not use this on the rendering path.
+/// video as a best-effort hint. Do not use this on the rendering path.
 func findVideoURL() -> URL? {
     findVideoURL(forChoice: WallpaperState.shared.currentVideoID)
 }

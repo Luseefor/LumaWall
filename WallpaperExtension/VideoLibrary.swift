@@ -193,7 +193,7 @@ final class VideoLibrary: Sendable {
     func removeVideo(id: String) {
         let dir = videosDir.appendingPathComponent(id)
         // Only ever delete a valid UUID directory that resolves inside the
-        // library — a malformed id must not reach removeItem at all.
+        // library. A malformed id must not reach removeItem at all.
         guard PathSafety.isValidEntryID(id), PathSafety.contained(dir, in: videosDir) else {
             extensionLog("[VideoLibrary] Refusing to remove unsafe id: \(id)")
             return

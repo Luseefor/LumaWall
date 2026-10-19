@@ -17,7 +17,7 @@ final class SharedPlaybackHub {
     /// Layers whose sessions are paused/static. They keep their last pumped
     /// frame (pump skips them) while the hub keeps playing for the remaining
     /// unpaused layers. Without this, pausing one display paused the shared
-    /// player for every display on the same video — and resuming one resumed
+    /// player for every display on the same video, and resuming one resumed
     /// the paused ones (the per-display pause fight).
     private var pausedLayers: Set<ObjectIdentifier> = []
     private var pumpTimer: Timer?
@@ -67,7 +67,7 @@ final class SharedPlaybackHub {
 
     /// Mark one attached layer paused (holds its last frame) or playing.
     /// The shared player runs while ANY attached layer is unpaused and pauses
-    /// only when all of them are — so per-display pause no longer freezes (or
+    /// only when all of them are, so per-display pause no longer freezes (or
     /// resumes) sibling displays on the same video.
     func setLayerPaused(_ paused: Bool, for layer: CALayer) {
         let id = ObjectIdentifier(layer)

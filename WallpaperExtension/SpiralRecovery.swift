@@ -40,12 +40,12 @@ enum SpiralRecovery {
            let last = Double((String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) {
             let since = Date().timeIntervalSince1970 - last
             if since < recoveryCooldown {
-                extensionLog("  [spiral] STUCK (agent pid \(pid), \(count) empty) but signaled \(Int(since))s ago (< \(Int(recoveryCooldown))s cooldown) — holding off")
+                extensionLog("  [spiral] STUCK (agent pid \(pid), \(count) empty) but signaled \(Int(since))s ago (< \(Int(recoveryCooldown))s cooldown), holding off")
                 return
             }
         }
         try? Data("\(Date().timeIntervalSince1970)".utf8).write(to: lastRecoveryURL)
-        extensionLog("  [spiral] STUCK — \(count) consecutive empty connections from agent pid \(pid), no acquire. Signaling app to killall WallpaperAgent.")
+        extensionLog("  [spiral] STUCK, \(count) consecutive empty connections from agent pid \(pid), no acquire. Signaling app to killall WallpaperAgent.")
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(agentStuckNotification as CFString),

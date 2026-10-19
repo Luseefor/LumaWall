@@ -16,7 +16,7 @@ struct ScreenGeometryTests {
     @Test func cocoaWindowMirrorsAroundPrimaryTop() {
         // Primary 1920x1080 with a taller 2560x1440 sidecar, bottoms aligned:
         // the sidecar extends 360pt above the primary, so the union's maxY
-        // (1440) is NOT the mirror line — the primary height (1080) is.
+        // (1440) is not the mirror line. The primary height (1080) is.
         // A primary-fullscreen window in Quartz coords (y-down from primary
         // top) must map back onto the primary Cocoa frame exactly.
         let primary = CGRect(x: 0, y: 0, width: 1920, height: 1080)

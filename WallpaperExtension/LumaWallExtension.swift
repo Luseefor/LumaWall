@@ -9,9 +9,9 @@ final class LumaWallExtension: NSObject, AppExtension {
 
         let frameworkPath = "/System/Library/PrivateFrameworks/WallpaperExtensionKit.framework/WallpaperExtensionKit"
         if let handle = dlopen(frameworkPath, RTLD_LAZY) {
-            // Keep handle open — framework must stay loaded for vtable/C-function-pointer validity.
+            // Keep the handle open. The framework must stay loaded for vtable/C-function-pointer validity.
             _ = handle
-            extensionLog("INIT (PID: \(ProcessInfo.processInfo.processIdentifier)) — WallpaperExtensionKit loaded")
+            extensionLog("INIT (PID: \(ProcessInfo.processInfo.processIdentifier)). WallpaperExtensionKit loaded")
             verifyRuntimeLayout()
             VideoLibrary.shared.scan()
             observeLibraryChanges()
@@ -42,13 +42,13 @@ final class LumaWallExtension: NSObject, AppExtension {
             }
         } else {
             let err = String(cString: dlerror())
-            extensionLog("INIT (PID: \(ProcessInfo.processInfo.processIdentifier)) — dlopen failed: \(err)")
+            extensionLog("INIT (PID: \(ProcessInfo.processInfo.processIdentifier)), dlopen failed: \(err)")
         }
     }
 
     /// Startup self-check: confirm the private WallpaperExtensionKit classes the
     /// extension bridges to are present after dlopen. This doesn't fail the
-    /// launch — the per-call guards already fail closed — but it surfaces an
+    /// launch. The per-call guards already fail closed, but it surfaces an
     /// unsupported OS/runtime layout in one clear log line up front instead of
     /// as scattered downstream failures, which is the documented manual
     /// compatibility check for OS upgrades.
@@ -62,9 +62,9 @@ final class LumaWallExtension: NSObject, AppExtension {
         ]
         let missing = critical.filter { objc_getClass($0) == nil }
         if missing.isEmpty {
-            extensionLog("  [SelfCheck] Runtime layout OK — all \(critical.count) critical classes present")
+            extensionLog("  [SelfCheck] Runtime layout OK, all \(critical.count) critical classes present")
         } else {
-            extensionLog("  [SelfCheck] UNSUPPORTED RUNTIME — missing: \(missing.joined(separator: ", ")). Rendering/snapshots may be degraded.")
+            extensionLog("  [SelfCheck] UNSUPPORTED RUNTIME, missing: \(missing.joined(separator: ", ")). Rendering/snapshots may be degraded.")
         }
     }
 
@@ -80,7 +80,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             WallpaperState.shared.forEachRenderer { renderer in
                 renderer.applyPolicy(.paused)
             }
-            extensionLog("[Extension] Displays asleep — paused all renderers")
+            extensionLog("[Extension] Displays asleep, paused all renderers")
         }
         center.addObserver(
             forName: NSWorkspace.screensDidWakeNotification,
@@ -89,7 +89,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             WallpaperState.shared.isDisplayAsleep = false
             Self.recomputeAndApplyPolicy()
             ShuffleController.shared.noteWake()
-            extensionLog("[Extension] Displays awake — recomputed policy (locked: \(WallpaperState.shared.isScreenLocked))")
+            extensionLog("[Extension] Displays awake, recomputed policy (locked: \(WallpaperState.shared.isScreenLocked))")
 
             // Recompute again after a short delay to catch any pending
             // WallpaperAgent presentation mode updates that arrive after wake.
@@ -101,7 +101,7 @@ final class LumaWallExtension: NSObject, AppExtension {
 
     /// Track screen lock state via distributed notifications from loginwindow.
     /// This lets us know the lock screen is showing even before the WallpaperAgent
-    /// sends a presentation mode update — fixing the race where a video paused
+    /// sends a presentation mode update, fixing the race where a video paused
     /// on the desktop doesn't resume on the lock screen after lid open.
     private func observeScreenLockState() {
         let dnc = DistributedNotificationCenter.default()
@@ -119,7 +119,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             WallpaperState.shared.isScreenLocked = false
             Self.recomputeAndApplyPolicy()
             ShuffleController.shared.noteWake()
-            extensionLog("[Extension] Screen unlocked — recomputed policy")
+            extensionLog("[Extension] Screen unlocked, recomputed policy")
         }
     }
 

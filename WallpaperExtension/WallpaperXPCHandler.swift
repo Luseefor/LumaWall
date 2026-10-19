@@ -7,7 +7,7 @@ import QuartzCore
 /// Builds the adaptive variant selector for a renderer. Captures only Sendable
 /// values (the choice ID + a fallback URL), so it can cross into the render Task.
 /// Reading the per-context `choice` (not the process-wide `currentVideoID`) keeps
-/// each display on its own selection — otherwise every renderer would converge on
+/// each display on its own selection. Otherwise every renderer would converge on
 /// whichever choice was set most recently (multi-monitor bug).
 func makeVariantSelector(choice: String?, fallback: URL) -> @Sendable () -> URL {
     {
@@ -33,11 +33,11 @@ func makeVariantSelector(choice: String?, fallback: URL) -> @Sendable () -> URL 
 /// own `WallpaperXPCHandler`, but the Agent multiplexes desktop + Settings-preview +
 /// thumbnail connections, so lifecycle callbacks (acquire/update/invalidate/choice
 /// change) can otherwise interleave across connections. We funnel them all through ONE
-/// serial queue — mirroring Apple's single `Controller`-actor `AsyncQueue` — so an
+/// serial queue, mirroring Apple's single `Controller`-actor `AsyncQueue`, so an
 /// invalidate can't slip between the halves of an acquire.
 /// Carries a non-Sendable value (e.g. a `CALayer`) into a `Task` without tainting the
 /// closure's isolation region. `nonisolated(unsafe)` on a local isn't enough under Swift 6.2
-/// region-based isolation — capturing the raw layer merges other (Sendable) captures like
+/// region-based isolation, capturing the raw layer merges other (Sendable) captures like
 /// `videoURL` into a non-Sendable region, which then trips the `sending` checker across the
 /// sibling BMP-snapshot Task. Boxing makes the capture genuinely Sendable.
 struct SendableBox<T>: @unchecked Sendable { let value: T }
@@ -112,7 +112,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
     /// Whether any exported method has been invoked on this connection. Read by the
     /// invalidationHandler: a connection that is accepted and invalidated without ever
-    /// serving a method is "empty" — the WallpaperAgent spiral-of-death signal
+    /// serving a method is "empty", the WallpaperAgent spiral-of-death signal
     /// (see SpiralRecovery). Set synchronously at each method's entry, before any queue hop.
     private let servedMethod = OSAllocatedUnfairLock(initialState: false)
     var didServeMethod: Bool {
@@ -128,7 +128,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
     // MARK: - Lifecycle
 
-    /// Stable per-display surface UUID for the rare acquire that carries no WallpaperID — so
+    /// Stable per-display surface UUID for the rare acquire that carries no WallpaperID, so
     /// such acquires still collapse to one context per display (old behavior) instead of
     /// minting a fresh context each time. Encodes the displayID into a fixed UUID layout.
     static func fallbackSurfaceUUID(forDisplay displayID: UInt32) -> UUID {
@@ -163,7 +163,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
     /// Clamp a non-preview acquire viewport to the live display geometry when it
     /// is far smaller than the display. Desktop/lock/Idle surfaces always cover
     /// their display, so a much smaller request is a stale probe or a
-    /// thumbnail-size acquire on a reused key — serving it as-is would mint a
+    /// thumbnail-size acquire on a reused key, serving it as-is would mint a
     /// stuck half-scale surface the agent hosts small over the full-bleed
     /// still. Returns the input unchanged for previews, unknown/offline
     /// displays, and sizes within tolerance (covers rounding and transient
@@ -198,7 +198,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
     /// Re-frame any non-preview surface whose stored geometry is far smaller
     /// than its live display (a transitional acquire minted it small and no
-    /// later re-acquire healed it — the stuck half-scale wallpaper). Reuses
+    /// later re-acquire healed it, the stuck half-scale wallpaper). Reuses
     /// the REUSE path's own re-frame, so a healed surface is indistinguishable
     /// from a display mode change. Must run on `Lifecycle.queue`. Quiet unless
     /// it heals something. Renderer-less and preview surfaces are skipped:
@@ -270,15 +270,15 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             }
         }
         // Mirror layout is private and can shift between OS versions. If it failed,
-        // fall back to the live display's pixel size instead of a hardcoded 1440p —
-        // a wrong-sized root layer renders into a sub-region (half off-screen).
+        // fall back to the live display's pixel size instead of a hardcoded 1440p.
+        // A wrong-sized root layer renders into a sub-region (half off-screen).
         if !didExtractGeometry, let did = displayID, CGDisplayPixelsWide(did) > 0 {
             let w = CGFloat(CGDisplayPixelsWide(did))
             let h = CGFloat(CGDisplayPixelsHigh(did))
             // destSize is in points; derive it from pixels / scale when possible.
             if w > 0, h > 0 {
                 destSize = CGSize(width: w / max(scaleFactor, 1), height: h / max(scaleFactor, 1))
-                extensionLog("  [acquire] geometry Mirror missed — fell back to live display \(did): \(destSize) @\(scaleFactor)x")
+                extensionLog("  [acquire] geometry Mirror missed, fell back to live display \(did): \(destSize) @\(scaleFactor)x")
             }
         }
         // Ground-truth guard: a non-preview surface must cover its display. A
@@ -348,7 +348,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
         // Each acquire's `choiceConfiguration` is authoritative for *this* display's
         // context. Do NOT mutate the process-wide `currentVideoID` here based on a
-        // diff — concurrent acquires for different displays would race and a renderer
+        // diff. Concurrent acquires for different displays would race and a renderer
         // can end up initialized with the wrong monitor's video. The global tracks
         // the last user-picked choice (via `selectedChoicesDidChange`); we only seed
         // it on first launch when UserDefaults has no value yet, so the menu-bar UI
@@ -358,7 +358,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         }
 
         // Each WallpaperID (a Space, the lock-screen surface, or a Settings preview) is its own
-        // hosted surface and must get its OWN CAContext — sharing one context per display let a
+        // hosted surface and must get its OWN CAContext. Sharing one context per display let a
         // second Space or the lock surface steal it and black out the first. Key the context by
         // the WallpaperID UUID; fall back to a per-display constant if an id ever lacks one.
         let displayID0 = displayID ?? 0
@@ -372,7 +372,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         let cachedStill = loadCachedSnapshotImage(forChoice: choiceConfiguration)
 
         // Diagnostic bisection: host a still only (no video pipeline). Same context
-        // reuse/create/reply as below — that's what we're stress-testing — but no renderer.
+        // reuse/create/reply as below. That's what we're stress-testing, but there is no renderer.
         if Bisect.stillOnly {
             acquireStillOnlyBisect(key: key, displayID: displayID, destSize: destSize, scaleFactor: scaleFactor, videoURL: videoURL, cachedStill: cachedStill, choice: choiceConfiguration, reply: reply)
             return
@@ -380,7 +380,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
         // ---- REUSE: the display's single persistent context already exists ----
         // Return the SAME contextId regardless of whether this is the desktop or a
-        // Settings-preview acquire — both host one surface (no gray gap, no
+        // Settings-preview acquire, both host one surface (no gray gap, no
         // accumulation, no orphan). Only swap the video if the choice actually
         // changed; re-selecting the same wallpaper is a no-op.
         if let existing = WallpaperState.shared.context(for: key) {
@@ -393,7 +393,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             // desktop renderer to a stuck quarter-size rect over the
             // full-bleed still (and a different choice would flip the desktop
             // video to the previewed one). Reply with the context and leave
-            // the surface alone — the requester still gets a live picture.
+            // the surface alone. The requester still gets a live picture.
             guard isPreview == existing.isPreview else {
                 guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
                     reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
@@ -403,7 +403,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 return
             }
 
-            // Geometry may have changed since this surface was created — a bigger/smaller
+            // Geometry may have changed since this surface was created. A bigger/smaller
             // display reconnected, or the same display switched resolution. The REUSE path
             // otherwise keeps the original frame, so the wallpaper renders into a sub-region
             // of the now-larger panel (issue #21). Re-frame the root + renderer layers to the
@@ -440,14 +440,14 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             if let renderer = existing.renderer {
                 // Switch the video IN PLACE on the already-hosted display layer.
                 // Building a fresh renderer here (new AVSampleBufferDisplayLayer) is
-                // what broke switching — a layer added to an already-hosted context
+                // what broke switching. A layer added to an already-hosted context
                 // doesn't composite. Reuse the existing layer instead.
                 renderer.variantSelector = selector
                 renderer.switchVideo(to: videoURL)
                 WallpaperState.shared.updateVideoID(choiceConfiguration, for: key)
                 WallpaperPrefs.shared.setActive(true)
             } else if WallpaperState.shared.claimRendererCreate(for: key) {
-                // Context exists but no renderer yet AND no create already in flight —
+                // Context exists but no renderer yet AND no create already in flight,
                 // attach one to the existing root layer. The claim prevents a racing
                 // (preview) acquire from creating a duplicate renderer on the same layer.
                 let boxedRoot = SendableBox(value: existing.rootLayer)
@@ -472,7 +472,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     LumaWallExtension.recomputeAndApplyPolicy()
                 }
             } else {
-                traceLog("  [acquire] renderer create already in flight for display \(key.displayID) — skipping duplicate")
+                traceLog("  [acquire] renderer create already in flight for display \(key.displayID), skipping duplicate")
             }
             let w = Int(destSize.width * scaleFactor), h = Int(destSize.height * scaleFactor)
             Task { [videoURL, choiceConfiguration, w, h] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: w, displayPixelHeight: h) }
@@ -486,7 +486,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             ? CAContext.remoteContext()
             : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
         guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
-            extensionLog("  ERROR: remote CAContext creation failed — failing acquire")
+            extensionLog("  ERROR: remote CAContext creation failed, failing acquire")
             reply(nil, NSError(domain: "LumaWallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
             return
         }
@@ -517,7 +517,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // video (in the render Task below). WallpaperAgent hosts a context only after it
         // receives this reply, and keeps compositing the OLD wallpaper's context until
         // then. Replying immediately (as before) made the agent swap to a not-yet-
-        // rendering context — the blink / still-flash / zoom on every switch. Gating the
+        // rendering context, the blink / still-flash / zoom on every switch. Gating the
         // reply on the first composited frame makes the host swap land directly on live
         // video, matching Apple's own extensions (which likewise don't reply until ready).
         // Every branch below still replies exactly once so the acquire can never hang.
@@ -525,7 +525,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         if ColorDiag.enabled { reply(replyObj, nil); colorDiagInstall(rootLayer: rootLayer, for: key); return }
 
         guard let videoURL else {
-            // No video file — solid gradient fallback. Static content, so it's ready as
+            // No video file, so solid gradient fallback. Static content, so it's ready as
             // soon as it's installed; reply immediately.
             let gradientLayer = CAGradientLayer()
             gradientLayer.colors = [
@@ -541,7 +541,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             rootLayer.addSublayer(gradientLayer)
             CATransaction.commit(); CATransaction.flush()
             reply(replyObj, nil)
-            extensionLog("  No video file found — solid color fallback")
+            extensionLog("  No video file found, solid color fallback")
             return
         }
 
@@ -549,9 +549,9 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // role (preview vs. live desktop) that the agent could keep compositing during the
         // swap. Unlike a switch (where the outgoing context is OURS and stays hosted, via
         // the teardown grace, until we reply), here the agent has nothing of ours to hold
-        // in THIS role's CALayerHost — the instant it hosts our context it shows whatever
+        // in THIS role's CALayerHost, the instant it hosts our context it shows whatever
         // the context contains. `rootLayer.contents` is BLACK cross-process (only IOSurface-
-        // backed AVSampleBufferDisplayLayer content composites remotely — see
+        // backed AVSampleBufferDisplayLayer content composites remotely, see
         // Research/wallpaper-extension-issue13-and-rendering-findings.md), so replying
         // before the renderer exists paints black. Instead, on a cold start we reply the
         // instant VideoRenderer.create() has seeded + flushed the IOSurface still into the
@@ -561,11 +561,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Filtering by `isPreview` is what fixes the WallpaperAgent-restart ordering bug:
         // a preview-first / desktop-second boot must NOT let the preview renderer trip this
         // check for the incoming desktop acquire, because the desktop CALayerHost has never
-        // hosted anything of ours — deferring there paints black.
+        // hosted anything of ours, deferring there paints black.
         let coldStart = !WallpaperState.shared.hasLiveRenderer(onDisplay: displayID0, isPreview: isPreview)
 
         // Claim the single create slot for this display. If a racing (preview)
-        // acquire beat us to it, skip — exactly one renderer per display.
+        // acquire beat us to it, skip, exactly one renderer per display.
         if WallpaperState.shared.claimRendererCreate(for: key) {
             traceLog("  Setting up VideoRenderer with: \(videoURL.lastPathComponent) (coldStart=\(coldStart))")
             let boxedRoot = SendableBox(value: rootLayer)
@@ -583,7 +583,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     return
                 }
                 // Cold start: the IOSurface still is now seeded + flushed into the display
-                // layer, so reply — the agent hosts our context already showing the still
+                // layer, so reply. The agent hosts our context already showing the still
                 // (no black gap), and video plays over it.
                 if coldStart {
                     reply(boxedReply.value, nil)
@@ -606,7 +606,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 })
             }
         } else {
-            traceLog("  [acquire] renderer create already in flight for display \(key.displayID) — skipping duplicate (create path)")
+            traceLog("  [acquire] renderer create already in flight for display \(key.displayID), skipping duplicate (create path)")
             reply(replyObj, nil)
         }
         let w = Int(destSize.width * scaleFactor), h = Int(destSize.height * scaleFactor)
@@ -677,8 +677,8 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
         // Extract presentation mode / activity state by walking the request's Mirror
         // for the named properties and reading the enum case, rather than scanning a
-        // stringified description (which silently fell through to "?" — and so failed
-        // to pause — whenever the description format didn't match). Default to the
+        // stringified description (which silently fell through to "?", and so failed
+        // to pause, whenever the description format didn't match). Default to the
         // benign desktop-active values if a field genuinely can't be found.
         var presentationMode = "default"
         var activityState = "active"
@@ -731,7 +731,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
     private func invalidateBody(id: Any?, reply: @escaping @Sendable ((any Error)?) -> Void) {
         // Per-SURFACE teardown, resolved via the WallpaperID UUID learned at acquire. Each
         // surface (Space / lock screen / Settings preview) owns its own context, so we simply
-        // tear down THIS surface after a short grace — a re-acquire of the same UUID (display
+        // tear down THIS surface after a short grace. A re-acquire of the same UUID (display
         // sleep/wake, a quick space revisit, a switch that reuses the id) cancels it. Because
         // teardown is scoped to one surface, it can never black out another Space (the old
         // shared-context cross-kill) and a superseded UUID just cleans up its own orphaned
@@ -833,7 +833,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Remove from library (deletes files + metadata)
         VideoLibrary.shared.removeVideo(id: videoID)
 
-        // Tear down only the contexts actually using this video — the video is gone
+        // Tear down only the contexts actually using this video. The video is gone
         // from the library, so these slots are genuinely dead (not a reuse). Other
         // displays may be playing different videos and must keep running.
         let removedKeys = WallpaperState.shared.removeContexts(forVideoID: videoID)
@@ -905,7 +905,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             return
         }
 
-        // The shuffle choice: no fixed video to record — resolve the current pick for
+        // The shuffle choice has no fixed video to record. Resolve the current pick for
         // the menu-bar UI and refresh snapshots. The acquire that follows activates
         // rotation and does the rendering.
         if ExtensionPlaylistLibrary.isShuffleChoice(choiceIdentifier), let choiceIdentifier {
@@ -941,7 +941,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         extensionLog("=== CHOICE CHANGED === videoID: \(videoID)")
 
         // Track the last user-picked video (for menu-bar UI / new-acquire fallback).
-        // The XPC API does NOT tell us which display this choice is for — only that
+        // The XPC API does NOT tell us which display this choice is for, only that
         // the user picked it. We can't safely touch any renderer here; doing so used
         // to flip the wrong display, because stopping all renderers forced macOS to
         // re-acquire every display, and the racing acquires would pick up the wrong
@@ -1049,7 +1049,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 }
 
 /// Extract the selected id of a picker option (e.g. "shuffleFrequency") from an XPC
-/// request whose descriptor carries `optionValues` — a
+/// request whose descriptor carries `optionValues`, a
 /// `WallpaperChoiceOptionValues(values: [String: Kind])` map where a picker's value
 /// is `Kind.picker(PickerValue(id:))`. The key is absent until the user touches the
 /// picker; callers treat nil as "keep the declared default".

@@ -7,7 +7,7 @@ import Foundation
 import Testing
 @testable import LumaWallCore
 
-/// End-to-end import tests with synthesized videos — no fixtures, no production
+/// End-to-end import tests with synthesized videos, no fixtures, no production
 /// data. Videos are encoded in-test with `AVAssetWriter` (software H.264 works
 /// headless), so every path runs on any Mac.
 ///

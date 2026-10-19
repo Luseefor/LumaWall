@@ -14,7 +14,7 @@ final class NativeWallpaperEngine {
     private var libraryByID: [WallpaperID: WallpaperAsset] = [:]
     /// Last (stable display UUID → entryID) map actually written to Index.plist.
     /// Restores that resolve to the identical map skip the plist rewrite +
-    /// WallpaperAgent kill — those are what black-flash every display on a
+    /// WallpaperAgent kill. Those restarts black-flash every display on a
     /// join/cut burst or redundant refresh.
     ///
     /// Keyed by the CG display UUID, NOT the CGDirectDisplayID: numeric IDs
@@ -116,7 +116,7 @@ final class NativeWallpaperEngine {
 
     /// Restores persisted assignments through the system host. When the overlay
     /// owns non-default displays (`onlyDefaultCrop`), those assignments are
-    /// left for the overlay engine — writing them here would fight it.
+    /// left for the overlay engine. Writing them here would fight it.
     func restore(using library: [WallpaperAsset], onlyDefaultCrop: Bool = false) async {
         let connected = displays.refresh()
         let connectedIDs = Set(connected.map(\.displayID))
@@ -179,7 +179,7 @@ final class NativeWallpaperEngine {
             }
         )
         if fingerprint == lastWrittenMap {
-            nativeHostLog.info("restore: assignments unchanged — skipping Index.plist rewrite + agent restart")
+            nativeHostLog.info("restore: assignments unchanged, skipping Index.plist rewrite + agent restart")
             return
         }
         do {

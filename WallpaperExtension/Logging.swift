@@ -16,7 +16,7 @@ private let logURL: URL = {
 /// Persistent file handle for log writing, protected by a lock.
 private let logLock = OSAllocatedUnfairLock(initialState: nil as FileHandle?)
 
-/// Cached formatter — `ISO8601DateFormatter` is thread-safe with immutable config.
+/// Cached formatter, `ISO8601DateFormatter` is thread-safe with immutable config.
 /// `nonisolated(unsafe)` because ISO8601DateFormatter doesn't conform to Sendable,
 /// but it's effectively immutable after initialization (no properties are mutated).
 private nonisolated(unsafe) let logDateFormatter: ISO8601DateFormatter = {
@@ -46,7 +46,7 @@ private func getLogHandle() -> FileHandle? {
 
 private func openLogHandle() -> FileHandle? {
     guard let h = try? FileHandle(forWritingTo: logURL) else {
-        // File doesn't exist yet — create it
+        // File doesn't exist yet, create it
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         return try? FileHandle(forWritingTo: logURL)
     }
@@ -120,7 +120,7 @@ let verboseLoggingEnabled: Bool = {
     return FileManager.default.fileExists(atPath: url.path)
 }()
 
-/// Trace-level log — only written when `verboseLoggingEnabled`. Use for the noisy internal
+/// Trace-level log, only written when `verboseLoggingEnabled`. Use for the noisy internal
 /// diagnostics (renderer restart steps, feed ticks, per-connection churn, snapshots). The
 /// `@autoclosure` means the string isn't even built when tracing is off.
 func traceLog(_ message: @autoclosure () -> String) {
@@ -133,7 +133,7 @@ func extensionLog(_ message: String) {
     let line = "[\(ts)] \(message)\n"
     guard let data = line.data(using: .utf8) else { return }
     guard let handle = getLogHandle() else {
-        // Last resort — write directly (creates file if missing)
+        // Last resort, write directly (creates file if missing)
         try? data.write(to: logURL, options: .atomic)
         return
     }

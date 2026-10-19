@@ -42,7 +42,7 @@ func createSnapshotXPC(surface: IOSurface) -> AnyObject? {
     }
 
     // Offset 8 is the assumed `rawValue` ivar location. Verify the instance is
-    // large enough to hold a pointer there before writing — a changed layout
+    // large enough to hold a pointer there before writing. A changed layout
     // must not turn into heap corruption.
     let snapshotOffset = 8
     guard snapshotOffset + MemoryLayout<UnsafeRawPointer>.size <= class_getInstanceSize(snapshotXPCClass) else {

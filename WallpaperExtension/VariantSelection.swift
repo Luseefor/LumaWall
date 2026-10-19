@@ -6,7 +6,7 @@ struct VideoVariant: Codable, Equatable {
     let resolution: CGSize
 }
 
-/// Picks the variant to play for a playback policy — the pure half of
+/// Picks the variant to play for a playback policy, the pure half of
 /// `VideoLibrary.bestVariantURL`, separated so it can be tested.
 enum VariantSelection {
     /// The variant to play, or nil for the original file.
@@ -17,7 +17,7 @@ enum VariantSelection {
     /// source rate (falling back to the smallest), `minimal` the smallest.
     /// `paused` and an empty variant list resolve to the original. Equal-fps
     /// ties break by resolution so the pick is deterministic (Swift's sort is
-    /// not stable — without this, reduced/minimal could land on the 1080p
+    /// not stable, without this, reduced/minimal could land on the 1080p
     /// sibling instead of the 720p one).
     static func variant(
         for policy: PlaybackPolicy,

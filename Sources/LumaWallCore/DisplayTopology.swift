@@ -14,7 +14,7 @@ public enum DisplayTopology {
     /// assignment that names a wallpaper, so a new monitor shows the current
     /// wallpaper instead of the system default.
     ///
-    /// Assignments for disconnected displays are intentionally left untouched —
+    /// Assignments for disconnected displays are intentionally left untouched,
     /// a reattached display resumes where it was.
     ///
     /// Returns empty when every connected display is covered or when there is

@@ -19,7 +19,7 @@ struct SetLumaWallWallpaperIntent: AppIntent {
         let name = wallpaperName?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let name, !name.isEmpty {
             UserDefaults.standard.set(name, forKey: "lumawall.pendingShortcutApply")
-            return .result(dialog: "Applying “\(name)” in LumaWall.")
+            return .result(dialog: "Applying \"\(name)\" in LumaWall.")
         }
         UserDefaults.standard.set("__featured__", forKey: "lumawall.pendingShortcutApply")
         return .result(dialog: "Applying the current LumaWall wallpaper.")

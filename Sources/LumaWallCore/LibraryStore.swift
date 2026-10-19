@@ -8,7 +8,7 @@ public actor LibraryStore {
 
         public var errorDescription: String? {
             switch self {
-            case let .duplicate(asset): "This video is already installed as “\(asset.name)”."
+            case let .duplicate(asset): "This video is already installed as \"\(asset.name)\"."
             case .missingAsset: "The wallpaper is no longer installed."
             case .invalidLocation: "The wallpaper points outside the library and was not deleted from disk."
             }

@@ -93,7 +93,7 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
     }
 
     /// Minimum age of the last fix before asking again. Coordinates only feed
-    /// sunrise/sunset math, which barely moves within minutes — without this,
+    /// sunrise/sunset math, which barely moves within minutes, without this,
     /// every automation evaluation (clock, appearance, workspace events) wakes
     /// location hardware for a fix we already have.
     private static let fixThrottle: TimeInterval = 15 * 60

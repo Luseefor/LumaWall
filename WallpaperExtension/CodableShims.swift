@@ -68,7 +68,7 @@ struct ChoiceID: Codable {
     var descriptor: ChoiceIDDescriptor
 }
 
-/// Nested descriptor inside WallpaperChoiceID — contains provider info
+/// Nested descriptor inside WallpaperChoiceID. It contains provider info.
 struct ChoiceIDDescriptor: Codable {
     var provider: ChoiceProviderID
     var identifier: String
@@ -88,7 +88,7 @@ struct SettingsItem: Codable {
     var contextMenu: ContextMenu?
 }
 
-/// WallpaperSettingsItem.ContentBadge — cases: none, video, dynamic
+/// WallpaperSettingsItem.ContentBadge, cases: none, video, dynamic
 enum ContentBadge: Codable {
     case none
     case video
@@ -118,7 +118,7 @@ enum ContentBadge: Codable {
     }
 }
 
-/// WallpaperThumbnail — enum with cases: image, solidColor, customButton, shuffleColors, shuffleImages, currentColorOption.
+/// WallpaperThumbnail, enum with cases: image, solidColor, customButton, shuffleColors, shuffleImages, currentColorOption.
 /// shuffleImages renders the composite shuffle tile (stacked thumbnails + rotate badge).
 enum Thumbnail: Codable {
     case image(url: URL)
@@ -179,7 +179,7 @@ enum Thumbnail: Codable {
     }
 }
 
-/// WallpaperTypes.CustomButton — enum with cases: addPhotoButton, addColorButton, shuffleColorsButton
+/// WallpaperTypes.CustomButton, enum with cases: addPhotoButton, addColorButton, shuffleColorsButton
 enum CustomButton: Codable {
     case addPhotoButton
     case addColorButton
@@ -220,7 +220,7 @@ struct ChoiceDescriptor: Codable {
     var options: [WallpaperOption]
 }
 
-/// Real type: WallpaperTypes.WallpaperOptionEnum — the per-choice settings controls
+/// Real type: WallpaperTypes.WallpaperOptionEnum, the per-choice settings controls
 /// shown in the wallpaper header when the choice is selected. Cases: picker, color,
 /// toggle, group, button; payloads use the synthesized `_0` key. Only picker is
 /// modeled here.
@@ -251,7 +251,7 @@ enum WallpaperOption: Codable {
     }
 }
 
-/// Real type: WallpaperTypes.MenuPickerOption — a labeled popup in the choice's
+/// Real type: WallpaperTypes.MenuPickerOption, a labeled popup in the choice's
 /// settings header. The system stores the selected item id per choice and hands it
 /// back to the extension; item ids and their meaning are the provider's own.
 struct MenuPickerOption: Codable {
@@ -263,7 +263,7 @@ struct MenuPickerOption: Codable {
     var items: [MenuPickerItemEnum]
 }
 
-/// Real type: WallpaperTypes.MenuPickerItemEnum — cases: item, divider (payload `_0`).
+/// Real type: WallpaperTypes.MenuPickerItemEnum, cases: item, divider (payload `_0`).
 enum MenuPickerItemEnum: Codable {
     case item(MenuPickerItem)
     case divider(MenuPickerDivider)

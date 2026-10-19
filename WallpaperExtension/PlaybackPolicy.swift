@@ -18,7 +18,7 @@ enum PlaybackPolicy: Int, Comparable {
     static let brightnessPauseThreshold: Float = 0.05
 
     /// Mirrors of `LumaWallCore.PlaybackPolicyThresholds` (the extension cannot
-    /// import LumaWallCore). Keep in sync — drift reintroduces per-host
+    /// import LumaWallCore). Keep in sync. Drift reintroduces per-host
     /// pause/resume divergence.
     ///
     /// Tier mapping note: this host has 4 tiers (no `.staticFrame`); the app
@@ -29,7 +29,7 @@ enum PlaybackPolicy: Int, Comparable {
     /// Power profiles are manual overrides and apply on any power source (mirrors
     /// `LumaWallCore.PlaybackPolicy`): gating them on `isOnBattery` left the menu
     /// dead on AC power / battery-less desktops ("nothing changes").
-    /// `fullQuality` additionally skips the Low Power Mode and fair-thermal
+    /// `fullQuality` also skips the Low Power Mode and fair-thermal
     /// downgrades; hard protections (pauses, serious/critical thermal) still win.
     /// `staticOnBattery` accumulates past serious thermal to `.paused` here,
     /// matching Core where Static returns before the serious-thermal downgrade.
@@ -42,10 +42,10 @@ enum PlaybackPolicy: Int, Comparable {
     /// On the desktop (unlocked), it pauses with a ramp animation.
     ///
     /// `screenSaverIsOurs`: a LumaWall choice is the active screensaver, so idle
-    /// presentation means WE are what's on screen — play full, like the lock screen.
-    /// Without it, idle means a foreign screensaver covers us — pause.
+    /// presentation means WE are what's on screen. Play full, like the lock screen.
+    /// Without it, idle means a foreign screensaver covers us, so the video pauses.
     ///
-    /// Lock screen never reduces FPS by itself — only power/thermal conditions do.
+    /// Lock screen never reduces FPS by itself. Only power/thermal conditions do.
     static func compute(
         presentationMode: String,
         activityState: String,
@@ -83,12 +83,12 @@ enum PlaybackPolicy: Int, Comparable {
         if displayBrightness < Self.brightnessPauseThreshold {
             worst = max(worst, .paused)
         }
-        // Desktop occlusion is irrelevant on full-screen presentations — the
+        // Desktop occlusion is irrelevant on full-screen presentations. The
         // wallpaper is fully visible there regardless of desktop window state.
         if pauseWhenOccluded, desktopOccluded, !fullScreenPresentation { worst = max(worst, .paused) }
         // A fullscreen app owning the display pauses unconditionally: the wallpaper
         // is invisible (or a menu bar sliver) and the app wants the hardware.
-        // Catches what Game Mode can't — gamepolicyd never recognizes Wine games.
+        // Fullscreen pause also catches games Game Mode misses. gamepolicyd never recognizes Wine games.
         if displayHasFullscreenApp, !fullScreenPresentation { worst = max(worst, .paused) }
         if alwaysPauseDesktop, !fullScreenPresentation { worst = max(worst, .paused) }
 

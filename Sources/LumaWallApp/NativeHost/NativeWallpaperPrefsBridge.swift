@@ -52,7 +52,7 @@ enum NativeWallpaperPrefsBridge {
         )
         guard let data = try? JSONEncoder().encode(file) else { return }
         // The extension reloads this file at init, so skipping an identical
-        // rewrite loses nothing — and spares a Darwin-notify round trip plus
+        // rewrite loses nothing, and spares a Darwin-notify round trip plus
         // a full policy recompute on every unchanged evaluation. The existence
         // check covers an externally deleted container (clear caches, fresh
         // install over a running app): without it we'd skip the rewrite

@@ -4,7 +4,7 @@ import QuartzCore
 
 /// One persistent per-display rendering slot. Reused across acquires (Apple's
 /// model): the `caContext`/`contextId`/`rootLayer` live for the display's lifetime
-/// and only the `renderer`/`videoID` swap when the wallpaper changes — so the Agent
+/// and only the `renderer`/`videoID` swap when the wallpaper changes, so the Agent
 /// never drops the context on switch (no gray gap) and contexts never accumulate.
 struct ActiveWallpaper: @unchecked Sendable {
     let caContext: AnyObject // CAContext (private class, hold as AnyObject)
@@ -22,7 +22,7 @@ struct ActiveWallpaper: @unchecked Sendable {
     /// The destination geometry (in points) and backing scale this surface's layer
     /// tree was last laid out for. Tracked so a re-`acquire` for the SAME surface can
     /// detect a resolution/scale change (disconnect→reconnect a display, or a plain
-    /// mode change) and re-frame the root + renderer layers — the REUSE path otherwise
+    /// mode change) and re-frame the root + renderer layers, the REUSE path otherwise
     /// keeps the original size and the wallpaper renders into a sub-region of the panel.
     var destSize: CGSize
     var scaleFactor: CGFloat
@@ -33,7 +33,7 @@ struct ActiveWallpaper: @unchecked Sendable {
     var rendererPending: Bool = false
 }
 
-/// Identifies one hosted wallpaper SURFACE — a distinct `CAContext`/layer tree that
+/// Identifies one hosted wallpaper SURFACE, a distinct `CAContext`/layer tree that
 /// WallpaperAgent hosts in one `CALayerHost`. There is one per **WallpaperID UUID**,
 /// i.e. one per Space, per lock-screen surface, and per Settings preview.
 ///
@@ -61,13 +61,13 @@ final class WallpaperState: Sendable {
         var contexts: [DisplayKey: ActiveWallpaper] = [:]
         /// WallpaperID UUID → its surface key, learned at acquire. Lets `invalidate(UUID)`
         /// resolve which surface context to tear down. Each surface owns its context, so an
-        /// invalidate tears down only that surface — no cross-surface interference.
+        /// invalidate tears down only that surface. No cross-surface interference.
         var keyForWallpaperUUID: [UUID: DisplayKey] = [:]
         /// Recently torn-down surface UUIDs (bounded ring). Lets an invalidate
         /// for an unknown UUID distinguish "already torn down here" (benign
         /// double-invalidate) from "never registered in this process" (the
         /// surface may belong to a sibling extension process and still be
-        /// decoding — a cross-process orphan worth logging).
+        /// decoding, a cross-process orphan worth logging).
         var recentlyForgotten: [UUID] = []
         var cachedThumbnailURL: URL?
         var cacheDirectoryURL: URL?
@@ -117,7 +117,7 @@ final class WallpaperState: Sendable {
     }
 
     /// Atomically claim the right to create the renderer for a slot. Returns true
-    /// only if the slot has no renderer AND no create is already in flight — in
+    /// only if the slot has no renderer AND no create is already in flight, in
     /// which case it marks a create pending. A concurrent (preview) acquire gets
     /// false and must NOT create a duplicate renderer. This is what guarantees
     /// exactly one renderer per display despite racing desktop+preview acquires.
@@ -162,7 +162,7 @@ final class WallpaperState: Sendable {
     /// Record the destination geometry for a slot, returning the slot (with its live
     /// `rootLayer`/`renderer`) only if the geometry actually changed since it was last
     /// laid out. The common re-acquire (display wake, quick Space revisit, a switch that
-    /// reuses the id) carries the same size and returns nil — no relayout. A
+    /// reuses the id) carries the same size and returns nil, so no relayout. A
     /// disconnect→reconnect at a different resolution, or a bare mode change, returns the
     /// slot so the caller can re-frame the layer tree. Sizes compare with a small
     /// tolerance: the agent occasionally reports sub-point jitter for an unchanged
@@ -181,7 +181,7 @@ final class WallpaperState: Sendable {
     }
 
     /// Update the videoID a slot is tracking after an in-place `switchVideo`
-    /// (the renderer object is unchanged — only its content switched).
+    /// (the renderer object is unchanged, and only its content switched).
     func updateVideoID(_ videoID: String?, for key: DisplayKey) {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return }
@@ -201,12 +201,11 @@ final class WallpaperState: Sendable {
     }
 
     /// Execute a closure for renderers on live (non-preview) surfaces.
-    /// Playback policy (pause, battery tiers, occlusion) is about the desktop
-    /// surfaces — preview surfaces (Settings picker, prewarm) must keep
-    /// playing what the user is looking at, not freeze because a fullscreen
-    /// app covers the desktop or a per-display pause targets it. Sleep and
-    /// teardown paths deliberately keep using `forEachRenderer` (nothing
-    /// should decode while displays sleep).
+    /// Playback policy (pause, battery tiers, occlusion) governs desktop
+    /// surfaces. Preview surfaces (Settings picker, prewarm) keep playing
+    /// what the user is looking at instead of freezing with desktop policy.
+    /// Sleep and teardown paths deliberately keep using `forEachRenderer`
+    /// (nothing should decode while displays sleep).
     func forEachLiveRenderer(_ body: (VideoRenderer) -> Void) {
         let renderers = lock.withLock { state in
             state.contexts.values.filter { !$0.isPreview }.compactMap(\.renderer)
@@ -216,7 +215,7 @@ final class WallpaperState: Sendable {
         }
     }
 
-    /// Whether ANY acquired context tracks the given choice id. Scans every context —
+    /// Whether ANY acquired context tracks the given choice id. Scans every context.
     /// `activeDisplayContexts()` samples one arbitrary context per display, which
     /// misreports when desktop, lock-screen, and preview surfaces coexist on one
     /// display.
@@ -250,7 +249,7 @@ final class WallpaperState: Sendable {
     }
 
     /// Tear down (stop renderer + invalidate context) every display slot using the
-    /// given videoID — the video was removed from the library, so its slots are
+    /// given videoID, the video was removed from the library, so its slots are
     /// genuinely gone (not a reuse). Returns the removed surface keys so callers
     /// can also cancel pending teardown timers (otherwise the timer leaks 15s
     /// then no-ops on an already-removed key).
@@ -297,15 +296,16 @@ final class WallpaperState: Sendable {
 
     /// True when this process tore the surface down itself (a repeat
     /// invalidate is then benign). False means the surface was never
-    /// registered here — likely owned by a sibling extension process.
+    /// registered here, likely owned by a sibling extension process.
     func wasRecentlyForgotten(_ uuid: UUID) -> Bool {
         lock.withLock { $0.recentlyForgotten.contains(uuid) }
     }
 
-    /// Per-surface teardown (the invalidate grace timer fired with no re-acquire — the Space
-    /// closed, the preview dismissed, or the display slept): stop ONLY this surface's renderer
-    /// and `-[CAContext invalidate]` its context, leaving other surfaces playing. Returns
-    /// whether it tore down.
+    /// Per-surface teardown runs when the invalidate grace timer fires with no
+    /// re-acquire (the Space closed, the preview dismissed, or the display
+    /// slept). It stops ONLY this surface's renderer and invalidates its
+    /// `CAContext`, leaving other surfaces playing. Returns whether it tore
+    /// down.
     @discardableResult
     func tearDownContext(for key: DisplayKey) -> Bool {
         let removed = lock.withLock { state -> ActiveWallpaper? in
@@ -383,7 +383,7 @@ final class WallpaperState: Sendable {
     }
 
     /// Whether this display already has a live renderer for the same surface *role*
-    /// (preview vs. live desktop) — i.e. an existing LumaWall surface WallpaperAgent
+    /// (preview vs. live desktop), i.e. an existing LumaWall surface WallpaperAgent
     /// is already hosting in the SAME CALayerHost this new acquire targets. Only such a
     /// same-role renderer is something the agent can keep compositing while the new
     /// context comes up: a live-desktop CALayerHost isn't held by a preview renderer, and

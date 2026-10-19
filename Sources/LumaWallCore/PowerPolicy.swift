@@ -4,7 +4,7 @@ import Foundation
 /// Playback tiers, ordered from most to least work. Semantics are shared by
 /// both hosts and must stay unified:
 /// - `.full` / `.reduced` / `.minimal`: motion plays (reduced/minimal cap the
-///   decode budget; the native host additionally picks lower-res variants).
+///   decode budget; the native host also picks lower-res variants).
 /// - `.staticFrame`: no motion; the overlay shows the poster still.
 /// - `.paused`: no motion; holds the last decoded frame for instant resume.
 public enum PlaybackTier: Int, Comparable, Codable, Sendable {
@@ -20,7 +20,7 @@ public enum PlaybackTier: Int, Comparable, Codable, Sendable {
 /// Shared numeric thresholds for playback policy decisions.
 ///
 /// The wallpaper extension (`WallpaperExtension/PlaybackPolicy.swift`) cannot
-/// import LumaWallCore, so it mirrors these values. Keep them in sync —
+/// import LumaWallCore, so it mirrors these values. Keep them in sync.
 /// `PowerPolicyTests` pins the Core side; match any change on the extension side.
 /// Drift here is what made pause/resume flap (e.g. 0.92 occlusion pausing on
 /// maximized windows) or diverge per-host (batterySaver hiding overlay video
@@ -124,12 +124,12 @@ public enum PlaybackPolicy: PlaybackPolicyDeciding {
         if state.hideDesktopVideo { return .staticFrame }
         if state.thermalState == .critical || state.batteryPercent < PlaybackPolicyThresholds.batteryCritical { return .paused }
         // A still frame is cheaper than even the minimal decode budget, so the
-        // Static profile wins over serious thermal too — matching the extension
+        // Static profile wins over serious thermal too, matching the extension
         // host, where staticOnBattery accumulates to `.paused` past `.minimal`.
         if state.profile == .staticOnBattery { return .staticFrame }
         if state.thermalState == .serious { return .minimal }
         // Power profiles are manual overrides, so they apply on any power
-        // source — not just on battery. Otherwise the menu is dead on AC power
+        // source, not just on battery. Otherwise the menu is dead on AC power
         // (and on desktops without a battery, permanently): Automatic and Full
         // Quality both resolve to .full there, and Battery Saver / Static never
         // take effect, which reads as "nothing changes".

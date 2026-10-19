@@ -404,7 +404,7 @@ final class AppModel {
             var notes: [String] = []
             for url in urls {
                 // NOTE: `defer` inside a loop defers to the enclosing scope, not
-                // the iteration — the old code held all security-scoped refs until
+                // the iteration, the old code held all security-scoped refs until
                 // every import finished. Per-URL helper scopes each access.
                 notes += await importOneVideo(url)
             }
@@ -472,7 +472,7 @@ final class AppModel {
                 await reload()
                 applyPlaybackPolicy()
             } catch {
-                present("Couldn’t apply wallpaper", error.localizedDescription)
+                present("Couldn't apply wallpaper", error.localizedDescription)
             }
             isApplying = false
         }
@@ -493,7 +493,7 @@ final class AppModel {
                 await reload()
                 applyPlaybackPolicy()
             } catch {
-                present("Couldn’t apply wallpaper", error.localizedDescription)
+                present("Couldn't apply wallpaper", error.localizedDescription)
             }
             isApplying = false
         }
@@ -510,7 +510,7 @@ final class AppModel {
                 await reload()
                 applyPlaybackPolicy()
             } catch {
-                present("Couldn’t span wallpaper", error.localizedDescription)
+                present("Couldn't span wallpaper", error.localizedDescription)
             }
             isApplying = false
         }
@@ -1260,7 +1260,7 @@ final class AppModel {
         refreshActive()
         refreshStats()
         applyPlaybackPolicy()
-        // Native side follows after settle, like any other topology event —
+        // Native side follows after settle, like any other topology event,
         // at login the displays may still be negotiating modes.
         scheduleSettledNativeRestore()
         syncDayNightTimer()
@@ -1290,7 +1290,7 @@ final class AppModel {
         guard let asset else {
             present("Shortcuts", pending == "__featured__"
                 ? "No wallpaper is ready to apply."
-                : "No wallpaper matched “\(pending)”.")
+                : "No wallpaper matched \"\(pending)\".")
             return
         }
         stopPlaylistRotation()
@@ -1471,7 +1471,7 @@ final class AppModel {
 
     /// Event-driven AC↔battery (and capacity) transitions via IOKit. The
     /// notifications above cover thermal and Low Power Mode, but nothing posts
-    /// for unplug/replug — without this, Automatic only noticed the switch at
+    /// for unplug/replug, without this, Automatic only noticed the switch at
     /// the next 15s stats tick (or never, if the tick's power comparison was
     /// skipped), which reads as "Automatic does nothing".
     private func observePowerSourceChanges() {
@@ -1580,7 +1580,7 @@ final class AppModel {
     }
 
     private func present(_ title: String, _ message: String) {
-        nativeHostLog.error("alert: \(title, privacy: .public) — \(message, privacy: .public)")
+        nativeHostLog.error("alert: \(title, privacy: .public), \(message, privacy: .public)")
         let alert = AppAlert(title: title, message: message)
         if activeAlert == nil {
             activeAlert = alert
@@ -1608,7 +1608,7 @@ private enum DisplayOcclusion {
         let desktop = displays.map(\.frame).reduce(CGRect.null) { $0.union($1) }
         // Mirror Quartz rects around the PRIMARY display's top (see
         // ScreenGeometry.cocoaWindow): the union's maxY is only correct when
-        // no display extends above the primary — a taller sidecar or stacked
+        // no display extends above the primary. A taller sidecar or stacked
         // layout otherwise shifts every window rect and coverage misfires.
         let primaryHeight = displays.first(where: \.isMain)?.frame.height ?? desktop.maxY
         guard !desktop.isNull,

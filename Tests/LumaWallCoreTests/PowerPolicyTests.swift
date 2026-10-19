@@ -127,7 +127,7 @@ struct PowerPolicyTests {
 
     @Test func staticProfileWinsOverSeriousThermal() {
         // A still frame decodes nothing, so Static stays a still even when the
-        // system is hot — matching the extension host (paused outranks minimal).
+        // system is hot, matching the extension host (paused outranks minimal).
         #expect(PlaybackPolicy.resolve(.init(profile: .staticOnBattery, thermalState: .serious)) == .staticFrame)
         #expect(PlaybackPolicy.resolve(.init(profile: .batterySaver, thermalState: .serious)) == .minimal)
     }
