@@ -1,8 +1,10 @@
 # LumaWall
 
-Live video wallpapers on macOS, from files already on your disk. Bundle id `app.lumawall.personal`. Version 0.4.0 (build 12).
+Play local video files as macOS wallpapers, with per-display assignments,
+scheduled playlists, and playback rules for power use and Reduce Motion.
 
-This is the production cut of the app: import, assign, automate, pause for power and accessibility, then leave it alone. Distribution still needs a Developer ID signature, notarization, and a DMG or Homebrew package before Gatekeeper-clean installs for other people. Until then, build and install locally.
+**Build locally:** a signed, notarized download is not available yet.
+See [Build](#build) for setup and [Production DMG](#production-dmg) for distribution requirements.
 
 ## Requirements
 
@@ -51,6 +53,20 @@ xcodebuild -scheme LumaWall -configuration Release -derivedDataPath .derived bui
 
 Install the built app to `/Applications/LumaWall.app` for the path this project expects.
 
+## Architecture
+
+```mermaid
+flowchart TD
+    App["LumaWall app"] --> Core["Library, displays, playlists and automation"]
+    Core --> Policy["Power and Reduce Motion policy"]
+    App -->|"macOS 26+"| Native["WallpaperKit extension and system wallpaper store"]
+    App -->|"macOS 15–25 or SwiftPM"| Overlay["Poster image and muted video overlay"]
+```
+
+The native extension and overlay are alternative playback paths. Shared playback
+reuses a decoder when multiple displays show the same video. Power and
+accessibility rules determine when playback pauses or uses a lower-resolution file.
+
 ## Production DMG
 
 The release script deliberately refuses development or ad-hoc identities. Configure
@@ -70,7 +86,7 @@ production artifact.
 
 ## Author
 
-Luseefor (`sapanakosansar18@gmail.com`). Commits and package metadata use that identity. Do not attribute this work to cursor-agent or other tool accounts.
+[Luseefor](https://github.com/Luseefor).
 
 Third-party notices for Phosphene reference code live in `THIRD_PARTY_NOTICES.md`.
 
