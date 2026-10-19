@@ -113,9 +113,38 @@ final class AppModel {
     private var coverageTimer: Timer?
     private var lockObservers: [NSObjectProtocol] = []
     private var powerObservers: [NSObjectProtocol] = []
-    /// IOKit power-source runloop source for AC↔battery transitions. Kept alive
-    /// here, scheduled on the main runloop, removed in shutdown.
-    private var powerSourceRunLoopSource: CFRunLoopSource?
+    /// Owns the IOKit power-source runloop source. A lock-guarded box rather
+    /// than a bare property so both MainActor teardown and nonisolated
+    /// deinit can release it: the notify context holds an unretained self
+    /// pointer, so a source outliving the model would crash on the next
+    /// power event. Removal runs on whatever thread deinit lands on;
+    /// CFRunLoopRemoveSource is thread-safe.
+    private final class PowerSourceRegistration: @unchecked Sendable {
+        private let lock = NSLock()
+        private var source: CFRunLoopSource?
+
+        func set(_ source: CFRunLoopSource?) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.source = source
+        }
+
+        /// Removes the source from the main runloop and forgets it. Idempotent.
+        /// The lock is released before touching the runloop: never call out
+        /// while holding it.
+        func invalidate() {
+            lock.lock()
+            let current = source
+            source = nil
+            lock.unlock()
+            if let current {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), current, .defaultMode)
+            }
+        }
+
+        deinit { invalidate() }
+    }
+    private let powerSourceRegistration = PowerSourceRegistration()
     private var sessionLocked = false
     private var displaysAsleep = false
     private var cpuSampler = CPUSampler()
@@ -666,10 +695,7 @@ final class AppModel {
         nativeRestoreWorkItem?.cancel()
         nativeRestoreWorkItem = nil
         gameModeMonitor.stop()
-        if let source = powerSourceRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
-            powerSourceRunLoopSource = nil
-        }
+        powerSourceRegistration.invalidate()
         let center = NotificationCenter.default
         let workspaceCenter = NSWorkspace.shared.notificationCenter
         let distributedCenter = DistributedNotificationCenter.default()
@@ -1458,7 +1484,7 @@ final class AppModel {
             callback,
             Unmanaged.passUnretained(self).toOpaque()
         )?.takeRetainedValue() else { return }
-        powerSourceRunLoopSource = source
+        powerSourceRegistration.set(source)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
     }
 

@@ -81,21 +81,6 @@ final class VideoLibrary: Sendable {
         return variantURL(for: id, variant: chosen)
     }
 
-    /// Update the variants array for an entry and persist to metadata.json.
-    func updateVariants(for id: String, variants: [VideoVariant]) {
-        lock.withLock { entries in
-            guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
-            entries[idx].variants = variants
-        }
-        let metadataURL = videosDir
-            .appendingPathComponent(id)
-            .appendingPathComponent("metadata.json")
-        if let entry = entry(for: id) {
-            try? JSONEncoder().encode(entry).write(to: metadataURL)
-        }
-        saveIndex(entries)
-    }
-
     /// Scan the videos directory and rebuild the in-memory index.
     /// Also migrates any legacy `wallpaper.{mp4,mov,m4v}` from Documents root.
     func scan() {

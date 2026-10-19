@@ -115,7 +115,8 @@ final class OverlayWallpaperEngine {
         if let existing = sessions[displayID] {
             existing.replace(asset: asset, composition: composition, screen: screen, connected: connected)
         } else {
-            let session = DesktopVideoSession(asset: asset, composition: composition, screen: screen, connected: connected)
+            let tier = tiers[displayID] ?? .full
+            let session = DesktopVideoSession(asset: asset, composition: composition, screen: screen, connected: connected, tier: tier)
             sessions[displayID] = session
             session.show()
         }
@@ -476,9 +477,10 @@ final class DesktopVideoSession {
     var currentComposition: DisplayComposition { composition }
     var usesSharedDecoder: Bool { sharedHub != nil }
 
-    init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay) {
+    init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay, tier: PlaybackTier = .full) {
         self.asset = asset
         self.composition = composition
+        self.requestedTier = tier
         displayPixelSize = connected.pixelSize
         window = DesktopSurfaceWindow(
             contentRect: .zero,
@@ -507,7 +509,10 @@ final class DesktopVideoSession {
             }
         }
         root.apply(composition: composition, poster: asset.posterURL, displayFrame: connected.frame)
-        configurePlayer(url: asset.mediaURL)
+        // Configure the tier-resolved URL up front: the trailing apply() then
+        // only sets the budget and plays instead of building a full-res
+        // decoder just to throw it away for the variant.
+        configurePlayer(url: BatteryMediaVariant.resolvedURL(for: asset, tier: tier))
         relayout(screen: screen, connected: connected)
     }
 
@@ -521,7 +526,9 @@ final class DesktopVideoSession {
         self.asset = asset
         self.composition = composition
         relayout(screen: screen, connected: connected)
-        configurePlayer(url: asset.mediaURL)
+        // Same single-build reasoning as init: the trailing apply() reuses
+        // this decoder when the URL already matches the tier.
+        configurePlayer(url: BatteryMediaVariant.resolvedURL(for: asset, tier: requestedTier))
         apply(tier: requestedTier)
         reassert()
     }

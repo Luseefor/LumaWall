@@ -236,18 +236,6 @@ final class WallpaperState: Sendable {
         }
     }
 
-    /// Execute a closure for renderers on a specific display.
-    func forRenderers(displayID: UInt32, _ body: (VideoRenderer) -> Void) {
-        let renderers = lock.withLock { state in
-            state.contexts.values
-                .filter { $0.displayID == displayID }
-                .compactMap(\.renderer)
-        }
-        for renderer in renderers {
-            body(renderer)
-        }
-    }
-
     /// Execute a closure for renderers on live (non-preview) surfaces of a
     /// display. See `forEachLiveRenderer` for why policy skips previews.
     func forLiveRenderers(displayID: UInt32, _ body: (VideoRenderer) -> Void) {
@@ -331,13 +319,6 @@ final class WallpaperState: Sendable {
         // unrelated commit happens to flush it.
         CATransaction.flush()
         return true
-    }
-
-    /// All unique display IDs from active contexts.
-    func uniqueDisplayIDs() -> Set<UInt32> {
-        lock.withLock { state in
-            Set(state.contexts.values.compactMap(\.displayID))
-        }
     }
 
     /// Display IDs with at least one live (non-preview) surface. Policy
