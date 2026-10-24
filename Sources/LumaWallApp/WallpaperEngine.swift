@@ -504,7 +504,7 @@ final class DesktopVideoSession {
         readinessObservation = root.playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
             let isReady = layer.isReadyForDisplay
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, !root.usesSharedFrames else { return }
                 root.setVideoVisible(isReady && requestedTier.showsMotion)
             }
         }
@@ -665,6 +665,7 @@ final class DesktopVideoSession {
         playPrivate(url: BatteryMediaVariant.resolvedURL(for: asset, tier: tier), budget: budget)
         root.setVideoVisible(root.playerLayer.isReadyForDisplay)
         reassert()
+        guard player.status == .readyToPlay else { return }
         player.setRate(1, time: .zero, atHostTime: hostTime)
     }
 

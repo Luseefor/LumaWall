@@ -2,6 +2,16 @@ import AppKit
 import LumaWallCore
 import SwiftUI
 
+#if LUMAWALL_TEST_HOST
+// Playback tests create their own sessions and temporary media. Keep the test
+// host from restoring real wallpapers or opening the user's library stores.
+@main
+struct LumaWallTestHost: App {
+    var body: some Scene {
+        WindowGroup { Color.clear.frame(width: 32, height: 32) }
+    }
+}
+#else
 @main
 struct LumaWallApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -24,6 +34,7 @@ struct LumaWallApp: App {
         .menuBarExtraStyle(.window)
     }
 }
+#endif
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -229,7 +240,7 @@ private struct ChromeHitSurface: NSViewRepresentable {
 }
 
 private final class ChromeHitView: NSView {
-    override var mouseDownCanMoveWindow: Bool { false }
+    override nonisolated var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func viewDidMoveToWindow() {

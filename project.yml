@@ -1,4 +1,8 @@
 name: LumaWall
+configs:
+  Debug: debug
+  Release: release
+  Testing: debug
 options:
   bundleIdPrefix: app.lumawall
   deploymentTarget:
@@ -52,14 +56,15 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Packaging/LumaWall.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Testing:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) LUMAWALL_TEST_HOST"
+          PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.test-host
     dependencies:
       - target: LumaWallCore
         embed: true
       - target: LumaWallWallpaper
         embed: true
-    scheme:
-      testTargets:
-        - LumaWallAppTests
 
   LumaWallWallpaper:
     type: extensionkit-extension
@@ -87,6 +92,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: WallpaperExtension/LumaWallWallpaper.entitlements
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         SKIP_INSTALL: YES
+      configs:
+        Testing:
+          PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.test-host.wallpaper
 
   LumaWallAppTests:
     type: bundle.unit-test
@@ -100,3 +108,19 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.tests
         GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  LumaWall:
+    build:
+      targets:
+        LumaWall: all
+    run:
+      config: Debug
+    test:
+      config: Testing
+      targets:
+        - LumaWallAppTests
+    profile:
+      config: Release
+    archive:
+      config: Release

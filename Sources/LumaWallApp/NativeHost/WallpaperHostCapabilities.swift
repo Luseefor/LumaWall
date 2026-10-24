@@ -22,7 +22,34 @@ enum WallpaperHostCapabilities {
         guard hasEmbeddedWallpaperExtension || UserDefaults.standard.bool(forKey: "lumawall.forceNative") else {
             return .overlay
         }
+        guard nativeStorageIsAccessible() else { return .overlay }
         return .native
+    }
+
+    static func nativeStorageIsAccessible(at url: URL = extensionDocumentsURL) -> Bool {
+        do {
+            _ = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
+            return true
+        } catch {
+            // A missing container can be created on first deployment. A protected
+            // container must use overlay playback instead of requesting broad disk access.
+            return !isPermissionError(error)
+        }
+    }
+
+    static func isPermissionError(_ error: Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain,
+           [CocoaError.fileReadNoPermission.rawValue, CocoaError.fileWriteNoPermission.rawValue].contains(error.code) {
+            return true
+        }
+        if error.domain == NSPOSIXErrorDomain, error.code == Int(EPERM) || error.code == Int(EACCES) {
+            return true
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isPermissionError(underlying)
+        }
+        return false
     }
 
     static var hasEmbeddedWallpaperExtension: Bool {

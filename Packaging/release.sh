@@ -21,11 +21,13 @@ if ! security find-identity -v -p codesigning | grep -Fq "${DEVELOPER_ID_APPLICA
     exit 2
 fi
 
+cd "${project_root}"
+"${project_root}/ci/check.sh"
+
 mkdir -p "${output_dir}"
 rm -rf "${archive_path}" "${dmg_root}"
 rm -f "${dmg_path}"
 
-cd "${project_root}"
 xcodegen generate
 xcodebuild \
     -project LumaWall.xcodeproj \

@@ -7,6 +7,7 @@ final class WallpaperEngine {
     private let overlay: OverlayWallpaperEngine
     private let native: NativeWallpaperEngine?
     private let assignments: AssignmentStore
+    private var libraryByID: [WallpaperID: WallpaperAsset] = [:]
     private(set) var mode: WallpaperHostMode
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
@@ -50,19 +51,31 @@ final class WallpaperEngine {
     }
 
     func apply(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition = .init()) async throws {
+        libraryByID[asset.id] = asset
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
-            overlay.dismantleSession(displayID)
-            try await native.apply(asset, to: displayID, composition: composition)
-            return
+            do {
+                try await native.apply(asset, to: displayID, composition: composition)
+                overlay.dismantleSession(displayID)
+                return
+            } catch {
+                guard WallpaperHostCapabilities.isPermissionError(error) else { throw error }
+                await fallBackToOverlay()
+            }
         }
         try await overlay.apply(asset, to: displayID, composition: composition)
     }
 
     func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
+        libraryByID[asset.id] = asset
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
-            overlay.dismantleSessions()
-            try await native.applyToAll(asset, composition: composition)
-            return
+            do {
+                try await native.applyToAll(asset, composition: composition)
+                overlay.dismantleSessions()
+                return
+            } catch {
+                guard WallpaperHostCapabilities.isPermissionError(error) else { throw error }
+                await fallBackToOverlay()
+            }
         }
         try await overlay.applyToAll(asset, composition: composition)
     }
@@ -96,6 +109,7 @@ final class WallpaperEngine {
     /// and posters only), so it runs immediately on every screen-parameters
     /// burst. See `restoreNative(using:)` for why the native half waits.
     func restoreOverlay(using library: [WallpaperAsset]) async {
+        libraryByID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         if mode == .native {
             if await needsOverlaySplit() {
                 await overlay.restore(using: library, nativeHostActive: true)
@@ -117,11 +131,19 @@ final class WallpaperEngine {
     /// displays clobbers assignments (overlay posters) or leaks windows.
     func restoreNative(using library: [WallpaperAsset]) async {
         guard mode == .native, let native else { return }
-        if await needsOverlaySplit() {
-            await native.restore(using: library, onlyDefaultCrop: true)
-        } else {
-            await native.restore(using: library)
+        libraryByID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
+        do {
+            let split = await needsOverlaySplit()
+            try await native.restore(using: library, onlyDefaultCrop: split)
+        } catch {
+            await fallBackToOverlay()
         }
+    }
+
+    private func fallBackToOverlay() async {
+        mode = .overlay
+        nativeHostLog.notice("Native wallpaper storage access denied; using overlay playback")
+        await overlay.restore(using: Array(libraryByID.values))
     }
 
     private func needsOverlaySplit() async -> Bool {
@@ -144,7 +166,7 @@ final class WallpaperEngine {
 
     func reapplyAssignments() {
         if mode == .native {
-            native?.reapplyAssignments()
+            Task { await restoreNative(using: Array(libraryByID.values)) }
             return
         }
         overlay.reapplyAssignments()

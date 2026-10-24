@@ -134,7 +134,7 @@ enum NativeWallpaperDeployment {
     @MainActor
     private static func deploy(asset: WallpaperAsset, entryID: String) async throws -> EntryInfo {
         let hash = try await cachedContentHash(for: asset.mediaURL)
-        if let existing = entry(id: entryID),
+        if let existing = try entry(id: entryID),
            FileManager.default.fileExists(atPath: videoURL(for: existing).path),
            existing.contentHash == hash {
             // Pre-variant libraries backfill in the background so Battery
@@ -197,12 +197,17 @@ enum NativeWallpaperDeployment {
         return entry
     }
 
-    static func entry(id: String) -> EntryInfo? {
+    static func entry(id: String, videosFolderURL: URL = videosFolderURL) throws -> EntryInfo? {
         let metadataURL = videosFolderURL
             .appendingPathComponent(id, isDirectory: true)
             .appendingPathComponent("metadata.json")
-        guard let data = try? Data(contentsOf: metadataURL) else { return nil }
-        return try? JSONDecoder().decode(EntryInfo.self, from: data)
+        let data: Data
+        do {
+            data = try Data(contentsOf: metadataURL)
+        } catch CocoaError.fileReadNoSuchFile {
+            return nil
+        }
+        return try JSONDecoder().decode(EntryInfo.self, from: data)
     }
 
     static func notifyLibraryChanged() {
@@ -257,7 +262,8 @@ enum NativeWallpaperDeployment {
             ("Wallpaper.minimal.mov", AVAssetExportPreset1280x720, 1280),
         ].filter { sourceMax > $0.maxDim }
         guard !specs.isEmpty else { return }
-        var variants = entry(id: entryID)?.variants ?? []
+        guard let metadata = try? entry(id: entryID) else { return }
+        var variants = metadata.variants ?? []
         // Drop entries whose file went missing so they regenerate below.
         variants.removeAll { fm.fileExists(atPath: dir.appendingPathComponent($0.filename).path) == false }
         var changed = false
@@ -279,7 +285,7 @@ enum NativeWallpaperDeployment {
             changed = true
         }
         guard changed else { return }
-        if var entry = entry(id: entryID) {
+        if var entry = try? entry(id: entryID) {
             entry.variants = variants
             if let data = try? JSONEncoder().encode(entry) {
                 try? data.write(to: dir.appendingPathComponent("metadata.json"), options: .atomic)

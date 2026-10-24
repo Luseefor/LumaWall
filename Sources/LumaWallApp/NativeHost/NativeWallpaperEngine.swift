@@ -117,7 +117,7 @@ final class NativeWallpaperEngine {
     /// Restores persisted assignments through the system host. When the overlay
     /// owns non-default displays (`onlyDefaultCrop`), those assignments are
     /// left for the overlay engine. Writing them here would fight it.
-    func restore(using library: [WallpaperAsset], onlyDefaultCrop: Bool = false) async {
+    func restore(using library: [WallpaperAsset], onlyDefaultCrop: Bool = false) async throws {
         let connected = displays.refresh()
         let connectedIDs = Set(connected.map(\.displayID))
         let connectedUUIDs = Set(connected.compactMap { stableUUID(for: $0.cgDisplayID) })
@@ -166,6 +166,7 @@ final class NativeWallpaperEngine {
                 map[display.cgDisplayID] = entry
                 active[assignment.displayID] = (asset.id, assignment.composition)
             } catch {
+                if WallpaperHostCapabilities.isPermissionError(error) { throw error }
                 nativeHostLog.error("restore: deploy failed for \(asset.name, privacy: .public): \(error, privacy: .public)")
             }
         }
@@ -187,6 +188,7 @@ final class NativeWallpaperEngine {
             lastWrittenMap = fingerprint
             nativeHostLog.info("restore: assigned \(map.count) display(s)")
         } catch {
+            if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             nativeHostLog.error("restore: assignment failed: \(error, privacy: .public)")
         }
     }
@@ -194,6 +196,6 @@ final class NativeWallpaperEngine {
     func reapplyAssignments() {
         let library = Array(libraryByID.values)
         guard !library.isEmpty else { return }
-        Task { await restore(using: library) }
+        Task { try? await restore(using: library) }
     }
 }

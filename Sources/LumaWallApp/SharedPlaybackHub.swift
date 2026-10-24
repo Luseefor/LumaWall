@@ -13,6 +13,7 @@ final class SharedPlaybackHub {
     private let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private let output: AVPlayerItemVideoOutput
+    private weak var outputItem: AVPlayerItem?
     private var layers: [ObjectIdentifier: WeakLayer] = [:]
     /// Layers whose sessions are paused/static. They keep their last pumped
     /// frame (pump skips them) while the hub keeps playing for the remaining
@@ -108,6 +109,7 @@ final class SharedPlaybackHub {
     }
 
     func synchronize(atHostTime hostTime: CMTime) {
+        guard player.status == .readyToPlay else { return }
         player.setRate(1, time: .zero, atHostTime: hostTime)
     }
 
@@ -118,7 +120,6 @@ final class SharedPlaybackHub {
         looper = nil
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 1
-        item.add(output)
         looper = AVPlayerLooper(player: player, templateItem: item)
         isLoaded = true
         Task { await refreshSourceFrameRate(for: url) }
@@ -163,6 +164,14 @@ final class SharedPlaybackHub {
     }
 
     private func pumpFrames() {
+        guard let item = player.currentItem else { return }
+        // The looper copies the template without its outputs. Follow the
+        // actual queue item, including when playback crosses a loop boundary.
+        if outputItem !== item {
+            outputItem?.remove(output)
+            item.add(output)
+            outputItem = item
+        }
         let time = output.itemTime(forHostTime: CACurrentMediaTime())
         guard output.hasNewPixelBuffer(forItemTime: time),
               let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil)
