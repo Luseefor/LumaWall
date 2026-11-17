@@ -24,6 +24,7 @@
 		2005D320EE4DB3C6E61F5DC2 /* NativeWallpaperDeployment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF64A3AE50DDE3102971EF2 /* NativeWallpaperDeployment.swift */; };
 		231A4C0C03E085872F103491 /* PlaylistPlaybackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D7BE0D955C7F0BE8DF866CF /* PlaylistPlaybackStore.swift */; };
 		24B0B1B525BA760C4DD60285 /* LumaWallWallpaper.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = B5F138BA1F2F0179AE357E78 /* LumaWallWallpaper.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		24D48B66AFCD28E4CF3E7B5C /* VariantSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD81E985B85F9C197EEEADEF /* VariantSelectionTests.swift */; };
 		27703CD32431238C74879E64 /* WallpaperModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E5F5F74F457F8FAF282073 /* WallpaperModels.swift */; };
 		28F246B976D22406C3E0D38E /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59DC962B533FD75165C56C4 /* SharedComponents.swift */; };
 		29376B54DAA52AD3D4DEFDBD /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE978B3E3944AB95BCDB11E2 /* Logging.swift */; };
@@ -44,6 +45,7 @@
 		4E6E69F79EA05FE8E2DED44A /* NativeWallpaperAssignmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E615B895EBC9A29191A4CC3C /* NativeWallpaperAssignmentService.swift */; };
 		502F5872506ECAF6C45C3969 /* VideoRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8092E38758B82BE5D879E732 /* VideoRenderer.swift */; };
 		52A281AAE0669A4D9CB3D118 /* CPUSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = C41EA988E2A80522A9F94B5F /* CPUSampler.swift */; };
+		54A65A26078CEDD85BD5097D /* VariantSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29310CD5FF9A5DCEFFF01BB /* VariantSelection.swift */; };
 		5B22BD068EE7259CB0C5C45D /* LibraryComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4FDD5BDAB00E7ED9F1EA48 /* LibraryComponents.swift */; };
 		5E4E2E458C7CEC1E174924CB /* ColorDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 972E22AA71E714394D396642 /* ColorDiag.swift */; };
 		5EEDB89C8121D771CF906ECF /* LoopingVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19D0E3B814FD25BF060BAFEB /* LoopingVideoView.swift */; };
@@ -75,6 +77,7 @@
 		A2C0AF588475CFAED60E1E09 /* DisplayCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 580BF5B18E21C3C2F1E7A962 /* DisplayCoordinator.swift */; };
 		AB633A03CB77A18D37A2D0EB /* VariantSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29310CD5FF9A5DCEFFF01BB /* VariantSelection.swift */; };
 		ABFC54D7CB6FA7846C6301FB /* SharedPlaybackHub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004C5CE2B0390C8A96316AD1 /* SharedPlaybackHub.swift */; };
+		AC3CC8BAC0C6F51E06C42E50 /* PlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C82E4B5715D67331F66B3 /* PlaybackPolicy.swift */; };
 		AE589C34D91A4831C452DA6A /* SpiralRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32DFB08F9FEC701E681168B2 /* SpiralRecovery.swift */; };
 		AE7569361ACE8075F9031015 /* AppModel+Displays.swift in Sources */ = {isa = PBXBuildFile; fileRef = B392584FC143C837C3708118 /* AppModel+Displays.swift */; };
 		B0C3C26B2C3C7EE160D6223E /* DisplayOcclusion.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6DBB8701C014457564B3EB5 /* DisplayOcclusion.swift */; };
@@ -227,6 +230,7 @@
 		7F82E6574A70C9A0333D0325 /* VideoLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoLibrary.swift; sourceTree = "<group>"; };
 		8092E38758B82BE5D879E732 /* VideoRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoRenderer.swift; sourceTree = "<group>"; };
 		82A061BE21AF10DA207F7C08 /* AppModel+Lifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Lifecycle.swift"; sourceTree = "<group>"; };
+		8469B0AE7A1B1EFD3B6AB03B /* WallpaperExtensionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WallpaperExtensionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		897C82E4B5715D67331F66B3 /* PlaybackPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackPolicy.swift; sourceTree = "<group>"; };
 		935605492FBB33F44E0672CF /* NativeWallpaperAssignmentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperAssignmentStore.swift; sourceTree = "<group>"; };
 		95C8553B65672801ECD4B39E /* WallpaperStoreProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperStoreProbe.swift; sourceTree = "<group>"; };
@@ -240,6 +244,7 @@
 		AB67E20FE99BF95F6C7B5362 /* AutomationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationStore.swift; sourceTree = "<group>"; };
 		ABC4C2023E8F0EB19D929721 /* WallpaperTiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperTiles.swift; sourceTree = "<group>"; };
 		ABDCE412E62E7FE35E60E348 /* PlaybackFrameRate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackFrameRate.swift; sourceTree = "<group>"; };
+		AD81E985B85F9C197EEEADEF /* VariantSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariantSelectionTests.swift; sourceTree = "<group>"; };
 		B0E94C6C771774B4920DA1C1 /* ScreenGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGeometry.swift; sourceTree = "<group>"; };
 		B2C03CB431C1C89AABAA80DF /* DisplaysPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaysPage.swift; sourceTree = "<group>"; };
 		B392584FC143C837C3708118 /* AppModel+Displays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Displays.swift"; sourceTree = "<group>"; };
@@ -314,6 +319,7 @@
 				449306C2885B89D221237E2B /* LumaWallAppTests.xctest */,
 				5D2D700161F54D7AE38C0A54 /* LumaWallCore.framework */,
 				B5F138BA1F2F0179AE357E78 /* LumaWallWallpaper.appex */,
+				8469B0AE7A1B1EFD3B6AB03B /* WallpaperExtensionTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -421,8 +427,17 @@
 			isa = PBXGroup;
 			children = (
 				04FAE92CF4D5D13B3B03C9E7 /* LumaWallAppTests */,
+				95B5D566193E4E6EE4CB192D /* WallpaperExtensionTests */,
 			);
 			path = Tests;
+			sourceTree = "<group>";
+		};
+		95B5D566193E4E6EE4CB192D /* WallpaperExtensionTests */ = {
+			isa = PBXGroup;
+			children = (
+				AD81E985B85F9C197EEEADEF /* VariantSelectionTests.swift */,
+			);
+			path = WallpaperExtensionTests;
 			sourceTree = "<group>";
 		};
 		CABFDA8F0EDC6CC55E3B353A /* WallpaperExtension */ = {
@@ -514,6 +529,23 @@
 			productReference = 7F6CB9125E1D50615F42B07B /* LumaWall.app */;
 			productType = "com.apple.product-type.application";
 		};
+		9EFCF8CFD5C4A9BA250999AB /* WallpaperExtensionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7D8B0B613DE41382F3962934 /* Build configuration list for PBXNativeTarget "WallpaperExtensionTests" */;
+			buildPhases = (
+				7217EE1C802BC0A2A6AE8654 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WallpaperExtensionTests;
+			packageProductDependencies = (
+			);
+			productName = WallpaperExtensionTests;
+			productReference = 8469B0AE7A1B1EFD3B6AB03B /* WallpaperExtensionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		BA7D381497A1D253E7C909D8 /* LumaWallWallpaper */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 8D57F82B29302BA367D79EA0 /* Build configuration list for PBXNativeTarget "LumaWallWallpaper" */;
@@ -566,6 +598,10 @@
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
+					9EFCF8CFD5C4A9BA250999AB = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
 					BA7D381497A1D253E7C909D8 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
@@ -595,6 +631,7 @@
 				2D57B861D0FB2493BBA95DD4 /* LumaWall */,
 				BA7D381497A1D253E7C909D8 /* LumaWallWallpaper */,
 				E32FF0342909C645D768D9D0 /* LumaWallAppTests */,
+				9EFCF8CFD5C4A9BA250999AB /* WallpaperExtensionTests */,
 			);
 		};
 /* End PBXProject section */
@@ -659,6 +696,16 @@
 				639F19235D75AB32B8430535 /* WallpaperStoreProbe.swift in Sources */,
 				C607C42ADD899872BB6D714D /* WallpaperTiles.swift in Sources */,
 				37939B55B9CE8A9AA2288140 /* WindowVisibility.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7217EE1C802BC0A2A6AE8654 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AC3CC8BAC0C6F51E06C42E50 /* PlaybackPolicy.swift in Sources */,
+				54A65A26078CEDD85BD5097D /* VariantSelection.swift in Sources */,
+				24D48B66AFCD28E4CF3E7B5C /* VariantSelectionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -872,6 +919,23 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LUMAWALL_TEST_HOST";
 			};
 			name = Testing;
+		};
+		24905287BB4FE1EFA3AA98AC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "app.lumawall.personal.extension-tests";
+				SDKROOT = macosx;
+			};
+			name = Debug;
 		};
 		258D6BF873FE1889D93CA516 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -1090,6 +1154,23 @@
 			};
 			name = Release;
 		};
+		88217854C7E8BB0222AC1F49 /* Testing */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "app.lumawall.personal.extension-tests";
+				SDKROOT = macosx;
+			};
+			name = Testing;
+		};
 		93F23C077960DAD46D7973D2 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1135,6 +1216,23 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "WallpaperExtension/WallpaperExtension-Bridging-Header.h";
 			};
 			name = Debug;
+		};
+		A1598254AAB300E6650A63EB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "app.lumawall.personal.extension-tests";
+				SDKROOT = macosx;
+			};
+			name = Release;
 		};
 		CE2AA543906F2575ED745A48 /* Testing */ = {
 			isa = XCBuildConfiguration;
@@ -1239,6 +1337,16 @@
 				5C1B209EBDCD26BEEB4EF71C /* Debug */,
 				E5A3B69CE048A9E12114F45F /* Release */,
 				5CE74F65465200270D94E9D3 /* Testing */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7D8B0B613DE41382F3962934 /* Build configuration list for PBXNativeTarget "WallpaperExtensionTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				24905287BB4FE1EFA3AA98AC /* Debug */,
+				A1598254AAB300E6650A63EB /* Release */,
+				88217854C7E8BB0222AC1F49 /* Testing */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

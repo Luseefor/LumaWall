@@ -68,13 +68,14 @@ final class VideoLibrary: Sendable {
     /// Select the best variant URL for a given playback policy (selection rules
     /// in `VariantSelection`). Falls back to the original file URL when the policy
     /// resolves to no variant. Returns `nil` only if the entry doesn't exist.
-    func bestVariantURL(for id: String, policy: PlaybackPolicy) -> URL? {
+    func bestVariantURL(for id: String, policy: PlaybackPolicy, displayPixels: CGSize? = nil) -> URL? {
         guard let entry = entry(for: id) else { return nil }
         guard let chosen = VariantSelection.variant(
             for: policy,
             sourceFPS: Int(entry.fps.rounded()),
             sourceResolution: entry.resolution,
             variants: entry.variants ?? [],
+            displayPixels: displayPixels,
         ) else {
             return videoURL(for: entry)
         }

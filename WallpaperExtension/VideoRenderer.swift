@@ -22,6 +22,9 @@ final class VideoRenderer: @unchecked Sendable {
     let debugID: Int = VideoRenderer.idCounter.withLock { $0 += 1; return $0 }
 
     let displayLayer: AVSampleBufferDisplayLayer
+    /// The display's size in pixels, so Full Quality can pick a copy that
+    /// fills it without decoding more than it can show.
+    let displayPixelSize: CGSize
     let timebase: CMTimebase
     private let renderer: AVSampleBufferVideoRenderer
     private let stillFrameLayer: CALayer
@@ -39,7 +42,7 @@ final class VideoRenderer: @unchecked Sendable {
     private struct PlaybackState {
         var isPaused = false
         var policy: PlaybackPolicy = .full
-        var variantSelector: (@Sendable () -> URL)?
+        var variantSelector: (@Sendable (CGSize) -> URL)?
     }
     /// Read-only view of the pause flag; all writes go through
     /// `takePaused()`/`takeResumed()` so claim races serialize.
@@ -99,7 +102,7 @@ final class VideoRenderer: @unchecked Sendable {
     /// Called at each loop boundary to select the video URL for the next iteration.
     /// Written from the Lifecycle queue, read on the renderer queue, lock-backed
     /// for the same reason as the pause flags above. Same API as before.
-    var variantSelector: (@Sendable () -> URL)? {
+    var variantSelector: (@Sendable (CGSize) -> URL)? {
         get { stateLock.withLock { $0.variantSelector } }
         set { stateLock.withLock { $0.variantSelector = newValue } }
     }
@@ -154,6 +157,10 @@ final class VideoRenderer: @unchecked Sendable {
         nominalFrameRate: Double,
     ) {
         self.displayLayer = displayLayer
+        self.displayPixelSize = CGSize(
+            width: rootLayer.bounds.width * rootLayer.contentsScale,
+            height: rootLayer.bounds.height * rootLayer.contentsScale
+        )
         self.renderer = LWSampleBufferRenderer(displayLayer)
         self.asset = asset
         self.videoTrack = videoTrack
@@ -198,7 +205,7 @@ final class VideoRenderer: @unchecked Sendable {
         rootLayer.sublayers?.filter { $0 is CAGradientLayer }.forEach { $0.removeFromSuperlayer() }
         rootLayer.addSublayer(displayLayer)
         rootLayer.addSublayer(stillFrameLayer)
-        traceLog("  [Renderer #\(debugID)] CREATED for \(asset.url.lastPathComponent), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0))")
+        traceLog("  [Renderer #\(debugID)] CREATED for \(asset.url.lastPathComponent), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0)), pixels=\(Int(displayPixelSize.width))x\(Int(displayPixelSize.height))")
         if let stillImage, let stillBuffer = makeStillSampleBuffer(from: stillImage) {
             // Tag DisplayImmediately so the still is shown the instant it's enqueued,
             // rather than waiting on the control timebase (which is frozen at rate 0 here).
@@ -440,7 +447,7 @@ final class VideoRenderer: @unchecked Sendable {
             // to a minute later. Switch now when the URL differs; the trailing
             // resume/ramp then continues on the right variant.
             if let selector = variantSelector {
-                let url = selector()
+                let url = selector(displayPixelSize)
                 if url != asset.url {
                     switchVideo(to: url)
                 }
@@ -760,7 +767,7 @@ final class VideoRenderer: @unchecked Sendable {
         // No Task involved.
         queue.async { [weak self] in
             guard let self, isRunning else { return }
-            let nextURL = variantSelector?()
+            let nextURL = variantSelector?(displayPixelSize)
             if let nextURL, nextURL != asset.url {
                 let newAsset = AVURLAsset(url: nextURL)
                 guard let track = Self.loadFirstVideoTrackBlocking(newAsset) else {

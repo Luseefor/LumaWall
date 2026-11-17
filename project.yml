@@ -109,6 +109,20 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.tests
         GENERATE_INFOPLIST_FILE: YES
 
+  WallpaperExtensionTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Tests/WallpaperExtensionTests
+      # The extension can't host a test bundle; compile its pure sources here.
+      - path: WallpaperExtension/VariantSelection.swift
+      - path: WallpaperExtension/PlaybackPolicy.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.extension-tests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   LumaWall:
     build:
@@ -120,6 +134,7 @@ schemes:
       config: Testing
       targets:
         - LumaWallAppTests
+        - WallpaperExtensionTests
     profile:
       config: Release
     archive:
