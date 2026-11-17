@@ -12,6 +12,10 @@ extension AppModel {
     var screenIsHidden: Bool { sessionLocked || displaysAsleep }
 
     func observeLockAndSleep() {
+        // The notifications below only report changes; a launch at the lock
+        // screen (login item, relaunch after an update) would otherwise
+        // believe the screen is unlocked until the next lock.
+        sessionLocked = SessionLock.isLocked
         let distributed = DistributedNotificationCenter.default()
         lockObservers.append(
             distributed.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in

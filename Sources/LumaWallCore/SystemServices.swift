@@ -1,5 +1,19 @@
+import CoreGraphics
 import Foundation
 import ServiceManagement
+
+/// Whether the login session's screen is locked right now.
+public enum SessionLock {
+    /// Lock and unlock notifications only report changes. An app launched
+    /// while the screen is already locked reads the current state here.
+    public static var isLocked: Bool {
+        isLocked(in: CGSessionCopyCurrentDictionary() as? [String: Any])
+    }
+
+    public static func isLocked(in session: [String: Any]?) -> Bool {
+        (session?["CGSSessionScreenIsLocked"] as? NSNumber)?.boolValue ?? false
+    }
+}
 
 public enum LaunchAtLogin {
     public static var isEnabled: Bool {

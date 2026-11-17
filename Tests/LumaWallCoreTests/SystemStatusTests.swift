@@ -64,4 +64,14 @@ struct SystemStatusTests {
         #expect(try CacheCleaner.clearDisk(preservingLibraryRoot: root) >= 1)
         #expect(!FileManager.default.fileExists(atPath: scratch.path))
     }
+
+    @Test func sessionLockReadsTheWindowServerFlag() {
+        // The app may launch while the screen is already locked, when no
+        // lock notification will arrive. Startup reads this flag instead.
+        #expect(SessionLock.isLocked(in: ["CGSSessionScreenIsLocked": true]))
+        #expect(SessionLock.isLocked(in: ["CGSSessionScreenIsLocked": 1]))
+        #expect(!SessionLock.isLocked(in: ["CGSSessionScreenIsLocked": false]))
+        #expect(!SessionLock.isLocked(in: [:]))
+        #expect(!SessionLock.isLocked(in: nil))
+    }
 }
