@@ -1,6 +1,8 @@
 import AVFoundation
 import SwiftUI
 
+/// Muted looping preview. Plays only while its window is visible on screen:
+/// a window behind other apps, minimized, or on another Space stops decoding.
 struct LoopingVideoView: NSViewRepresentable {
     let url: URL
     var gravity: AVLayerVideoGravity = .resizeAspectFill
@@ -11,7 +13,8 @@ struct LoopingVideoView: NSViewRepresentable {
         let view = PlayerSurface()
         view.playerLayer.player = context.coordinator.player
         view.playerLayer.videoGravity = gravity
-        context.coordinator.player.play()
+        let coordinator = context.coordinator
+        view.onVisibilityChange = { [weak coordinator] in coordinator?.setVisible($0) }
         return view
     }
 
@@ -22,19 +25,21 @@ struct LoopingVideoView: NSViewRepresentable {
         if context.coordinator.url != url {
             context.coordinator.reconfigure(url: url)
             view.playerLayer.player = context.coordinator.player
-            context.coordinator.player.play()
         }
     }
 
     static func dismantleNSView(_ view: PlayerSurface, coordinator: Coordinator) {
+        view.onVisibilityChange = nil
         coordinator.tearDown()
         view.playerLayer.player = nil
     }
 
+    @MainActor
     final class Coordinator {
         let player = AVQueuePlayer()
         private var looper: AVPlayerLooper?
         private(set) var url: URL
+        private var isVisible = false
 
         init(url: URL) {
             self.url = url
@@ -44,6 +49,11 @@ struct LoopingVideoView: NSViewRepresentable {
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         }
 
+        func setVisible(_ visible: Bool) {
+            isVisible = visible
+            if visible { player.play() } else { player.pause() }
+        }
+
         /// Swap the looping item for a new URL (main thread, SwiftUI update).
         func reconfigure(url: URL) {
             self.url = url
@@ -51,10 +61,12 @@ struct LoopingVideoView: NSViewRepresentable {
             looper = nil
             player.replaceCurrentItem(with: nil)
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+            if isVisible { player.play() }
         }
 
         /// Fully release the decoder for view teardown.
         func tearDown() {
+            isVisible = false
             player.pause()
             looper = nil
             player.replaceCurrentItem(with: nil)
@@ -64,11 +76,44 @@ struct LoopingVideoView: NSViewRepresentable {
 
 final class PlayerSurface: NSView {
     let playerLayer = AVPlayerLayer()
+    /// Called with whether the view's window is currently visible on screen.
+    var onVisibilityChange: ((Bool) -> Void)?
+    private var occlusionObserver: NSObjectProtocol?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer = playerLayer
     }
+
     @available(*, unavailable) required init?(coder: NSCoder) { nil }
+
     override func layout() { super.layout(); playerLayer.frame = bounds }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Leaving the window (including teardown) drops the observer.
+        if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
+        occlusionObserver = nil
+        if let window {
+            // Occlusion state covers being behind other windows, minimized,
+            // on another Space, and the app being hidden.
+            occlusionObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportVisibility() }
+            }
+        }
+        reportVisibility()
+    }
+
+    override func viewDidUnhide() { super.viewDidUnhide(); reportVisibility() }
+    override func viewDidHide() { super.viewDidHide(); reportVisibility() }
+
+    private func reportVisibility() {
+        let visible = window?.occlusionState.contains(.visible) == true && !isHiddenOrHasHiddenAncestor
+        onVisibilityChange?(visible)
+    }
 }
