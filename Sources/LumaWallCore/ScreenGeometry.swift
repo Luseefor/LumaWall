@@ -45,8 +45,9 @@ public enum ScreenGeometry {
 
     /// Fraction of `screen` hidden by the union of `windows`. Overlaps count
     /// once, so tiled windows that together hide the screen reach 1 even when
-    /// no single window does. Exact for rectangles: the screen is split into
-    /// cells along every window edge and each covered cell is counted once.
+    /// no single window does. Sweeps vertical slabs between window edges and
+    /// merges the covered y-intervals in each: O(n² log n), a few thousand
+    /// steps for a typical desktop, so it is safe on the main thread.
     public static func unionCoverageRatio(screen: CGRect, windows: [CGRect]) -> CGFloat {
         let area = screen.width * screen.height
         guard area > 0 else { return 0 }
@@ -56,16 +57,25 @@ public enum ScreenGeometry {
         }
         guard !clipped.isEmpty else { return 0 }
         let xs = Array(Set(clipped.flatMap { [$0.minX, $0.maxX] })).sorted()
-        let ys = Array(Set(clipped.flatMap { [$0.minY, $0.maxY] })).sorted()
         var covered: CGFloat = 0
         for (x0, x1) in zip(xs, xs.dropFirst()) {
             let midX = (x0 + x1) / 2
-            for (y0, y1) in zip(ys, ys.dropFirst()) {
-                let midY = (y0 + y1) / 2
-                if clipped.contains(where: { $0.minX < midX && midX < $0.maxX && $0.minY < midY && midY < $0.maxY }) {
-                    covered += (x1 - x0) * (y1 - y0)
+            let spans = clipped
+                .filter { $0.minX < midX && midX < $0.maxX }
+                .map { (low: $0.minY, high: $0.maxY) }
+                .sorted { $0.low < $1.low }
+            var length: CGFloat = 0
+            var run: (low: CGFloat, high: CGFloat)?
+            for span in spans {
+                if let current = run, span.low <= current.high {
+                    run = (current.low, max(current.high, span.high))
+                } else {
+                    if let current = run { length += current.high - current.low }
+                    run = span
                 }
             }
+            if let current = run { length += current.high - current.low }
+            covered += (x1 - x0) * length
         }
         return min(1, covered / area)
     }

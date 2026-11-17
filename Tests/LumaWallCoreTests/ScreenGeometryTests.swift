@@ -72,4 +72,38 @@ struct ScreenGeometryTests {
             threshold: PlaybackPolicyThresholds.occlusionCovered
         ))
     }
+
+    @Test func unionCoverageMatchesExactGridOnManyWindows() {
+        // Reference: split the screen along every edge and test each cell.
+        func gridUnion(_ screen: CGRect, _ windows: [CGRect]) -> CGFloat {
+            let rects = windows.map { $0.intersection(screen) }.filter { !$0.isNull && !$0.isEmpty }
+            let xs = Array(Set(rects.flatMap { [$0.minX, $0.maxX] })).sorted()
+            let ys = Array(Set(rects.flatMap { [$0.minY, $0.maxY] })).sorted()
+            var area: CGFloat = 0
+            for (x0, x1) in zip(xs, xs.dropFirst()) {
+                for (y0, y1) in zip(ys, ys.dropFirst()) {
+                    let mid = CGPoint(x: (x0 + x1) / 2, y: (y0 + y1) / 2)
+                    if rects.contains(where: { $0.contains(mid) }) { area += (x1 - x0) * (y1 - y0) }
+                }
+            }
+            return area / (screen.width * screen.height)
+        }
+        let screen = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        var seed: UInt64 = 42
+        func next(_ bound: Int) -> CGFloat {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return CGFloat(Int(seed >> 33) % bound)
+        }
+        let windows = (0..<60).map { _ in
+            CGRect(x: next(2700) - 100, y: next(1500) - 50, width: next(900) + 20, height: next(700) + 20)
+        }
+        let fast = ScreenGeometry.unionCoverageRatio(screen: screen, windows: windows)
+        #expect(abs(fast - gridUnion(screen, windows)) < 0.0001)
+    }
+
+    @Test func unionCoverageOfTiledStripsIsFull() {
+        let screen = CGRect(x: 0, y: 0, width: 1000, height: 600)
+        let strips = (0..<100).map { CGRect(x: CGFloat($0) * 10, y: 0, width: 12, height: 600) }
+        #expect(abs(ScreenGeometry.unionCoverageRatio(screen: screen, windows: strips) - 1) < 0.0001)
+    }
 }
