@@ -98,4 +98,44 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         let unknown = NativeWallpaperDeployment.previewURL(entryID: UUID().uuidString, minPixelWidth: 640, fallback: original, videosFolderURL: videos)
         XCTAssertEqual(unknown, original)
     }
+
+    func testCopiesPlannedPerSourceSize() {
+        let names = { (size: CGSize) in NativeWallpaperDeployment.variantSpecs(sourceSize: size).map(\.filename) }
+        // 4K sources also get a 1440p copy at full frame rate for 1440p monitors.
+        XCTAssertEqual(Set(names(CGSize(width: 3840, height: 2160))), ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov", "Wallpaper.qhd.mov"])
+        XCTAssertEqual(Set(names(CGSize(width: 2560, height: 1440))), ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
+        XCTAssertEqual(names(CGSize(width: 1920, height: 1080)), ["Wallpaper.minimal.mov"])
+        XCTAssertEqual(names(CGSize(width: 1280, height: 720)), [])
+    }
+
+    func testQHDCopyKeepsTheSourceAspect() {
+        let qhd = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 4096, height: 2304)).first { $0.filename == "Wallpaper.qhd.mov" }
+        XCTAssertEqual(qhd?.fitting, CGSize(width: 2560, height: 1440))
+        let portrait = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 2160, height: 3840)).first { $0.filename == "Wallpaper.qhd.mov" }
+        XCTAssertEqual(portrait?.fitting, CGSize(width: 1440, height: 2560))
+    }
+
+    func testConcurrentCopiesAreMergedNotOverwritten() {
+        // Two workers each wrote the list they started with, so the last
+        // writer dropped the other's copy from metadata.json.
+        let reduced = NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 60, resolution: CGSize(width: 1920, height: 1080))
+        let minimal = NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.minimal.mov", fps: 60, resolution: CGSize(width: 1280, height: 720))
+        let merged = NativeWallpaperDeployment.merging([minimal], with: [reduced])
+        XCTAssertEqual(Set(merged.map(\.filename)), ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
+        let replaced = NativeWallpaperDeployment.merging([reduced], with: [NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: reduced.resolution)])
+        XCTAssertEqual(replaced.count, 1)
+        XCTAssertEqual(replaced.first?.fps, 30)
+    }
+
+    func testEntryMissingAnyPlannedCopyNeedsBackfill() {
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: UUID().uuidString, name: "x", filename: "Wallpaper.mp4", duration: 5, fps: 60,
+            resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants
+        )
+        // Has 1080p and 720p, not the 1440p copy added later.
+        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(entry))
+        var complete = entry
+        complete.variants = variants + [.init(filename: "Wallpaper.qhd.mov", fps: 60, resolution: CGSize(width: 2560, height: 1440))]
+        XCTAssertFalse(NativeWallpaperDeployment.needsVariants(complete))
+    }
 }

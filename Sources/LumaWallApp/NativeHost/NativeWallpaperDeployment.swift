@@ -137,9 +137,9 @@ enum NativeWallpaperDeployment {
         if let existing = try entry(id: entryID),
            FileManager.default.fileExists(atPath: videoURL(for: existing).path),
            existing.contentHash == hash {
-            // Pre-variant libraries backfill in the background so Battery
-            // Saver / Automatic start working without a manual re-apply.
-            if (existing.variants ?? []).isEmpty {
+            // Libraries missing any planned copy (pre-variant ones, or ones
+            // made before the 1440p copy existed) backfill in the background.
+            if needsVariants(existing) {
                 Task.detached {
                     await ensureVariants(
                         for: entryID,
