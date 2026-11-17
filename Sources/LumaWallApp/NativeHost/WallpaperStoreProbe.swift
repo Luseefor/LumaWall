@@ -36,9 +36,15 @@ enum WallpaperStoreProbe {
         let stamp = Stamp(url: url, modified: modified, size: size)
         if let cached, cached.stamp == stamp { return cached.isOurs }
         parseCount += 1
-        let isOurs = (try? Data(contentsOf: url))
-            .flatMap { try? PropertyListSerialization.propertyList(from: $0, options: [], format: nil) as? [String: Any] }
-            .map(containsOurChoice) ?? false
+        // Cache only a successful read: a transient failure (permissions, a
+        // half-written file) keeps the same stamp and must be retried.
+        guard let data = try? Data(contentsOf: url),
+              let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        else {
+            cached = nil
+            return false
+        }
+        let isOurs = containsOurChoice(root)
         cached = (stamp, isOurs)
         return isOurs
     }

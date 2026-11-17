@@ -49,6 +49,17 @@ final class WallpaperStoreProbeTests: XCTestCase {
         XCTAssertTrue(WallpaperStoreProbe.screenSaverIsOurs(storeURL: storeURL))
     }
 
+    func testUnreadableStoreIsRetried() throws {
+        // chmod leaves the modification date and size alone, so a cached
+        // failure would stick until the store happened to change.
+        try writeStore(idleProvider: WallpaperHostCapabilities.extensionBundleID)
+        let fm = FileManager.default
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: storeURL.path)
+        XCTAssertFalse(WallpaperStoreProbe.screenSaverIsOurs(storeURL: storeURL))
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: storeURL.path)
+        XCTAssertTrue(WallpaperStoreProbe.screenSaverIsOurs(storeURL: storeURL))
+    }
+
     func testMissingStoreIsNotOurs() {
         XCTAssertFalse(WallpaperStoreProbe.screenSaverIsOurs(storeURL: storeURL))
     }
