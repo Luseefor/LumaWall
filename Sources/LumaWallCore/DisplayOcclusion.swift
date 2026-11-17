@@ -55,7 +55,7 @@ public enum DisplayOcclusion {
     public struct Analysis: Equatable, Sendable {
         public var covered: Set<DisplayID>
         public var fullscreen: Set<DisplayID>
-        /// Max single-window coverage ratio per display, for hysteresis.
+        /// Fraction of each display hidden by app windows, for hysteresis.
         public var coverage: [DisplayID: CGFloat]
     }
 
@@ -72,7 +72,9 @@ public enum DisplayOcclusion {
 
         var analysis = Analysis(covered: [], fullscreen: [], coverage: [:])
         for display in displays {
-            let ratio = ScreenGeometry.coverageRatio(screen: display.frame, windows: rects)
+            // Union, not the largest window: side-by-side windows that
+            // together hide the wallpaper should pause it too.
+            let ratio = ScreenGeometry.unionCoverageRatio(screen: display.frame, windows: rects)
             analysis.coverage[display.displayID] = ratio
             // Require near-total occlusion before auto-pausing (see
             // PlaybackPolicyThresholds). Lower values flap pause/resume on
