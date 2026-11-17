@@ -26,7 +26,7 @@ func bisectShowStill(videoURL: URL?, cachedStill: CGImage?, rootLayer: CALayer, 
         layer = existing
     } else {
         layer = AVSampleBufferDisplayLayer()
-        layer.videoGravity = .resizeAspectFill
+        LWSetVideoGravity(layer, .resizeAspectFill)
         layer.frame = rootLayer.bounds
         layer.contentsScale = rootLayer.contentsScale
         CATransaction.begin()
@@ -51,7 +51,7 @@ func bisectShowStill(videoURL: URL?, cachedStill: CGImage?, rootLayer: CALayer, 
         return
     }
     bisectSetDisplayImmediately(sample)
-    layer.sampleBufferRenderer.enqueue(sample)
+    LWSampleBufferRenderer(layer).enqueue(sample)
     extensionLog("  [bisect] display \(key.displayID): enqueued still (src=\(source))")
 }
 

@@ -119,7 +119,7 @@ final class VideoRenderer: @unchecked Sendable {
         let nominalFrameRate = Double(try await track.load(.nominalFrameRate))
 
         let displayLayer = AVSampleBufferDisplayLayer()
-        displayLayer.videoGravity = .resizeAspectFill
+        LWSetVideoGravity(displayLayer, .resizeAspectFill)
         displayLayer.frame = rootLayer.bounds
         displayLayer.contentsScale = rootLayer.contentsScale
         // Opaque: the per-surface context fix (each Space/lock surface owns its own
@@ -154,7 +154,7 @@ final class VideoRenderer: @unchecked Sendable {
         nominalFrameRate: Double,
     ) {
         self.displayLayer = displayLayer
-        self.renderer = displayLayer.sampleBufferRenderer
+        self.renderer = LWSampleBufferRenderer(displayLayer)
         self.asset = asset
         self.videoTrack = videoTrack
         if nominalFrameRate.isFinite, nominalFrameRate > 0 {
@@ -180,7 +180,7 @@ final class VideoRenderer: @unchecked Sendable {
         // during the async gap between init and start, which would cause
         // the first batch of frames to be considered "late" and dropped.
         CMTimebaseSetRate(timebase, rate: 0.0)
-        displayLayer.controlTimebase = timebase
+        LWSetControlTimebase(displayLayer, timebase)
 
         // Install the layers and seed the still in ONE action-free transaction, so
         // Core Animation doesn't play an implicit "onOrderIn" animation (the video
