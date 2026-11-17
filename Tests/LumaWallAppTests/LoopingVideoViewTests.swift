@@ -34,4 +34,15 @@ final class LoopingVideoViewTests: XCTestCase {
         surface.viewDidMoveToWindow()
         XCTAssertEqual(reported, [false])
     }
+
+    func testSurfaceLeavingItsWindowReportsHidden() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: [.borderless], backing: .buffered, defer: true)
+        let surface = PlayerSurface()
+        var reported: [Bool] = []
+        surface.onVisibilityChange = { reported.append($0) }
+        window.contentView?.addSubview(surface)
+        surface.removeFromSuperview()
+        XCTAssertEqual(reported.count, 2)
+        XCTAssertEqual(reported.last, false)
+    }
 }
