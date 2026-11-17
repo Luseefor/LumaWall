@@ -73,7 +73,7 @@ struct MenuBarPopover: View {
     private var heroSection: some View {
         ZStack {
             if let slide = currentSlide {
-                LoopingVideoView(url: slide.asset.mediaURL)
+                LoopingVideoView(url: NativeWallpaperDeployment.previewURL(for: slide.asset, minPixelWidth: NativeWallpaperDeployment.PreviewSize.thumbnail))
                     .id(slide.id)
             }
             if slides.count > 1 {

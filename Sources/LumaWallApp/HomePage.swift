@@ -199,7 +199,10 @@ struct FeaturedHero: View {
     private var slideshowBackground: some View {
         ZStack {
             if let asset = currentAsset {
-                LoopingVideoView(url: asset.mediaURL, isSuspended: model.screenIsHidden)
+                LoopingVideoView(
+                    url: NativeWallpaperDeployment.previewURL(for: asset, minPixelWidth: NativeWallpaperDeployment.PreviewSize.hero),
+                    isSuspended: model.screenIsHidden
+                )
                     .id(asset.id)
                     .transition(.opacity)
             } else {

@@ -27,6 +27,7 @@
 		27703CD32431238C74879E64 /* WallpaperModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E5F5F74F457F8FAF282073 /* WallpaperModels.swift */; };
 		28F246B976D22406C3E0D38E /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59DC962B533FD75165C56C4 /* SharedComponents.swift */; };
 		29376B54DAA52AD3D4DEFDBD /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE978B3E3944AB95BCDB11E2 /* Logging.swift */; };
+		2A1E8DD63C0A6010100B42E8 /* NativeWallpaperDeployment+Preview.swift in Sources */ = {isa = PBXBuildFile; fileRef = C890D0ECF91CB2C2FEA38A16 /* NativeWallpaperDeployment+Preview.swift */; };
 		2C562986A43830A14F700F8F /* SetLumaWallWallpaperIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CF12B9E3E2FCE2FADFDA7E2 /* SetLumaWallWallpaperIntent.swift */; };
 		329DABF7B808C64482D93140 /* HomePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F4D198CBD4A545E8BB2A2AA /* HomePage.swift */; };
 		37939B55B9CE8A9AA2288140 /* WindowVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB936267C6F947A7DAC2C9B /* WindowVisibility.swift */; };
@@ -249,6 +250,7 @@
 		C41EA988E2A80522A9F94B5F /* CPUSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPUSampler.swift; sourceTree = "<group>"; };
 		C503067C2365EA7BD861B962 /* AppModel+Diagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Diagnostics.swift"; sourceTree = "<group>"; };
 		C57A9D6606EEA6772A5C4AED /* NativeWallpaperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperEngine.swift; sourceTree = "<group>"; };
+		C890D0ECF91CB2C2FEA38A16 /* NativeWallpaperDeployment+Preview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NativeWallpaperDeployment+Preview.swift"; sourceTree = "<group>"; };
 		C8DEB9D119449BFF32A668D1 /* CallerValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallerValidation.swift; sourceTree = "<group>"; };
 		C96DE55EDE615F840EF93CC7 /* AppModel+Library.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Library.swift"; sourceTree = "<group>"; };
 		CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperDeploymentTests.swift; sourceTree = "<group>"; };
@@ -405,6 +407,7 @@
 				E615B895EBC9A29191A4CC3C /* NativeWallpaperAssignmentService.swift */,
 				935605492FBB33F44E0672CF /* NativeWallpaperAssignmentStore.swift */,
 				6AF64A3AE50DDE3102971EF2 /* NativeWallpaperDeployment.swift */,
+				C890D0ECF91CB2C2FEA38A16 /* NativeWallpaperDeployment+Preview.swift */,
 				C57A9D6606EEA6772A5C4AED /* NativeWallpaperEngine.swift */,
 				1574B693E71CFA6AC6A56F4D /* NativeWallpaperPrefsBridge.swift */,
 				03A86F2AE256396D0F702B3D /* WallpaperEngineHost.swift */,
@@ -639,6 +642,7 @@
 				925C844AA691542D7E62FDC2 /* MenuBarPopover.swift in Sources */,
 				4E6E69F79EA05FE8E2DED44A /* NativeWallpaperAssignmentService.swift in Sources */,
 				7E300D9030D6AE9DBA0ADFA7 /* NativeWallpaperAssignmentStore.swift in Sources */,
+				2A1E8DD63C0A6010100B42E8 /* NativeWallpaperDeployment+Preview.swift in Sources */,
 				2005D320EE4DB3C6E61F5DC2 /* NativeWallpaperDeployment.swift in Sources */,
 				CA96B24654E0DBC8EE91D66B /* NativeWallpaperEngine.swift in Sources */,
 				75C46C08A6DBEA592E04ADBA /* NativeWallpaperPrefsBridge.swift in Sources */,

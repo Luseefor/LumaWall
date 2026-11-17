@@ -54,4 +54,41 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertFalse(WallpaperHostCapabilities.isPermissionError(
             NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteOutOfSpace.rawValue)))
     }
+
+    private let variants = [
+        NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1920, height: 1080)),
+        NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.minimal.mov", fps: 30, resolution: CGSize(width: 1280, height: 720)),
+    ]
+
+    func testPreviewPicksSmallestCopyWideEnough() {
+        // Small tiles decoded the 4K original. The 720p copy is plenty.
+        XCTAssertEqual(NativeWallpaperDeployment.previewVariant(variants, minPixelWidth: 640)?.filename, "Wallpaper.minimal.mov")
+        XCTAssertEqual(NativeWallpaperDeployment.previewVariant(variants, minPixelWidth: 1600)?.filename, "Wallpaper.reduced.mov")
+        XCTAssertNil(NativeWallpaperDeployment.previewVariant(variants, minPixelWidth: 2560))
+        XCTAssertNil(NativeWallpaperDeployment.previewVariant([], minPixelWidth: 640))
+    }
+
+    func testPreviewURLUsesDeployedCopyAndFallsBack() throws {
+        let fm = FileManager.default
+        let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: videos) }
+        let id = UUID().uuidString
+        let dir = videos.appendingPathComponent(id)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: "Wallpaper.mp4", duration: 5, fps: 30,
+            resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants
+        )
+        try JSONEncoder().encode(entry).write(to: dir.appendingPathComponent("metadata.json"))
+        try Data().write(to: dir.appendingPathComponent("Wallpaper.minimal.mov"))
+        let original = URL(fileURLWithPath: "/library/original.mp4")
+
+        let small = NativeWallpaperDeployment.previewURL(entryID: id, minPixelWidth: 640, fallback: original, videosFolderURL: videos)
+        XCTAssertEqual(small.lastPathComponent, "Wallpaper.minimal.mov")
+        // The reduced copy is listed but missing on disk: use the original.
+        let large = NativeWallpaperDeployment.previewURL(entryID: id, minPixelWidth: 1600, fallback: original, videosFolderURL: videos)
+        XCTAssertEqual(large, original)
+        let unknown = NativeWallpaperDeployment.previewURL(entryID: UUID().uuidString, minPixelWidth: 640, fallback: original, videosFolderURL: videos)
+        XCTAssertEqual(unknown, original)
+    }
 }

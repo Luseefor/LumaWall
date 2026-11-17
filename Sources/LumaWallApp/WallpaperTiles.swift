@@ -75,7 +75,7 @@ struct WallpaperTile: View {
             WallpaperPosterFrame(posterURL: asset.posterURL, cornerRadius: 16) {
                 ZStack {
                     if hovering {
-                        LoopingVideoView(url: asset.mediaURL)
+                        LoopingVideoView(url: NativeWallpaperDeployment.previewURL(for: asset, minPixelWidth: NativeWallpaperDeployment.PreviewSize.thumbnail))
                             .scaledToFill()
                             .transition(.opacity)
                         Color.black.opacity(0.28)
