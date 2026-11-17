@@ -60,6 +60,12 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.minimal.mov", fps: 30, resolution: CGSize(width: 1280, height: 720)),
     ]
 
+    func testPortraitCopyIsJudgedByWidth() {
+        let portrait = [NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1080, height: 1920))]
+        XCTAssertNil(NativeWallpaperDeployment.previewVariant(portrait, minPixelWidth: 1920))
+        XCTAssertEqual(NativeWallpaperDeployment.previewVariant(portrait, minPixelWidth: 640)?.filename, "Wallpaper.reduced.mov")
+    }
+
     func testPreviewPicksSmallestCopyWideEnough() {
         // Small tiles decoded the 4K original. The 720p copy is plenty.
         XCTAssertEqual(NativeWallpaperDeployment.previewVariant(variants, minPixelWidth: 640)?.filename, "Wallpaper.minimal.mov")
@@ -68,6 +74,7 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertNil(NativeWallpaperDeployment.previewVariant([], minPixelWidth: 640))
     }
 
+    @MainActor
     func testPreviewURLUsesDeployedCopyAndFallsBack() throws {
         let fm = FileManager.default
         let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
