@@ -1538,7 +1538,7 @@ final class AppModel {
         let power = PowerStatus.current()
         batteryPercent = power.percent
         isOnBattery = power.isOnBattery
-        let coverage = DisplayOcclusion.analysis(in: displays)
+        let coverage = DisplayOcclusion.analyze(windows: OnscreenWindow.current(), displays: displays)
         // Hysteresis: hold the paused verdict until coverage falls back past
         // the release thresholds, so a window sitting at the enter boundary
         // can't strobe pause/resume on every evaluation.
@@ -1613,65 +1613,5 @@ final class AppModel {
     /// Dismiss the active alert and show the next queued one, if any.
     func acknowledgeAlert() {
         activeAlert = alertQueue.isEmpty ? nil : alertQueue.removeFirst()
-    }
-}
-
-private enum DisplayOcclusion {
-    struct Analysis {
-        var covered: Set<DisplayID>
-        var fullscreen: Set<DisplayID>
-        /// Max single-window coverage ratio per display, for hysteresis.
-        var coverage: [DisplayID: CGFloat]
-    }
-
-    static func analysis(in displays: [ConnectedDisplay]) -> Analysis {
-        let desktopLayer = Int(CGWindowLevelForKey(.desktopIconWindow))
-        let desktop = displays.map(\.frame).reduce(CGRect.null) { $0.union($1) }
-        // Mirror Quartz rects around the PRIMARY display's top (see
-        // ScreenGeometry.cocoaWindow): the union's maxY is only correct when
-        // no display extends above the primary. A taller sidecar or stacked
-        // layout otherwise shifts every window rect and coverage misfires.
-        let primaryHeight = displays.first(where: \.isMain)?.frame.height ?? desktop.maxY
-        guard !desktop.isNull,
-              let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
-        else { return Analysis(covered: [], fullscreen: [], coverage: [:]) }
-
-        var windows: [(rect: CGRect, layer: Int)] = []
-        for dict in info {
-            let layer = dict[kCGWindowLayer as String] as? Int ?? 0
-            if layer <= desktopLayer { continue }
-            guard let bounds = dict[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
-            let quartz = CGRect(
-                x: bounds["X"] ?? 0,
-                y: bounds["Y"] ?? 0,
-                width: bounds["Width"] ?? 0,
-                height: bounds["Height"] ?? 0
-            )
-            windows.append((ScreenGeometry.cocoaWindow(fromQuartz: quartz, primaryHeight: primaryHeight), layer))
-        }
-
-        var covered: Set<DisplayID> = []
-        var fullscreen: Set<DisplayID> = []
-        var coverage: [DisplayID: CGFloat] = [:]
-        for display in displays {
-            let rects = windows.map(\.rect)
-            let ratio = ScreenGeometry.coverageRatio(screen: display.frame, windows: rects)
-            coverage[display.displayID] = ratio
-            // Require near-total occlusion before auto-pausing (see
-            // PlaybackPolicyThresholds). Lower values flap pause/resume on
-            // maximized windows with menu bar/dock visible (~96% coverage).
-            if ratio >= PlaybackPolicyThresholds.occlusionCovered {
-                covered.insert(display.displayID)
-            }
-            let ownsFullscreen = windows.contains { window in
-                ScreenGeometry.coverageRatio(screen: display.frame, windows: [window.rect]) >= PlaybackPolicyThresholds.fullscreenCoverage
-                    && abs(window.rect.width - display.frame.width) < PlaybackPolicyThresholds.fullscreenWidthTolerance
-                    && abs(window.rect.height - display.frame.height) < PlaybackPolicyThresholds.fullscreenHeightTolerance
-            }
-            if ownsFullscreen {
-                fullscreen.insert(display.displayID)
-            }
-        }
-        return Analysis(covered: covered, fullscreen: fullscreen, coverage: coverage)
     }
 }
