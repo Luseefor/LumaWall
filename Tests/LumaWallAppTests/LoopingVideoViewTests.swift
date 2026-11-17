@@ -21,6 +21,17 @@ final class LoopingVideoViewTests: XCTestCase {
         XCTAssertEqual(coordinator.player.rate, 0)
     }
 
+    func testSuspendedPreviewPausesEvenWhenVisible() {
+        // A locked screen doesn't change window occlusion, so a "visible"
+        // window under the lock screen kept decoding its previews.
+        let coordinator = LoopingVideoView.Coordinator(url: url)
+        coordinator.setVisible(true)
+        coordinator.setSuspended(true)
+        XCTAssertEqual(coordinator.player.rate, 0)
+        coordinator.setSuspended(false)
+        XCTAssertEqual(coordinator.player.rate, 1)
+    }
+
     func testReconfigureKeepsHiddenPreviewPaused() {
         let coordinator = LoopingVideoView.Coordinator(url: url)
         coordinator.reconfigure(url: URL(fileURLWithPath: "/dev/zero"))

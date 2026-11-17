@@ -183,8 +183,8 @@ struct FeaturedHero: View {
         // Auto-cancelled by SwiftUI on disappear / count / visibility change.
         // Keyed on the count (not the ID list) so metadata reloads from
         // apply/recordApply don't restart the 4s cadence and make the hero jitter.
-        .task(id: SlideshowKey(count: assets.count, isOnScreen: isOnScreen)) {
-            guard isOnScreen, assets.count > 1 else { return }
+        .task(id: SlideshowKey(count: assets.count, isOnScreen: isOnScreen && !model.screenIsHidden)) {
+            guard isOnScreen, !model.screenIsHidden, assets.count > 1 else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.slideDuration)
                 guard !Task.isCancelled else { break }
@@ -199,7 +199,7 @@ struct FeaturedHero: View {
     private var slideshowBackground: some View {
         ZStack {
             if let asset = currentAsset {
-                LoopingVideoView(url: asset.mediaURL)
+                LoopingVideoView(url: asset.mediaURL, isSuspended: model.screenIsHidden)
                     .id(asset.id)
                     .transition(.opacity)
             } else {

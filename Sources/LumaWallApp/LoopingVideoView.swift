@@ -3,9 +3,12 @@ import SwiftUI
 
 /// Muted looping preview. Plays only while its window is visible on screen:
 /// a window behind other apps, minimized, or on another Space stops decoding.
+/// `isSuspended` stops it too, for states occlusion doesn't report, such as
+/// a locked screen or sleeping displays.
 struct LoopingVideoView: NSViewRepresentable {
     let url: URL
     var gravity: AVLayerVideoGravity = .resizeAspectFill
+    var isSuspended = false
 
     func makeCoordinator() -> Coordinator { Coordinator(url: url) }
 
@@ -15,11 +18,13 @@ struct LoopingVideoView: NSViewRepresentable {
         view.playerLayer.videoGravity = gravity
         let coordinator = context.coordinator
         view.onVisibilityChange = { [weak coordinator] in coordinator?.setVisible($0) }
+        coordinator.setSuspended(isSuspended)
         return view
     }
 
     func updateNSView(_ view: PlayerSurface, context: Context) {
         view.playerLayer.videoGravity = gravity
+        context.coordinator.setSuspended(isSuspended)
         // Recreate the decoder when the URL changes (SwiftUI reuses the view).
         // Without this, hero/carousel reuse silently kept playing the old video.
         if context.coordinator.url != url {
@@ -40,6 +45,8 @@ struct LoopingVideoView: NSViewRepresentable {
         private var looper: AVPlayerLooper?
         private(set) var url: URL
         private var isVisible = false
+        private var isSuspended = false
+        private var shouldPlay: Bool { isVisible && !isSuspended }
 
         init(url: URL) {
             self.url = url
@@ -51,7 +58,17 @@ struct LoopingVideoView: NSViewRepresentable {
 
         func setVisible(_ visible: Bool) {
             isVisible = visible
-            if visible { player.play() } else { player.pause() }
+            updatePlayback()
+        }
+
+        func setSuspended(_ suspended: Bool) {
+            guard suspended != isSuspended else { return }
+            isSuspended = suspended
+            updatePlayback()
+        }
+
+        private func updatePlayback() {
+            if shouldPlay { player.play() } else { player.pause() }
         }
 
         /// Swap the looping item for a new URL (main thread, SwiftUI update).
@@ -61,7 +78,7 @@ struct LoopingVideoView: NSViewRepresentable {
             looper = nil
             player.replaceCurrentItem(with: nil)
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
-            if isVisible { player.play() }
+            if shouldPlay { player.play() }
         }
 
         /// Fully release the decoder for view teardown.

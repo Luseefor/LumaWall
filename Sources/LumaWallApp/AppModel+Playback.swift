@@ -7,6 +7,10 @@ import Observation
 import UniformTypeIdentifiers
 
 extension AppModel {
+    /// True while nobody can see the controller's windows even though
+    /// occlusion says they're visible: the screen is locked or displays sleep.
+    var screenIsHidden: Bool { sessionLocked || displaysAsleep }
+
     func observeLockAndSleep() {
         let distributed = DistributedNotificationCenter.default()
         lockObservers.append(

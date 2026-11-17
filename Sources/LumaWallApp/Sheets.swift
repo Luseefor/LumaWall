@@ -136,7 +136,7 @@ struct PreviewSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            LoopingVideoView(url: asset.mediaURL)
+            LoopingVideoView(url: asset.mediaURL, isSuspended: model.screenIsHidden)
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .background(.black)
             HStack(spacing: 12) {
