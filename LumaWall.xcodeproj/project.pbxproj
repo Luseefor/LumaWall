@@ -90,6 +90,7 @@
 		F773182235EEBFC864716901 /* CodableSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB998F5FA3CED4AD4C9CA8E /* CodableSupport.swift */; };
 		F9392BF300C80738DD742DF5 /* WallpaperPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FF4FA464A03E68138FE9D37 /* WallpaperPrefs.swift */; };
 		F9A25F4027A6362D426CC6B5 /* WallpaperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E4E5CBB3184C2D063537A13 /* WallpaperEngine.swift */; };
+		FBE37192E476391F9E0B8848 /* WallpaperStoreProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B7B44E07D5DC8FAA2BABAC /* WallpaperStoreProbeTests.swift */; };
 		FEA7EEBEFBC251F58E2B3107 /* BMPCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E89568A09F72A1703DCB178 /* BMPCache.swift */; };
 /* End PBXBuildFile section */
 
@@ -160,6 +161,7 @@
 		1E89568A09F72A1703DCB178 /* BMPCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BMPCache.swift; sourceTree = "<group>"; };
 		1FB998F5FA3CED4AD4C9CA8E /* CodableSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodableSupport.swift; sourceTree = "<group>"; };
 		217AB2E4539D5FEB6508DF44 /* AutomationLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationLibrary.swift; sourceTree = "<group>"; };
+		21B7B44E07D5DC8FAA2BABAC /* WallpaperStoreProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperStoreProbeTests.swift; sourceTree = "<group>"; };
 		2240EDFCA4AC39ACFC0CFA34 /* RuntimeHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeHelpers.swift; sourceTree = "<group>"; };
 		26E3B368D5F4F600032F2BB7 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		289AC19257F838602572AE26 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
@@ -248,6 +250,7 @@
 				E754FFABC4851272B5B28410 /* NativeWallpaperAssignmentStoreTests.swift */,
 				CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */,
 				0E0B72BAACBDD1A1F915454F /* SharedPlaybackHubTests.swift */,
+				21B7B44E07D5DC8FAA2BABAC /* WallpaperStoreProbeTests.swift */,
 			);
 			path = LumaWallAppTests;
 			sourceTree = "<group>";
@@ -614,6 +617,7 @@
 				82DA19E480E2E1891F9F6181 /* NativeWallpaperAssignmentStoreTests.swift in Sources */,
 				A0515B2E9CCB91FD497753DC /* NativeWallpaperDeploymentTests.swift in Sources */,
 				93B61883BB0DD5E7C93F3999 /* SharedPlaybackHubTests.swift in Sources */,
+				FBE37192E476391F9E0B8848 /* WallpaperStoreProbeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
