@@ -74,11 +74,8 @@ struct LoopingVideoView: NSViewRepresentable {
     }
 }
 
-final class PlayerSurface: NSView {
+final class PlayerSurface: WindowVisibilityView {
     let playerLayer = AVPlayerLayer()
-    /// Called with whether the view's window is currently visible on screen.
-    var onVisibilityChange: ((Bool) -> Void)?
-    private var occlusionObserver: NSObjectProtocol?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -89,31 +86,4 @@ final class PlayerSurface: NSView {
     @available(*, unavailable) required init?(coder: NSCoder) { nil }
 
     override func layout() { super.layout(); playerLayer.frame = bounds }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        // Leaving the window (including teardown) drops the observer.
-        if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
-        occlusionObserver = nil
-        if let window {
-            // Occlusion state covers being behind other windows, minimized,
-            // on another Space, and the app being hidden.
-            occlusionObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.didChangeOcclusionStateNotification,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reportVisibility() }
-            }
-        }
-        reportVisibility()
-    }
-
-    override func viewDidUnhide() { super.viewDidUnhide(); reportVisibility() }
-    override func viewDidHide() { super.viewDidHide(); reportVisibility() }
-
-    private func reportVisibility() {
-        let visible = window?.occlusionState.contains(.visible) == true && !isHiddenOrHasHiddenAncestor
-        onVisibilityChange?(visible)
-    }
 }

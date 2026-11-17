@@ -104,8 +104,17 @@ struct HomePage: View {
 struct FeaturedHero: View {
     @Bindable var model: AppModel
     @State private var slideIndex = 0
+    /// False while the window is behind other apps, minimized, or on another
+    /// Space. The slideshow stops then: each advance builds a new video player
+    /// and redraws the shadowed title on the CPU.
+    @State private var isOnScreen = false
 
     private static let slideDuration: Duration = .seconds(4)
+
+    private struct SlideshowKey: Equatable {
+        var count: Int
+        var isOnScreen: Bool
+    }
 
     private var assets: [WallpaperAsset] { model.assets }
     private var currentAsset: WallpaperAsset? {
@@ -168,11 +177,14 @@ struct FeaturedHero: View {
         .onChange(of: assets.map(\.id)) { _, _ in
             syncSlideIndex()
         }
-        // Auto-cancelled by SwiftUI on disappear / count change. Keyed on the
-        // count (not the ID list) so metadata reloads from apply/recordApply
-        // don't restart the 4s cadence and make the hero jitter.
-        .task(id: assets.count) {
-            guard assets.count > 1 else { return }
+        .background(WindowVisibilityReader { visible in
+            if isOnScreen != visible { isOnScreen = visible }
+        })
+        // Auto-cancelled by SwiftUI on disappear / count / visibility change.
+        // Keyed on the count (not the ID list) so metadata reloads from
+        // apply/recordApply don't restart the 4s cadence and make the hero jitter.
+        .task(id: SlideshowKey(count: assets.count, isOnScreen: isOnScreen)) {
+            guard isOnScreen, assets.count > 1 else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.slideDuration)
                 guard !Task.isCancelled else { break }
