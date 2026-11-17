@@ -144,12 +144,10 @@ struct FeaturedHero: View {
                     .font(.system(size: 40, weight: .bold, design: .rounded))
                     .lineLimit(2)
                     .shadow(color: .black.opacity(0.5), radius: 10, y: 2)
-                    .animation(.easeInOut(duration: 0.35), value: currentAsset?.id)
                 Text(currentAsset.map(meta) ?? "Private local video wallpapers. Import once, apply instantly, stay offline.")
                     .font(.system(size: 14))
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(maxWidth: 520, alignment: .leading)
-                    .animation(.easeInOut(duration: 0.35), value: currentAsset?.id)
                 HStack(spacing: 10) {
                     if let currentAsset {
                         PrimaryButton("Use as Wallpaper", symbol: "display") { model.apply(currentAsset) }
@@ -188,9 +186,10 @@ struct FeaturedHero: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.slideDuration)
                 guard !Task.isCancelled else { break }
-                withAnimation(.easeInOut(duration: 0.7)) {
-                    slideIndex = (slideIndex + 1) % assets.count
-                }
+                // No withAnimation: the background and indicators carry their
+                // own animations. Animating the whole hero crossfaded the
+                // shadowed title on the CPU at every advance.
+                slideIndex = (slideIndex + 1) % assets.count
             }
         }
     }
