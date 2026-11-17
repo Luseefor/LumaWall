@@ -21,8 +21,8 @@ struct DisplayOcclusionTests {
         // UI (layer 24) each report an opaque full-panel window. Counting them
         // marked the display fullscreen and froze the native wallpaper.
         let windows = [
-            OnscreenWindow(layer: 20, alpha: 1, bounds: fullPanel),
-            OnscreenWindow(layer: 24, alpha: 1, bounds: fullPanel),
+            OnscreenWindow(layer: 20, alpha: 1, bounds: fullPanel, ownerIsRegularApp: false),
+            OnscreenWindow(layer: 24, alpha: 1, bounds: fullPanel, ownerIsRegularApp: false),
         ]
         let analysis = DisplayOcclusion.analyze(windows: windows, displays: [panel])
         #expect(analysis.fullscreen.isEmpty)
@@ -35,6 +35,14 @@ struct DisplayOcclusionTests {
         let analysis = DisplayOcclusion.analyze(windows: windows, displays: [panel])
         #expect(analysis.fullscreen == [panel.displayID])
         #expect(analysis.covered == [panel.displayID])
+    }
+
+    @Test func gameAboveTheMenuBarLevelStillPauses() {
+        // GLFW puts fullscreen windows at NSMainMenuWindowLevel + 1 (25).
+        // Game Mode can miss these games, so the window itself must count.
+        let windows = [OnscreenWindow(layer: 25, alpha: 1, bounds: fullPanel, ownerIsRegularApp: true)]
+        let analysis = DisplayOcclusion.analyze(windows: windows, displays: [panel])
+        #expect(analysis.fullscreen == [panel.displayID])
     }
 
     @Test func transparentAppWindowIsIgnored() {

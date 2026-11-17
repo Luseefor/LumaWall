@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -7,11 +8,15 @@ public struct OnscreenWindow: Equatable, Sendable {
     public var alpha: CGFloat
     /// Quartz coordinates: y-down from the primary display's top-left.
     public var bounds: CGRect
+    /// True when a regular (Dock-visible) app owns the window. False for the
+    /// Dock, WindowServer, Screenshot, Control Center and other system agents.
+    public var ownerIsRegularApp: Bool
 
-    public init(layer: Int, alpha: CGFloat, bounds: CGRect) {
+    public init(layer: Int, alpha: CGFloat, bounds: CGRect, ownerIsRegularApp: Bool = true) {
         self.layer = layer
         self.alpha = alpha
         self.bounds = bounds
+        self.ownerIsRegularApp = ownerIsRegularApp
     }
 
     /// Reads the current on-screen window list. Desktop elements are excluded.
@@ -20,8 +25,16 @@ public struct OnscreenWindow: Equatable, Sendable {
             [.optionOnScreenOnly, .excludeDesktopElements],
             kCGNullWindowID
         ) as? [[String: Any]] else { return [] }
+        var regularByPID: [pid_t: Bool] = [:]
+        func isRegular(_ pid: pid_t) -> Bool {
+            if let known = regularByPID[pid] { return known }
+            let regular = NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular
+            regularByPID[pid] = regular
+            return regular
+        }
         return info.compactMap { dict in
             guard let bounds = dict[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
+            let pid = (dict[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
             return OnscreenWindow(
                 layer: dict[kCGWindowLayer as String] as? Int ?? 0,
                 alpha: dict[kCGWindowAlpha as String] as? CGFloat ?? 1,
@@ -30,7 +43,8 @@ public struct OnscreenWindow: Equatable, Sendable {
                     y: bounds["Y"] ?? 0,
                     width: bounds["Width"] ?? 0,
                     height: bounds["Height"] ?? 0
-                )
+                ),
+                ownerIsRegularApp: pid.map(isRegular) ?? false
             )
         }
     }
@@ -73,12 +87,16 @@ public enum DisplayOcclusion {
         return analysis
     }
 
-    /// Only app windows can hide the wallpaper. System chrome above them (the
-    /// Dock at layer 20, the menu bar and Screenshot UI at 24 and up) reports
+    /// Only app windows can hide the wallpaper. System chrome (the Dock at
+    /// layer 20, the menu bar and Screenshot UI at 24 and up) reports
     /// full-panel opaque windows on a bare desktop, and counting those paused
-    /// the wallpaper with nothing covering it. Invisible windows don't count.
+    /// the wallpaper with nothing covering it. Windows from the normal level
+    /// up to the Dock always count. Above that, only a regular app's windows
+    /// count: GLFW games go fullscreen at the main menu level + 1, and Game
+    /// Mode doesn't always catch them. Invisible windows never count.
     static func isAppWindow(_ window: OnscreenWindow) -> Bool {
-        window.layer >= normalLayer && window.layer < dockLayer && window.alpha > 0.01
+        guard window.alpha > 0.01, window.layer >= normalLayer else { return false }
+        return window.layer < dockLayer || window.ownerIsRegularApp
     }
 
     private static let normalLayer = Int(CGWindowLevelForKey(.normalWindow))
