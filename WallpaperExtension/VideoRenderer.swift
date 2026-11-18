@@ -37,7 +37,7 @@ final class VideoRenderer: @unchecked Sendable {
     /// Every playback decision for this renderer: clock, feed, deep pause,
     /// resets, and the display-sleep gate. Touched only on `queue`; see
     /// `RendererLifecycle`. Public entry points hop to `queue` and send events.
-    private var lifecycle = RendererLifecycle()
+    private var lifecycle: RendererLifecycle
     /// Events raised while effects run (an instant ramp completion) wait here
     /// so each event's effects run against the state that produced them.
     private var pendingEvents: [RendererLifecycle.Event] = []
@@ -61,26 +61,47 @@ final class VideoRenderer: @unchecked Sendable {
     private var lastEnqueuedEnd: CMTime = .zero
     private var nominalFrameRate: Double = 60
 
-    /// Selects the copy to play for a display size: consulted at loop
-    /// boundaries, on tier changes, and on wake. Written from the Lifecycle
-    /// queue and read on the renderer queue, so lock-backed.
-    /// Called with the renderer's own tier, so the copy matches what it plays.
-    var variantSelector: (@Sendable (CGSize, PlaybackPolicy) -> URL)? {
+    /// Selects the copy to play for a display size: consulted on create, on
+    /// switches, at loop boundaries, on tier changes, and on wake. Set by
+    /// `create` and `switchVideo`, cleared by `stop` off the queue, so
+    /// lock-backed. Called with the renderer's own tier, so the copy matches
+    /// what it plays.
+    private var variantSelector: (@Sendable (CGSize, PlaybackPolicy) -> URL)? {
         get { selector.withLock { $0 } }
         set { selector.withLock { $0 = newValue } }
     }
-    private let selector = OSAllocatedUnfairLock<(@Sendable (CGSize, PlaybackPolicy) -> URL)?>(initialState: nil)
+    private let selector: OSAllocatedUnfairLock<(@Sendable (CGSize, PlaybackPolicy) -> URL)?>
     /// The creation still, shown again when the video can't be rebuilt.
     private let fallbackStill: CGImage?
 
+    /// Opens the copy `variantSelector` picks for the root layer's pixel size
+    /// and `policy`, falling back to `videoURL` when that copy has no video
+    /// track, so the first frame is decoded from the file the renderer plays.
     static func create(
         rootLayer: CALayer,
         videoURL: URL,
         stillImage: CGImage? = nil,
+        variantSelector: @escaping @Sendable (CGSize, PlaybackPolicy) -> URL,
+        policy: PlaybackPolicy,
     ) async throws -> VideoRenderer {
-        let asset = AVURLAsset(url: videoURL)
-        let tracks = try await asset.loadTracks(withMediaType: .video)
-        guard let track = tracks.first else {
+        let pixels = CGSize(
+            width: rootLayer.bounds.width * rootLayer.contentsScale,
+            height: rootLayer.bounds.height * rootLayer.contentsScale
+        )
+        let openURL = VariantSelection.openingURL(requested: videoURL, tier: policy, displayPixels: pixels, selector: variantSelector)
+        var asset = AVURLAsset(url: openURL)
+        var track: AVAssetTrack?
+        if openURL != videoURL {
+            track = try? await asset.loadTracks(withMediaType: .video).first
+            if track == nil {
+                traceLog("  [Renderer] no video track in \(openURL.lastPathComponent), opening \(videoURL.lastPathComponent)")
+                asset = AVURLAsset(url: videoURL)
+            }
+        }
+        if track == nil {
+            track = try await asset.loadTracks(withMediaType: .video).first
+        }
+        guard let track else {
             throw CocoaError(.fileReadCorruptFile, userInfo: [
                 NSLocalizedDescriptionKey: "No video track found in \(videoURL.lastPathComponent)",
             ])
@@ -111,6 +132,8 @@ final class VideoRenderer: @unchecked Sendable {
             videoTrack: track,
             stillImage: stillImage,
             nominalFrameRate: nominalFrameRate,
+            variantSelector: variantSelector,
+            policy: policy,
         )
     }
 
@@ -121,8 +144,12 @@ final class VideoRenderer: @unchecked Sendable {
         videoTrack: AVAssetTrack,
         stillImage: CGImage?,
         nominalFrameRate: Double,
+        variantSelector: (@Sendable (CGSize, PlaybackPolicy) -> URL)?,
+        policy: PlaybackPolicy,
     ) {
         self.displayLayer = displayLayer
+        self.selector = OSAllocatedUnfairLock(initialState: variantSelector)
+        self.lifecycle = RendererLifecycle(policy: policy)
         self.pixelSize = OSAllocatedUnfairLock(initialState: CGSize(
             width: rootLayer.bounds.width * rootLayer.contentsScale,
             height: rootLayer.bounds.height * rootLayer.contentsScale
@@ -172,7 +199,7 @@ final class VideoRenderer: @unchecked Sendable {
         rootLayer.sublayers?.filter { $0 is CAGradientLayer }.forEach { $0.removeFromSuperlayer() }
         rootLayer.addSublayer(displayLayer)
         rootLayer.addSublayer(stillFrameLayer)
-        traceLog("  [Renderer #\(debugID)] CREATED for \(asset.url.lastPathComponent), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0)), pixels=\(Int(displayPixelSize.width))x\(Int(displayPixelSize.height))")
+        traceLog("  [Renderer #\(debugID)] CREATED for \(asset.url.lastPathComponent) tier=\(policy), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0)), pixels=\(Int(displayPixelSize.width))x\(Int(displayPixelSize.height))")
         if let stillImage, let stillBuffer = makeStillSampleBuffer(from: stillImage) {
             // Tag DisplayImmediately so the still is shown the instant it's enqueued,
             // rather than waiting on the control timebase (which is frozen at rate 0 here).
@@ -298,17 +325,29 @@ final class VideoRenderer: @unchecked Sendable {
     /// While the displays sleep the request is held (latest wins) and wake
     /// resolves it; a restart would decode the new clip's first frames with
     /// nothing on screen.
-    func switchVideo(to url: URL) {
+    ///
+    /// `url` is the new choice's original; `variantSelector` picks its copies,
+    /// and the switch opens the one for this display and tier. Both change in
+    /// the same queue job, so a preload never pairs one choice's selector
+    /// with the other's asset.
+    func switchVideo(to url: URL, variantSelector: @escaping @Sendable (CGSize, PlaybackPolicy) -> URL) {
         traceLog("  [switchVideo #\(debugID)] REQUEST target=\(url.lastPathComponent)")
         queue.async { [weak self] in
             guard let self, isRunning else { return }
+            self.variantSelector = variantSelector
             if lifecycle.displayAsleep {
                 traceLog("  [switchVideo #\(debugID)] DEFERRED until wake: \(url.lastPathComponent)")
                 send(.switchDeferred(url))
-            } else if loadAsset(url) {
+            } else if loadAsset(openingURL(requested: url)) {
                 send(.assetChanged)
             }
         }
+    }
+
+    /// The copy to open in place of `requested` for this display and tier.
+    /// Queue-only: reads the lifecycle's tier.
+    private func openingURL(requested: URL) -> URL {
+        VariantSelection.openingURL(requested: requested, tier: lifecycle.policy, displayPixels: displayPixelSize, selector: variantSelector)
     }
 
     /// Make `url` the current asset. False when it already is, or when it has
@@ -423,9 +462,9 @@ final class VideoRenderer: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, isRunning, lifecycle.displayAsleep else { return }
             var changed = false
-            if lifecycle.deferredSwitch != nil || lifecycle.policy != .paused,
-               let url = variantSelector?(displayPixelSize, lifecycle.policy) ?? lifecycle.deferredSwitch {
-                changed = loadAsset(url)
+            // Paused with nothing held keeps the current copy (see `preloadURL`).
+            if lifecycle.deferredSwitch != nil || lifecycle.policy != .paused {
+                changed = loadAsset(openingURL(requested: lifecycle.deferredSwitch ?? asset.url))
             }
             send(.displayWake(assetChanged: changed))
         }
@@ -726,10 +765,8 @@ final class VideoRenderer: @unchecked Sendable {
             // boundary waits for wake, and the swap builds a reader itself
             // when none is ready.
             guard lifecycle.generation == generation, !lifecycle.displayAsleep else { return }
-            // A paused tier resolves to the original file; keep the current copy
-            // so a resume doesn't loop into the wrong one.
-            let nextURL = lifecycle.policy == .paused ? nil : variantSelector?(displayPixelSize, lifecycle.policy)
-            if let nextURL, nextURL != asset.url {
+            let nextURL = VariantSelection.preloadURL(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, selector: variantSelector)
+            if nextURL != asset.url {
                 let newAsset = AVURLAsset(url: nextURL)
                 guard let track = Self.loadFirstVideoTrackBlocking(newAsset) else {
                     traceLog("  [Renderer] No video track in variant: \(nextURL.lastPathComponent)")
