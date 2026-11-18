@@ -82,6 +82,8 @@ final class NativeWallpaperEngine {
             entry: entry,
             to: Set(connected.map(\.cgDisplayID))
         )
+        let previous = Set(active.values.map(\.0))
+        defer { reportSurfaces(ofAll: previous) }
         nativeHostLog.info("applyToAll: \(asset.name, privacy: .public) → \(connected.count) display(s)")
         libraryByID[asset.id] = asset
         for display in connected {
@@ -108,7 +110,7 @@ final class NativeWallpaperEngine {
     func clearAll() async throws {
         let removed = Set(active.values.map(\.0))
         active.removeAll()
-        removed.forEach(reportSurfaces(of:))
+        reportSurfaces(ofAll: removed)
         tiers.removeAll()
         lastWrittenMap.removeAll()
         try await assignments.clearAll()
@@ -130,6 +132,12 @@ final class NativeWallpaperEngine {
         return (showing.filter { !extraIDs.contains($0.displayID) } + extra).map(surface(on:))
     }
 
+    /// Reports every wallpaper in `previous` or showing now, so one that
+    /// lost all its displays reports none and its 1440p job is dropped.
+    private func reportSurfaces(ofAll previous: Set<WallpaperID>) {
+        previous.union(active.values.map(\.0)).forEach(reportSurfaces(of:))
+    }
+
     /// Tells the copy queue where a wallpaper plays and at which tiers.
     private func reportSurfaces(of wallpaperID: WallpaperID) {
         NativeWallpaperDeployment.playbackChanged(entryID: wallpaperID.rawValue.uuidString, surfaces: surfaces(showing: wallpaperID))
@@ -142,6 +150,8 @@ final class NativeWallpaperEngine {
         let connected = displays.refresh()
         let connectedIDs = Set(connected.map(\.displayID))
         let connectedUUIDs = Set(connected.compactMap { stableUUID(for: $0.cgDisplayID) })
+        let previous = Set(active.values.map(\.0))
+        defer { reportSurfaces(ofAll: previous) }
         // Drop bookkeeping for removed displays so stale entries can't make
         // the restore look like a no-op (or leak ghost wallpapers into the UI).
         for id in Array(active.keys) where !connectedIDs.contains(id) {
