@@ -109,28 +109,46 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertEqual(names(CGSize(width: 1280, height: 720)), [])
     }
 
+    /// Same table as `VariantSelectionTests.qhdFitFixtures` on the extension
+    /// side, which checks the extension's Full Quality pick agrees. Change
+    /// both together.
+    private let qhdFitFixtures: [(source: CGSize, fps: Double, display: CGSize, playsQHD: Bool)] = [
+        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 3840, height: 2160), false),
+        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 2560, height: 1440), true),
+        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 1920, height: 1080), true),
+        // At 30 fps the 1080p battery copy keeps the source rate and wins.
+        (CGSize(width: 3840, height: 2160), 30, CGSize(width: 1920, height: 1080), false),
+        (CGSize(width: 3840, height: 2160), 30, CGSize(width: 2560, height: 1440), true),
+        // A 2.39:1 source's 1440p copy is 2560x1072, too short to fill.
+        (CGSize(width: 4096, height: 1716), 60, CGSize(width: 2560, height: 1440), false),
+        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 1440, height: 2560), false),
+    ]
+
     func testQHDCopyIsPlannedOnlyForDisplaysThatPlayIt() {
         // A 4K encode ran even when every display was 4K and would never play it.
-        func plansQHD(_ source: CGSize, fps: Double = 60, _ displays: [CGSize]) -> Bool {
-            NativeWallpaperDeployment.variantSpecs(sourceSize: source, sourceFPS: fps, displayPixels: displays)
-                .contains { $0.filename == "Wallpaper.qhd.mov" }
+        for fixture in qhdFitFixtures {
+            let planned = NativeWallpaperDeployment.variantSpecs(sourceSize: fixture.source, sourceFPS: fixture.fps, displayPixels: [fixture.display])
+            XCTAssertEqual(planned.contains { $0.filename == "Wallpaper.qhd.mov" }, fixture.playsQHD, "\(fixture)")
         }
         let uhd = CGSize(width: 3840, height: 2160)
-        XCTAssertFalse(plansQHD(uhd, [uhd]))
-        XCTAssertFalse(plansQHD(uhd, []))
-        XCTAssertTrue(plansQHD(uhd, [uhd, CGSize(width: 2560, height: 1440)]))
-        XCTAssertTrue(plansQHD(uhd, [CGSize(width: 1920, height: 1080)]))
-        // At 30 fps the 1080p battery copy keeps the source rate, so a 1080p
-        // display plays that one and never the 1440p copy.
-        XCTAssertFalse(plansQHD(uhd, fps: 30, [CGSize(width: 1920, height: 1080)]))
-        XCTAssertTrue(plansQHD(uhd, fps: 30, [CGSize(width: 2560, height: 1440)]))
-        // Aspect fill: a 2.39:1 source's 1440p copy is 2560x1072, too short
-        // to fill a 2560x1440 display, and a portrait display needs more height.
-        XCTAssertFalse(plansQHD(CGSize(width: 4096, height: 1716), [CGSize(width: 2560, height: 1440)]))
-        XCTAssertFalse(plansQHD(uhd, [CGSize(width: 1440, height: 2560)]))
+        func plansQHD(_ displays: [CGSize]) -> Bool {
+            NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: 60, displayPixels: displays)
+                .contains { $0.filename == "Wallpaper.qhd.mov" }
+        }
+        XCTAssertFalse(plansQHD([]))
+        XCTAssertTrue(plansQHD([uhd, CGSize(width: 2560, height: 1440)]))
         // Battery copies don't depend on the displays.
         XCTAssertEqual(NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: 60, displayPixels: [uhd]).map(\.filename),
                        ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
+    }
+
+    func testCopySizesMatchTheExtensionFixtures() {
+        // VariantSelectionTests builds its copies with these sizes.
+        let size = NativeWallpaperDeployment.copySize(source:fitting:)
+        let wide = CGSize(width: 4096, height: 1716)
+        XCTAssertEqual(size(wide, CGSize(width: 2560, height: 1440)), CGSize(width: 2560, height: 1072))
+        XCTAssertEqual(size(wide, CGSize(width: 1920, height: 1080)), CGSize(width: 1920, height: 804))
+        XCTAssertEqual(size(wide, CGSize(width: 1280, height: 720)), CGSize(width: 1280, height: 536))
     }
 
     func testCopyReadinessFollowsPlaybackPowerAndFit() {
