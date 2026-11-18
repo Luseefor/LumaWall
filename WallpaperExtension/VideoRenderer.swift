@@ -240,6 +240,9 @@ final class VideoRenderer: @unchecked Sendable {
     /// including early exits, so a gated reply can never hang.
     func start(onFirstFrameReady: (@Sendable () -> Void)? = nil) {
         traceLog("  [start #\(debugID)] asset=\(asset.url.lastPathComponent)")
+        // Display sleep gates the start: the first frame is still enqueued (the
+        // acquire reply waits on it), but the clock stays at 0 until wake.
+        if WallpaperState.shared.isDisplayAsleep { haltForDisplaySleep() }
         queue.async { [weak self] in
             guard let self else { onFirstFrameReady?(); return }
             guard isRunning else { traceLog("  [start #\(debugID)] aborted, already stopped"); onFirstFrameReady?(); return }
@@ -256,6 +259,8 @@ final class VideoRenderer: @unchecked Sendable {
             // action-free transaction, so the context is genuinely displaying video
             // before onFirstFrameReady fires (the deferred acquire reply gates on this).
             if let firstSample = output.copyNextSampleBuffer() {
+                // With the clock held at 0 the frame must not wait on the timebase.
+                if isPaused { Self.setDisplayImmediately(firstSample) }
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
                 renderer.enqueue(firstSample)
@@ -268,8 +273,9 @@ final class VideoRenderer: @unchecked Sendable {
             ptsOffset = .zero
             lastEnqueuedEnd = .zero
 
-            // Begin advancing the timebase. Playback starts.
-            CMTimebaseSetRate(timebase, rate: 1.0)
+            // Begin advancing the timebase unless paused before the first frame
+            // (display sleep, or a policy applied while the start was queued).
+            CMTimebaseSetRate(timebase, rate: isPaused ? 0.0 : 1.0)
 
             // The context now holds a live, composited video frame. Release the gate so
             // the acquire can reply and the agent can swap to us.
