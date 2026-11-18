@@ -97,13 +97,16 @@ public actor EnergyLogStore {
 
     private let fileURL: URL
     private var snapshot = EnergyLogSnapshot()
-    private var lastWrite: Date
+    /// Batching uses a monotonic clock (it keeps counting through sleep), so a
+    /// wall-clock correction can't delay or advance a write. `Date` stays for
+    /// sample timestamps and the report window.
+    private var lastWrite: ContinuousClock.Instant
     private var hasPendingSamples = false
 
-    public init(rootURL: URL? = nil, now: Date = .now) throws {
+    public init(rootURL: URL? = nil, now: Date = .now, instant: ContinuousClock.Instant = .now) throws {
         let base = try StorePaths.appSupportBase(rootURL: rootURL)
         self.fileURL = base.appendingPathComponent("EnergyLog.json")
-        self.lastWrite = now
+        self.lastWrite = instant
         if let decoded: EnergyLogSnapshot = StoreIO.readJSON(from: fileURL, as: EnergyLogSnapshot.self) {
             snapshot = Self.pruned(decoded, now: now)
         }
@@ -113,28 +116,32 @@ public actor EnergyLogStore {
 
     public func startSoak(at date: Date = .now) throws {
         snapshot.soakStartedAt = date
-        try persist(now: date)
+        try persist()
     }
 
     public func clearSoak() throws {
         snapshot.soakStartedAt = nil
-        try persist(now: .now)
+        try persist()
     }
 
-    public func record(_ sample: EnergySample, now: Date = .now) throws {
+    public func record(
+        _ sample: EnergySample,
+        now: Date = .now,
+        instant: ContinuousClock.Instant = .now
+    ) throws {
         snapshot.samples.append(sample)
         snapshot = Self.pruned(snapshot, now: now)
         hasPendingSamples = true
-        if now.timeIntervalSince(lastWrite) >= Self.flushInterval {
+        if instant - lastWrite >= .seconds(Self.flushInterval) {
             // On failure the samples stay pending and the next record retries.
-            try persist(now: now)
+            try persist(instant: instant)
         }
     }
 
     /// Writes any samples not yet on disk.
-    public func flush(now: Date = .now) throws {
+    public func flush() throws {
         guard hasPendingSamples else { return }
-        try persist(now: now)
+        try persist()
     }
 
     public func report(now: Date = .now) -> EnergySoakReport? {
@@ -183,9 +190,9 @@ public actor EnergyLogStore {
         )
     }
 
-    private func persist(now: Date) throws {
+    private func persist(instant: ContinuousClock.Instant = .now) throws {
         try StoreIO.writeJSON(snapshot, to: fileURL)
-        lastWrite = now
+        lastWrite = instant
         hasPendingSamples = false
     }
 

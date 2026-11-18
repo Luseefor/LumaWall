@@ -131,26 +131,68 @@ struct EnergyLogStoreTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let start = Date()
-        let store = try EnergyLogStore(rootURL: root, now: start)
+        let clock = ContinuousClock.now
+        let store = try EnergyLogStore(rootURL: root, now: start, instant: clock)
         // Fifteen one-minute samples, all before the 15-minute boundary.
         for minute in 0..<15 {
             let at = start.addingTimeInterval(Double(minute) * 60)
-            try await store.record(sample(at: at, cpu: Double(minute)), now: at)
+            try await store.record(sample(at: at, cpu: Double(minute)), now: at, instant: clock.advanced(by: .seconds(minute * 60)))
         }
         #expect(!FileManager.default.fileExists(atPath: logFile(in: root).path))
         #expect(await store.current().samples.count == 15)
 
         // The first record at or past the boundary writes the whole batch once.
         let boundary = start.addingTimeInterval(15 * 60)
-        try await store.record(sample(at: boundary, cpu: 15), now: boundary)
+        try await store.record(sample(at: boundary, cpu: 15), now: boundary, instant: clock.advanced(by: .seconds(15 * 60)))
         let written = try Data(contentsOf: logFile(in: root))
         let first = try EnergyLogStore(rootURL: root, now: boundary)
         #expect(await first.current().samples.count == 16)
 
         // Then it stays quiet for another interval.
         let later = boundary.addingTimeInterval(60)
-        try await store.record(sample(at: later, cpu: 16), now: later)
+        try await store.record(sample(at: later, cpu: 16), now: later, instant: clock.advanced(by: .seconds(16 * 60)))
         #expect(try Data(contentsOf: logFile(in: root)) == written)
+    }
+
+    @Test func wallClockJumpsDoNotMoveTheWriteBoundary() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let start = Date()
+        let clock = ContinuousClock.now
+        let store = try EnergyLogStore(rootURL: root, now: start, instant: clock)
+        // The date jumps forward a day but only a minute really passed: no write.
+        let jumpedForward = start.addingTimeInterval(24 * 3_600)
+        try await store.record(sample(at: jumpedForward, cpu: 1), now: jumpedForward, instant: clock.advanced(by: .seconds(60)))
+        #expect(!FileManager.default.fileExists(atPath: logFile(in: root).path))
+        // The date steps back an hour but 15 real minutes passed: write.
+        let steppedBack = start.addingTimeInterval(-3_600)
+        try await store.record(sample(at: steppedBack, cpu: 2), now: steppedBack, instant: clock.advanced(by: .seconds(15 * 60)))
+        #expect(FileManager.default.fileExists(atPath: logFile(in: root).path))
+    }
+
+    @Test func failedWriteKeepsSamplesPendingAndRetriesOnTheNextRecord() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let start = Date()
+        let clock = ContinuousClock.now
+        let store = try EnergyLogStore(rootURL: root, now: start, instant: clock)
+        try await store.record(sample(at: start, cpu: 1), now: start, instant: clock.advanced(by: .seconds(60)))
+        // A read-only directory makes the atomic write fail.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+        let due = start.addingTimeInterval(15 * 60)
+        await #expect(throws: (any Error).self) {
+            try await store.record(sample(at: due, cpu: 2), now: due, instant: clock.advanced(by: .seconds(15 * 60)))
+        }
+        #expect(!FileManager.default.fileExists(atPath: logFile(in: root).path))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+        let next = due.addingTimeInterval(60)
+        try await store.record(sample(at: next, cpu: 3), now: next, instant: clock.advanced(by: .seconds(16 * 60)))
+        let reloaded = try EnergyLogStore(rootURL: root, now: next)
+        #expect(await reloaded.current().samples.map(\.processCPUPercent) == [1, 2, 3])
     }
 
     @Test func soakStartAndClearWriteImmediately() async throws {

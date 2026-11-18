@@ -40,6 +40,7 @@
 		46584995802EB00B9452E6B3 /* PowerStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E31264E5AD442CF2FC97EC /* PowerStatus.swift */; };
 		470A16E7D3190D3EC46C1090 /* DisplaysPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C03CB431C1C89AABAA80DF /* DisplaysPage.swift */; };
 		488AD46E56274ACDC0A14FB4 /* PlaybackFrameRate.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABDCE412E62E7FE35E60E348 /* PlaybackFrameRate.swift */; };
+		48C9025ACAF5BF57A23ADDF7 /* AsyncDeadline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F0C0F671A1198D5D4F851EE /* AsyncDeadline.swift */; };
 		499FDCA82D4AA14E6638D2C5 /* CallerValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8DEB9D119449BFF32A668D1 /* CallerValidation.swift */; };
 		49AADCE683976BB0A93B040C /* RuntimeHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2240EDFCA4AC39ACFC0CFA34 /* RuntimeHelpers.swift */; };
 		4A9D27798A99323D694E602F /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEAC344A725794E789B8517E /* LibraryStore.swift */; };
@@ -244,6 +245,7 @@
 		8469B0AE7A1B1EFD3B6AB03B /* WallpaperExtensionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WallpaperExtensionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8678A3384385BBD349B0722E /* DiagnosticsVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsVisibility.swift; sourceTree = "<group>"; };
 		897C82E4B5715D67331F66B3 /* PlaybackPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackPolicy.swift; sourceTree = "<group>"; };
+		8F0C0F671A1198D5D4F851EE /* AsyncDeadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncDeadline.swift; sourceTree = "<group>"; };
 		935605492FBB33F44E0672CF /* NativeWallpaperAssignmentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperAssignmentStore.swift; sourceTree = "<group>"; };
 		95C8553B65672801ECD4B39E /* WallpaperStoreProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperStoreProbe.swift; sourceTree = "<group>"; };
 		972E22AA71E714394D396642 /* ColorDiag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorDiag.swift; sourceTree = "<group>"; };
@@ -385,6 +387,7 @@
 			isa = PBXGroup;
 			children = (
 				2ECDCAA211A4E80FA3F84F59 /* AssignmentStore.swift */,
+				8F0C0F671A1198D5D4F851EE /* AsyncDeadline.swift */,
 				AB67E20FE99BF95F6C7B5362 /* AutomationStore.swift */,
 				1FB998F5FA3CED4AD4C9CA8E /* CodableSupport.swift */,
 				C611E6A02CB155E093E2F177 /* CoverageScanPolicy.swift */,
@@ -740,6 +743,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DC17146B2DC45373FE887719 /* AssignmentStore.swift in Sources */,
+				48C9025ACAF5BF57A23ADDF7 /* AsyncDeadline.swift in Sources */,
 				0ED8B62E42030A5CD5B6FC2E /* AutomationStore.swift in Sources */,
 				52A281AAE0669A4D9CB3D118 /* CPUSampler.swift in Sources */,
 				F773182235EEBFC864716901 /* CodableSupport.swift in Sources */,
