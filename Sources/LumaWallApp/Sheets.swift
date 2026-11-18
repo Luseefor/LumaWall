@@ -29,7 +29,7 @@ struct AssignSheet: View {
             } else {
                 ZStack {
                     Rectangle().fill(.black)
-                    PosterImage(url: selectedAsset?.posterURL, contentMode: contentMode)
+                    PosterImage(url: selectedAsset?.posterURL, contentMode: contentMode, maxPixelWidth: PosterCache.Width.large)
                         .scaleEffect(composition.scale)
                         .rotationEffect(.degrees(composition.rotationDegrees))
                         .offset(x: composition.offset.x * 0.18, y: -composition.offset.y * 0.18)
