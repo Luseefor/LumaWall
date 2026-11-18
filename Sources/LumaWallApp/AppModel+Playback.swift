@@ -162,7 +162,14 @@ extension AppModel {
         let power = PowerStatus.current()
         batteryPercent = power.percent
         isOnBattery = power.isOnBattery
-        let coverage = DisplayOcclusion.analyze(windows: OnscreenWindow.current(), displays: displays)
+        // On battery, a window filling everything below the menu bar counts as
+        // covering the display: the compositor shows none of the wallpaper's
+        // frames then, so decoding them only drains the battery.
+        let coverage = DisplayOcclusion.analyze(
+            windows: OnscreenWindow.current(),
+            displays: displays,
+            ignoringMenuBar: power.isOnBattery
+        )
         // Hysteresis: hold the paused verdict until coverage falls back past
         // the release thresholds, so a window sitting at the enter boundary
         // can't strobe pause/resume on every evaluation.

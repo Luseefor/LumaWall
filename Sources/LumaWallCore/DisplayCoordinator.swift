@@ -13,6 +13,8 @@ public struct ConnectedDisplay: Identifiable, Equatable, Hashable, Sendable {
     public let refreshRate: Double
     public let isMain: Bool
     public let cgDisplayID: CGDirectDisplayID
+    /// Height of the menu bar strip at the top of this display, in points.
+    public let menuBarHeight: CGFloat
 
     public init(
         displayID: DisplayID,
@@ -22,7 +24,8 @@ public struct ConnectedDisplay: Identifiable, Equatable, Hashable, Sendable {
         scale: CGFloat,
         refreshRate: Double,
         isMain: Bool,
-        cgDisplayID: CGDirectDisplayID
+        cgDisplayID: CGDirectDisplayID,
+        menuBarHeight: CGFloat = 0
     ) {
         self.displayID = displayID
         self.name = name
@@ -32,6 +35,7 @@ public struct ConnectedDisplay: Identifiable, Equatable, Hashable, Sendable {
         self.refreshRate = refreshRate
         self.isMain = isMain
         self.cgDisplayID = cgDisplayID
+        self.menuBarHeight = menuBarHeight
     }
 }
 
@@ -108,7 +112,8 @@ public final class DisplayCoordinator {
             scale: scale,
             refreshRate: screen.maximumFramesPerSecond.doubleValue,
             isMain: cgID == mainCGID,
-            cgDisplayID: cgID
+            cgDisplayID: cgID,
+            menuBarHeight: max(0, screen.frame.maxY - screen.visibleFrame.maxY)
         )
     }
 }

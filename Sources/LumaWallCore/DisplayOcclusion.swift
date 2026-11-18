@@ -59,7 +59,15 @@ public enum DisplayOcclusion {
         public var coverage: [DisplayID: CGFloat]
     }
 
-    public static func analyze(windows: [OnscreenWindow], displays: [ConnectedDisplay]) -> Analysis {
+    /// `ignoringMenuBar` measures coverage below each display's menu bar.
+    /// With a window maximized under the menu bar, the compositor showed
+    /// none of the wallpaper's decoded frames, so on battery that counts as
+    /// covered. On AC the whole display is measured, as before.
+    public static func analyze(
+        windows: [OnscreenWindow],
+        displays: [ConnectedDisplay],
+        ignoringMenuBar: Bool = false
+    ) -> Analysis {
         let desktop = displays.map(\.frame).reduce(CGRect.null) { $0.union($1) }
         guard !desktop.isNull else { return Analysis(covered: [], fullscreen: [], coverage: [:]) }
         // Mirror Quartz rects around the PRIMARY display's top (see
@@ -74,7 +82,12 @@ public enum DisplayOcclusion {
         for display in displays {
             // Union, not the largest window: side-by-side windows that
             // together hide the wallpaper should pause it too.
-            let ratio = ScreenGeometry.unionCoverageRatio(screen: display.frame, windows: rects)
+            var measured = display.frame
+            if ignoringMenuBar {
+                // Cocoa coordinates: the menu bar is at the top (maxY).
+                measured.size.height = max(0, measured.height - display.menuBarHeight)
+            }
+            let ratio = ScreenGeometry.unionCoverageRatio(screen: measured, windows: rects)
             analysis.coverage[display.displayID] = ratio
             // Require near-total occlusion before auto-pausing (see
             // PlaybackPolicyThresholds). Lower values flap pause/resume on

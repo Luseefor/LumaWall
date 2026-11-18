@@ -90,4 +90,23 @@ struct DisplayOcclusionTests {
         #expect(abs(ratio - 1400.0 / 1512.0) < 0.001)
         #expect(analysis.covered.isEmpty)
     }
+
+    @Test func onBatteryAMaximizedWindowUnderTheMenuBarCountsAsCovered() {
+        // Zoom maximized on the built-in panel: everything but the 39pt menu
+        // bar. The compositor showed none of the decoded wallpaper frames.
+        let menuBar: CGFloat = 39
+        let display = ConnectedDisplay(
+            displayID: panel.displayID, name: panel.name, frame: panel.frame, pixelSize: panel.pixelSize,
+            scale: panel.scale, refreshRate: panel.refreshRate, isMain: true, cgDisplayID: 1, menuBarHeight: menuBar
+        )
+        let maximized = CGRect(x: 0, y: menuBar, width: 1512, height: 982 - menuBar)
+        let windows = [OnscreenWindow(layer: 0, alpha: 1, bounds: maximized)]
+        #expect(DisplayOcclusion.analyze(windows: windows, displays: [display]).covered.isEmpty)
+        let battery = DisplayOcclusion.analyze(windows: windows, displays: [display], ignoringMenuBar: true)
+        #expect(battery.covered == [display.displayID])
+        #expect(battery.fullscreen.isEmpty)
+        // A smaller window still leaves wallpaper in view.
+        let half = [OnscreenWindow(layer: 0, alpha: 1, bounds: CGRect(x: 0, y: menuBar, width: 756, height: 982 - menuBar))]
+        #expect(DisplayOcclusion.analyze(windows: half, displays: [display], ignoringMenuBar: true).covered.isEmpty)
+    }
 }
