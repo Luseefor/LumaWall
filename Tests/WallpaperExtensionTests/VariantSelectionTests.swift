@@ -46,10 +46,35 @@ final class VariantSelectionTests: XCTestCase {
         XCTAssertNil(full(display: nil))
     }
 
-    func testBatteryTiersAreUnchangedByTheQHDCopy() {
+    func testBatteryTiersIgnoreTheQHDCopy() {
         let reduced = VariantSelection.variant(for: .reduced, sourceFPS: 60, sourceResolution: source, variants: variants, displayPixels: CGSize(width: 2560, height: 1440))
         let minimal = VariantSelection.variant(for: .minimal, sourceFPS: 60, sourceResolution: source, variants: variants, displayPixels: CGSize(width: 2560, height: 1440))
-        XCTAssertEqual(reduced?.filename, "Wallpaper.minimal.mov")
+        XCTAssertEqual(reduced?.filename, "Wallpaper.reduced.mov")
         XCTAssertEqual(minimal?.filename, "Wallpaper.minimal.mov")
+    }
+
+    func testBatteryTiersPlayTheirOwn30FPSCopies() {
+        let copies = [
+            VideoVariant(filename: "Wallpaper.qhd.mov", fps: 60, resolution: CGSize(width: 2560, height: 1440)),
+            VideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1920, height: 1080)),
+            VideoVariant(filename: "Wallpaper.minimal.mov", fps: 30, resolution: CGSize(width: 1280, height: 720)),
+        ]
+        let pick = { (policy: PlaybackPolicy) in
+            VariantSelection.variant(for: policy, sourceFPS: 60, sourceResolution: self.source, variants: copies)?.filename
+        }
+        XCTAssertEqual(pick(.reduced), "Wallpaper.reduced.mov")
+        XCTAssertEqual(pick(.minimal), "Wallpaper.minimal.mov")
+    }
+
+    func testThirtyFPSSourceOnBatteryPlaysThe1080pCopyNotThe1440pOne() {
+        // All copies share the source rate here; "below the source rate"
+        // found nothing and fell through to 720p, or could pick 1440p.
+        let copies = [
+            VideoVariant(filename: "Wallpaper.qhd.mov", fps: 30, resolution: CGSize(width: 2560, height: 1440)),
+            VideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1920, height: 1080)),
+            VideoVariant(filename: "Wallpaper.minimal.mov", fps: 30, resolution: CGSize(width: 1280, height: 720)),
+        ]
+        let reduced = VariantSelection.variant(for: .reduced, sourceFPS: 30, sourceResolution: source, variants: copies)
+        XCTAssertEqual(reduced?.filename, "Wallpaper.reduced.mov")
     }
 }

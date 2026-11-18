@@ -49,10 +49,21 @@ enum VariantSelection {
             else { return nil }
             return top
         case .reduced:
-            return sorted.first { $0.fps < sourceFPS } ?? sorted.last
+            // The app names each battery copy after its tier. Without the
+            // name, a 30 fps source (every copy at the source rate) fell
+            // through to 720p, or could land on the Full Quality 1440p copy.
+            return named(reducedFilename, in: variants)
+                ?? sorted.first { $0.fps < sourceFPS } ?? sorted.last
         case .minimal:
-            return sorted.last
+            return named(minimalFilename, in: variants) ?? sorted.last
         }
+    }
+
+    static let reducedFilename = "Wallpaper.reduced.mov"
+    static let minimalFilename = "Wallpaper.minimal.mov"
+
+    private static func named(_ filename: String, in variants: [VideoVariant]) -> VideoVariant? {
+        variants.first { $0.filename == filename }
     }
 
     /// The smallest copy at the source frame rate that aspect-fills `display`
