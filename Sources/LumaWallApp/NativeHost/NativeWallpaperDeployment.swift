@@ -75,30 +75,71 @@ enum NativeWallpaperDeployment {
         WallpaperHostCapabilities.extensionDocumentsURL.appendingPathComponent("videos", isDirectory: true)
     }
 
-    /// Content-hash cache keyed by file path. Restores call `ensureDeployed`
-    /// once per display, and without this each of them re-hashes the same
-    /// multi-GB source, stalling multi-monitor restores and burning battery
-    /// to prove what the first hash already proved. Entries are validated by
-    /// size + mtime; only touched on MainActor (all callers are).
+    /// Verified content hashes keyed by source path, size and modification
+    /// date, kept in memory and in a JSON file. Restores call `ensureDeployed`
+    /// once per display, and every launch used to SHA-256 each multi-GB
+    /// source again to prove what the last launch already proved.
     @MainActor
-    private static var hashCache: [String: (size: UInt64, mtime: Date, hash: String)] = [:]
+    final class ContentHashStore {
+        typealias Hasher = @Sendable (URL) async throws -> String
+
+        private struct Record: Codable {
+            var size: UInt64
+            var mtime: Date
+            var hash: String
+        }
+
+        private let fileURL: URL?
+        private let hasher: Hasher
+        private var records: [String: Record]?
+
+        init(fileURL: URL?, hasher: @escaping Hasher) {
+            self.fileURL = fileURL
+            self.hasher = hasher
+        }
+
+        func hash(for url: URL) async throws -> String {
+            let key = url.standardizedFileURL.path
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let size = (attributes?[.size] as? NSNumber)?.uint64Value
+            let mtime = attributes?[.modificationDate] as? Date
+            if let size, let mtime, let cached = loaded()[key], cached.size == size, cached.mtime == mtime {
+                return cached.hash
+            }
+            let hash = try await hasher(url)
+            if let size, let mtime {
+                records?[key] = Record(size: size, mtime: mtime, hash: hash)
+                save()
+            }
+            return hash
+        }
+
+        private func loaded() -> [String: Record] {
+            if let records { return records }
+            // A missing or unreadable file only costs one rehash per source.
+            let decoded = fileURL
+                .flatMap { try? Data(contentsOf: $0) }
+                .flatMap { try? JSONDecoder().decode([String: Record].self, from: $0) }
+            records = decoded ?? [:]
+            return records ?? [:]
+        }
+
+        private func save() {
+            guard let fileURL, let records else { return }
+            // Sources deleted from disk would otherwise stay listed forever.
+            let live = records.filter { FileManager.default.fileExists(atPath: $0.key) }
+            self.records = live
+            if let data = try? JSONEncoder().encode(live) {
+                try? data.write(to: fileURL, options: .atomic)
+            }
+        }
+    }
 
     @MainActor
-    private static func cachedContentHash(for url: URL) async throws -> String {
-        let key = url.standardizedFileURL.path
-        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attributes?[.size] as? NSNumber)?.uint64Value
-        let mtime = attributes?[.modificationDate] as? Date
-        if let size, let mtime,
-           let cached = hashCache[key], cached.size == size, cached.mtime == mtime {
-            return cached.hash
-        }
-        let hash = try await contentHash(for: url)
-        if let size, let mtime {
-            hashCache[key] = (size: size, mtime: mtime, hash: hash)
-        }
-        return hash
-    }
+    private static let hashStore = ContentHashStore(
+        fileURL: (try? StorePaths.appSupportBase())?.appendingPathComponent("content-hashes.json"),
+        hasher: { try await contentHash(for: $0) }
+    )
 
     static func videoURL(for entry: EntryInfo) -> URL {
         videosFolderURL.appendingPathComponent(entry.id, isDirectory: true)
@@ -133,7 +174,7 @@ enum NativeWallpaperDeployment {
 
     @MainActor
     private static func deploy(asset: WallpaperAsset, entryID: String) async throws -> EntryInfo {
-        let hash = try await cachedContentHash(for: asset.mediaURL)
+        let hash = try await hashStore.hash(for: asset.mediaURL)
         if let existing = try entry(id: entryID),
            FileManager.default.fileExists(atPath: videoURL(for: existing).path),
            existing.contentHash == hash {
