@@ -25,3 +25,47 @@ struct CoverageScanPolicyTests {
         #expect(CoverageScanPolicy.powerChange(from: ac, to: PowerStatus(isOnBattery: true, percent: 80)) == .sourceSwitched)
     }
 }
+
+struct PowerSampleTrackerTests {
+    @Test func firstSampleIsASwitch() {
+        var tracker = PowerSampleTracker()
+        #expect(tracker.observe(PowerStatus(isOnBattery: false, percent: 90)) == .sourceSwitched)
+    }
+
+    @Test func sameSourceClassifiesByPercent() {
+        var tracker = PowerSampleTracker()
+        _ = tracker.observe(PowerStatus(isOnBattery: false, percent: 90))
+        tracker.noteCoverageScan(onBattery: false)
+        #expect(tracker.observe(PowerStatus(isOnBattery: false, percent: 91)) == .percentOnly)
+        #expect(tracker.observe(PowerStatus(isOnBattery: false, percent: 91)) == .none)
+    }
+
+    /// AC sampled, a workspace scan ran on battery, AC returned before the
+    /// next callback: the sample looks unchanged but coverage is stale.
+    @Test func coverageMeasuredOnOtherSourceForcesRefresh() {
+        var tracker = PowerSampleTracker()
+        _ = tracker.observe(PowerStatus(isOnBattery: false, percent: 90))
+        tracker.noteCoverageScan(onBattery: true)
+        #expect(tracker.observe(PowerStatus(isOnBattery: false, percent: 90)) == .sourceSwitched)
+    }
+}
+
+@MainActor
+struct CoverageDebouncerTests {
+    @Test func burstRunsOnceAfterTheLastSignal() async throws {
+        var runs = 0
+        let debouncer = CoverageDebouncer(delay: .milliseconds(40)) { runs += 1 }
+        for _ in 0..<5 { debouncer.signal() }
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(runs == 1)
+    }
+
+    @Test func cancelStopsAPendingScan() async throws {
+        var runs = 0
+        let debouncer = CoverageDebouncer(delay: .milliseconds(40)) { runs += 1 }
+        debouncer.signal()
+        debouncer.cancel()
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(runs == 0)
+    }
+}

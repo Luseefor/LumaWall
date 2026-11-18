@@ -131,28 +131,26 @@ extension AppModel {
     /// just refreshes the battery tiers from the cached coverage.
     func handlePowerSourceCallback() {
         let power = PowerStatus.current()
-        let change = lastPowerStatus.map { CoverageScanPolicy.powerChange(from: $0, to: power) } ?? .sourceSwitched
-        lastPowerStatus = power
-        switch change {
+        switch powerTracker.observe(power) {
         case .none:
             return
         case .percentOnly:
-            applyPlaybackPolicy(refreshCoverage: false)
+            applyPlaybackPolicy(refreshCoverage: false, power: power)
         case .sourceSwitched:
-            applyPlaybackPolicy()
+            applyPlaybackPolicy(power: power)
             // Power-source rules gate automations: apply or lift them now.
-            evaluateAutomations(force: false)
+            evaluateAutomations(force: false, power: power)
         }
     }
 
     /// Merges a burst of workspace notifications into one scan.
     private func scheduleCoverageScan() {
-        coverageDebounceWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            Task { @MainActor in self?.applyPlaybackPolicy() }
+        if coverageDebouncer == nil {
+            coverageDebouncer = CoverageDebouncer(delay: .seconds(CoverageScanPolicy.debounce)) { [weak self] in
+                self?.applyPlaybackPolicy()
+            }
         }
-        coverageDebounceWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + CoverageScanPolicy.debounce, execute: item)
+        coverageDebouncer?.signal()
     }
 
     private var userPausedEverywhere: Bool {
@@ -184,7 +182,7 @@ extension AppModel {
                     userPausedEverywhere: self.userPausedEverywhere,
                     displaysAsleep: self.displaysAsleep,
                     sessionLocked: self.sessionLocked,
-                    hasAssignedWallpaper: self.displays.contains { self.engine.wallpaperID(on: $0.displayID) != nil }
+                    hasAssignedWallpaper: self.engine.hasActivePlayback
                 )
                 if scan { self.applyPlaybackPolicy() }
             }
@@ -197,11 +195,12 @@ extension AppModel {
 
     /// `refreshCoverage: false` reuses the latched coverage instead of fetching
     /// the window list again.
-    func applyPlaybackPolicy(refreshCoverage: Bool = true) {
-        let power = PowerStatus.current()
+    func applyPlaybackPolicy(refreshCoverage: Bool = true, power sampled: PowerStatus? = nil) {
+        let power = sampled ?? PowerStatus.current()
         batteryPercent = power.percent
         isOnBattery = power.isOnBattery
         if refreshCoverage {
+            powerTracker.noteCoverageScan(onBattery: power.isOnBattery)
             // On battery, a window filling everything below the menu bar counts as
             // covering the display: the compositor shows none of the wallpaper's
             // frames then, so decoding them only drains the battery.

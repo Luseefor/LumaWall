@@ -242,10 +242,11 @@ extension AppModel {
         }
     }
 
-    func evaluateAutomations(force: Bool) {
+    /// `power` lets a caller that already sampled IOPS avoid a second read.
+    func evaluateAutomations(force: Bool, power: PowerStatus? = nil) {
         guard automations.allowsWeekday() else { return }
         guard !automations.isDoNotInterrupt() else { return }
-        guard automations.powerSourceRule.allows(isOnBattery: PowerStatus.current().isOnBattery) else { return }
+        guard automations.powerSourceRule.allows(isOnBattery: (power ?? PowerStatus.current()).isOnBattery) else { return }
 
         let targetID: WallpaperID?
         if automations.dayNightEnabled {
