@@ -109,24 +109,9 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertEqual(names(CGSize(width: 1280, height: 720)), [])
     }
 
-    /// Same table as `VariantSelectionTests.qhdFitFixtures` on the extension
-    /// side, which checks the extension's Full Quality pick agrees. Change
-    /// both together.
-    private let qhdFitFixtures: [(source: CGSize, fps: Double, display: CGSize, playsQHD: Bool)] = [
-        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 3840, height: 2160), false),
-        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 2560, height: 1440), true),
-        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 1920, height: 1080), true),
-        // At 30 fps the 1080p battery copy keeps the source rate and wins.
-        (CGSize(width: 3840, height: 2160), 30, CGSize(width: 1920, height: 1080), false),
-        (CGSize(width: 3840, height: 2160), 30, CGSize(width: 2560, height: 1440), true),
-        // A 2.39:1 source's 1440p copy is 2560x1072, too short to fill.
-        (CGSize(width: 4096, height: 1716), 60, CGSize(width: 2560, height: 1440), false),
-        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 1440, height: 2560), false),
-    ]
-
     func testQHDCopyIsPlannedOnlyForDisplaysThatPlayIt() {
         // A 4K encode ran even when every display was 4K and would never play it.
-        for fixture in qhdFitFixtures {
+        for fixture in QHDFitFixtures.rows {
             let planned = NativeWallpaperDeployment.variantSpecs(sourceSize: fixture.source, sourceFPS: fixture.fps, displayPixels: [fixture.display])
             XCTAssertEqual(planned.contains { $0.filename == "Wallpaper.qhd.mov" }, fixture.playsQHD, "\(fixture)")
         }
@@ -142,13 +127,14 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
                        ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
     }
 
-    func testCopySizesMatchTheExtensionFixtures() {
-        // VariantSelectionTests builds its copies with these sizes.
+    func testCopySizesMatchTheSharedFixtures() {
+        // The extension's selection test builds its copies with these sizes.
         let size = NativeWallpaperDeployment.copySize(source:fitting:)
-        let wide = CGSize(width: 4096, height: 1716)
-        XCTAssertEqual(size(wide, CGSize(width: 2560, height: 1440)), CGSize(width: 2560, height: 1072))
-        XCTAssertEqual(size(wide, CGSize(width: 1920, height: 1080)), CGSize(width: 1920, height: 804))
-        XCTAssertEqual(size(wide, CGSize(width: 1280, height: 720)), CGSize(width: 1280, height: 536))
+        for fixture in QHDFitFixtures.rows {
+            XCTAssertEqual(size(fixture.source, CGSize(width: 1920, height: 1080)), fixture.reduced)
+            XCTAssertEqual(size(fixture.source, CGSize(width: 1280, height: 720)), fixture.minimal)
+            XCTAssertEqual(size(fixture.source, CGSize(width: 2560, height: 1440)), fixture.qhd)
+        }
     }
 
     func testCopyReadinessFollowsWhatEachSurfacePlays() {

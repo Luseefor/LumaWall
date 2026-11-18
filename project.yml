@@ -119,6 +119,8 @@ targets:
       - path: WallpaperExtension/VariantSelection.swift
       - path: WallpaperExtension/PlaybackPolicy.swift
       - path: WallpaperExtension/ThermalHold.swift
+      # Shared with the app tests so both sides check the same rows.
+      - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.extension-tests

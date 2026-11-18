@@ -78,34 +78,15 @@ final class VariantSelectionTests: XCTestCase {
         XCTAssertEqual(reduced?.filename, "Wallpaper.reduced.mov")
     }
 
-    /// Same table as `NativeWallpaperDeploymentTests.qhdFitFixtures` in the
-    /// app, which plans the 1440p copy only where this side would play it.
-    /// Change both together.
-    private let qhdFitFixtures: [(source: CGSize, fps: Double, display: CGSize, playsQHD: Bool)] = [
-        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 3840, height: 2160), false),
-        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 2560, height: 1440), true),
-        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 1920, height: 1080), true),
-        // At 30 fps the 1080p battery copy keeps the source rate and wins.
-        (CGSize(width: 3840, height: 2160), 30, CGSize(width: 1920, height: 1080), false),
-        (CGSize(width: 3840, height: 2160), 30, CGSize(width: 2560, height: 1440), true),
-        // A 2.39:1 source's 1440p copy is 2560x1072, too short to fill.
-        (CGSize(width: 4096, height: 1716), 60, CGSize(width: 2560, height: 1440), false),
-        (CGSize(width: 3840, height: 2160), 60, CGSize(width: 1440, height: 2560), false),
-    ]
-
     func testFullQualityPicksTheQHDCopyWhereTheAppPlansIt() {
-        for fixture in qhdFitFixtures {
-            // The copies the app makes: battery ones capped at 30 fps, the
-            // 1440p one at the source rate, sized as `copySize` scales them.
-            let wide = fixture.source.width / fixture.source.height > 2
+        // Rows shared with the app's planning test (QHDFitFixtures.swift).
+        for fixture in QHDFitFixtures.rows {
+            // Battery copies are capped at 30 fps; the 1440p one keeps the source rate.
             let battery = Int(min(fixture.fps, 30).rounded())
             let copies = [
-                VideoVariant(filename: "Wallpaper.reduced.mov", fps: battery,
-                             resolution: wide ? CGSize(width: 1920, height: 804) : CGSize(width: 1920, height: 1080)),
-                VideoVariant(filename: "Wallpaper.minimal.mov", fps: battery,
-                             resolution: wide ? CGSize(width: 1280, height: 536) : CGSize(width: 1280, height: 720)),
-                VideoVariant(filename: "Wallpaper.qhd.mov", fps: Int(fixture.fps.rounded()),
-                             resolution: wide ? CGSize(width: 2560, height: 1072) : CGSize(width: 2560, height: 1440)),
+                VideoVariant(filename: "Wallpaper.reduced.mov", fps: battery, resolution: fixture.reduced),
+                VideoVariant(filename: "Wallpaper.minimal.mov", fps: battery, resolution: fixture.minimal),
+                VideoVariant(filename: "Wallpaper.qhd.mov", fps: Int(fixture.fps.rounded()), resolution: fixture.qhd),
             ]
             let pick = VariantSelection.variant(
                 for: .full, sourceFPS: Int(fixture.fps.rounded()), sourceResolution: fixture.source,
