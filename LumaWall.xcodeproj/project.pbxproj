@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0279E1BBE0C86016A9C41E20 /* CoverageScanPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C611E6A02CB155E093E2F177 /* CoverageScanPolicy.swift */; };
 		033938F81E75221F64B02D23 /* AppModel+Automations.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21D3442AA3DECB7DF57EFC3 /* AppModel+Automations.swift */; };
+		0339CF069DEAE2F5ECC7E7C0 /* ContentHashStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA921C83D761AB7785CB1D0D /* ContentHashStoreTests.swift */; };
 		086560A43649AE5E11D7A8E2 /* WallpaperState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A893BCA71F19994859B59CA /* WallpaperState.swift */; };
 		08A777396CAAA76CF7B85815 /* LumaWallCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5D2D700161F54D7AE38C0A54 /* LumaWallCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		0A062DEAB075D280942BA437 /* PowerPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7FAE3AF0C5D3D035E99212D /* PowerPolicy.swift */; };
@@ -281,6 +282,7 @@
 		D59DC962B533FD75165C56C4 /* SharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedComponents.swift; sourceTree = "<group>"; };
 		D6DBB8701C014457564B3EB5 /* DisplayOcclusion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayOcclusion.swift; sourceTree = "<group>"; };
 		D9F008AE58768A26D058DE69 /* BatteryMediaVariant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryMediaVariant.swift; sourceTree = "<group>"; };
+		DA921C83D761AB7785CB1D0D /* ContentHashStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentHashStoreTests.swift; sourceTree = "<group>"; };
 		DEAC344A725794E789B8517E /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
 		DF4AC82CC46B940190BC7779 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		DF77B5569F11B32DEC4DDB6C /* RecentsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsStore.swift; sourceTree = "<group>"; };
@@ -311,6 +313,7 @@
 		04FAE92CF4D5D13B3B03C9E7 /* LumaWallAppTests */ = {
 			isa = PBXGroup;
 			children = (
+				DA921C83D761AB7785CB1D0D /* ContentHashStoreTests.swift */,
 				EDCB9B96D2A6A4DE581A711D /* LoopingVideoViewTests.swift */,
 				E754FFABC4851272B5B28410 /* NativeWallpaperAssignmentStoreTests.swift */,
 				CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */,
@@ -776,6 +779,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0339CF069DEAE2F5ECC7E7C0 /* ContentHashStoreTests.swift in Sources */,
 				94DFC3618AA4027FA1230638 /* LoopingVideoViewTests.swift in Sources */,
 				82DA19E480E2E1891F9F6181 /* NativeWallpaperAssignmentStoreTests.swift in Sources */,
 				A0515B2E9CCB91FD497753DC /* NativeWallpaperDeploymentTests.swift in Sources */,

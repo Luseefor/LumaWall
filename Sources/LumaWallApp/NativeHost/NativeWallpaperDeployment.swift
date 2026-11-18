@@ -75,17 +75,39 @@ enum NativeWallpaperDeployment {
         WallpaperHostCapabilities.extensionDocumentsURL.appendingPathComponent("videos", isDirectory: true)
     }
 
-    /// Verified content hashes keyed by source path, size and modification
-    /// date, kept in memory and in a JSON file. Restores call `ensureDeployed`
-    /// once per display, and every launch used to SHA-256 each multi-GB
-    /// source again to prove what the last launch already proved.
+    /// Verified content hashes keyed by source path and a file fingerprint,
+    /// kept in memory and in a JSON file. Restores call `ensureDeployed` once
+    /// per display, and every launch used to SHA-256 each multi-GB source
+    /// again to prove what the last launch already proved.
     @MainActor
     final class ContentHashStore {
         typealias Hasher = @Sendable (URL) async throws -> String
 
+        /// Size and modification date alone miss a same-size replacement
+        /// that keeps the old date. The inode catches a file swapped in, and
+        /// the change time catches any rewrite in place, since setting the
+        /// modification date back also bumps it.
+        struct Fingerprint: Codable, Equatable {
+            var device: Int64
+            var inode: UInt64
+            var size: Int64
+            var mtime: TimeInterval
+            var ctime: TimeInterval
+
+            init?(url: URL) {
+                var info = stat()
+                guard stat(url.path, &info) == 0 else { return nil }
+                func seconds(_ time: timespec) -> TimeInterval { TimeInterval(time.tv_sec) + TimeInterval(time.tv_nsec) / 1e9 }
+                device = Int64(info.st_dev)
+                inode = UInt64(info.st_ino)
+                size = Int64(info.st_size)
+                mtime = seconds(info.st_mtimespec)
+                ctime = seconds(info.st_ctimespec)
+            }
+        }
+
         private struct Record: Codable {
-            var size: UInt64
-            var mtime: Date
+            var fingerprint: Fingerprint
             var hash: String
         }
 
@@ -100,15 +122,14 @@ enum NativeWallpaperDeployment {
 
         func hash(for url: URL) async throws -> String {
             let key = url.standardizedFileURL.path
-            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-            let size = (attributes?[.size] as? NSNumber)?.uint64Value
-            let mtime = attributes?[.modificationDate] as? Date
-            if let size, let mtime, let cached = loaded()[key], cached.size == size, cached.mtime == mtime {
+            let before = Fingerprint(url: url)
+            if let before, let cached = loaded()[key], cached.fingerprint == before {
                 return cached.hash
             }
             let hash = try await hasher(url)
-            if let size, let mtime {
-                records?[key] = Record(size: size, mtime: mtime, hash: hash)
+            // A file that changed while it was read has no hash worth keeping.
+            if let before, Fingerprint(url: url) == before {
+                records?[key] = Record(fingerprint: before, hash: hash)
                 save()
             }
             return hash
