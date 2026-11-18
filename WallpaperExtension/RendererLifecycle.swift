@@ -13,6 +13,11 @@ import Foundation
 /// same queue as policy updates, an update decided before sleep is undone by
 /// the sleep event and one decided after it sees the gate.
 ///
+/// A closed surface (invalidated by the agent, or a preview past its lease)
+/// is a second gate beside sleep. It stops the clock and feed but keeps the
+/// readers and the displayed frame, so a re-acquire resumes in place with no
+/// flush and no blank frame.
+///
 /// Every pipeline rebuild (a switch, a deep-pause wake, decoder recovery)
 /// goes through one reset: at most one flush is in flight, a reset requested
 /// during it is merged into it, and the clock and feed start only once the
@@ -84,6 +89,8 @@ struct RendererLifecycle: Equatable {
         /// The renderer loaded a different asset (switch or battery-tier copy).
         case assetChanged
         case displaySleep
+        /// The agent invalidated the surface (false) or acquired it again (true).
+        case surfaceOpen(Bool)
         /// `assetChanged`: the renderer loaded the held switch or the tier's copy.
         case displayWake(assetChanged: Bool)
         case resetFlushed(generation: Int)
@@ -105,6 +112,7 @@ struct RendererLifecycle: Equatable {
 
     private(set) var policy: PlaybackPolicy = .full
     private(set) var displayAsleep = false
+    private(set) var surfaceOpen = true
     private(set) var clock: Clock = .stopped
     private(set) var readers: Readers = .notStarted
     /// The reset whose flush is in flight, with any later request merged in.
@@ -134,7 +142,7 @@ struct RendererLifecycle: Equatable {
     var wantsPlayback: Bool { wouldPlay(policy) }
 
     func wouldPlay(_ policy: PlaybackPolicy) -> Bool {
-        policy != .paused && !displayAsleep
+        policy != .paused && !displayAsleep && surfaceOpen
     }
 
     /// Whether a feed callback or event from registration `token` may act.
@@ -176,6 +184,10 @@ struct RendererLifecycle: Equatable {
             guard !displayAsleep else { return [] }
             displayAsleep = true
             rampWhenReady = false
+        case let .surfaceOpen(open):
+            guard open != surfaceOpen else { return [] }
+            surfaceOpen = open
+            if !open { rampWhenReady = false }
         case let .displayWake(assetChanged):
             guard displayAsleep else { return [] }
             displayAsleep = false
@@ -319,8 +331,9 @@ struct RendererLifecycle: Equatable {
             if wantClock {
                 clock = animated ? .rampingUp : .playing
                 effects.append(animated ? .ramp(to: 1) : .setRate(1))
-            } else if clock == .rampingDown, displayAsleep || !ready {
-                // Sleep cuts a ramp-down short instead of decoding for seconds.
+            } else if clock == .rampingDown, displayAsleep || !surfaceOpen || !ready {
+                // Sleep or a closed surface cuts a ramp-down short instead of
+                // decoding for seconds nobody sees.
                 clock = .stopped
                 effects.append(.setRate(0))
             }

@@ -86,6 +86,67 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
     }
 
+    // MARK: Closed surfaces (#12)
+
+    func testClosingASurfaceStopsTheFeedAndKeepsItsReaders() {
+        // An invalidated surface used to decode through its 15 s grace.
+        var life = playing()
+        XCTAssertEqual(life.handle(.surfaceOpen(false)), [.setRate(0), .stopFeeding, .armDeepPause])
+        assertStoppedAndIdle(life)
+        XCTAssertEqual(life.readers, .live, "the context and frame stay for a re-acquire")
+    }
+
+    func testReopeningResumesInPlaceWithoutAFlush() {
+        // A re-acquire within the grace must not show a black frame: no reset,
+        // the held frame stays until the feed continues from it.
+        var life = playing()
+        _ = life.handle(.surfaceOpen(false))
+        XCTAssertEqual(life.handle(.surfaceOpen(true)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
+    }
+
+    func testPolicyUpdatesDoNotResumeAClosedSurface() {
+        var life = playing()
+        _ = life.handle(.surfaceOpen(false))
+        XCTAssertEqual(life.handle(.policy(.paused, animated: false)), [])
+        XCTAssertEqual(life.handle(.policy(.reduced, animated: true)), [])
+        XCTAssertEqual(life.policy, .reduced)
+        assertStoppedAndIdle(life)
+        XCTAssertEqual(life.handle(.surfaceOpen(true)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
+    }
+
+    func testSurfaceClosedBeforeStartShowsItsFirstFrameWithoutPlaying() {
+        var life = RendererLifecycle()
+        XCTAssertEqual(life.handle(.surfaceOpen(false)), [])
+        XCTAssertEqual(life.handle(.started(displayAsleep: false)), [])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
+        assertStoppedAndIdle(life)
+    }
+
+    func testClosingCutsARampDownShort() {
+        var life = playing()
+        XCTAssertEqual(life.handle(.policy(.paused, animated: true)), [.ramp(to: 0)])
+        XCTAssertEqual(life.handle(.surfaceOpen(false)), [.setRate(0), .stopFeeding, .armDeepPause])
+    }
+
+    func testDeepPausedClosedSurfaceRebuildsFromItsPositionOnReopen() {
+        var life = playing()
+        _ = life.handle(.surfaceOpen(false))
+        XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
+        XCTAssertEqual(life.handle(.surfaceOpen(true)), [.beginReset(.resume, generation: 1)])
+    }
+
+    func testClosedSurfaceDoesNotRetryAFailedVideo() {
+        var life = playing()
+        for token in 1...RendererLifecycle.maxFailures {
+            _ = life.handle(.decoderFailed(token: token))
+            _ = life.handle(.resetFlushed(generation: token))
+            if token < RendererLifecycle.maxFailures { _ = life.handle(.pipelineBuilt(true)) }
+        }
+        XCTAssertEqual(life.readers, .failed)
+        XCTAssertTrue(life.retryArmed)
+        XCTAssertEqual(life.handle(.surfaceOpen(false)), [.disarmRetry])
+    }
+
     // MARK: Start
 
     func testStartDuringSleepHoldsTheClock() {
