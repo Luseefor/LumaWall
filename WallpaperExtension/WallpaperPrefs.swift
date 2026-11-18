@@ -237,19 +237,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         let displayIDs = state.liveDisplayIDs()
 
         func policy(for displayID: UInt32?) -> PlaybackPolicy {
-            PlaybackPolicy.compute(
-                presentationMode: presentationMode,
-                activityState: activityState,
-                userPaused: userPaused || displayID.map { pausedDisplays.contains($0) } ?? false,
-                alwaysPauseDesktop: alwaysPauseDesktop,
-                pauseWhenOccluded: pauseWhenOccluded,
-                desktopOccluded: displayID.map(isOccluded(displayID:)) ?? desktopOccluded,
-                displayHasFullscreenApp: displayID.map { fullscreenDisplays.contains($0) }
-                    ?? !fullscreenDisplays.isEmpty,
-                screenSaverIsOurs: screenSaverIsOurs,
-                powerState: powerState,
-                powerProfile: powerProfile,
-            )
+            self.policy(for: displayID, presentationMode: presentationMode, activityState: activityState, powerState: powerState)
         }
 
         if displayIDs.isEmpty {
@@ -267,6 +255,29 @@ final class WallpaperPrefs: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// The tier `applyPolicies` gives live renderers on `displayID`, or every
+    /// live renderer when `displayID` is nil.
+    func policy(
+        for displayID: UInt32?,
+        presentationMode: String,
+        activityState: String,
+        powerState: PowerMonitor.PowerState,
+    ) -> PlaybackPolicy {
+        PlaybackPolicy.compute(
+            presentationMode: presentationMode,
+            activityState: activityState,
+            userPaused: userPaused || displayID.map { pausedDisplays.contains($0) } ?? false,
+            alwaysPauseDesktop: alwaysPauseDesktop,
+            pauseWhenOccluded: pauseWhenOccluded,
+            desktopOccluded: displayID.map(isOccluded(displayID:)) ?? desktopOccluded,
+            displayHasFullscreenApp: displayID.map { fullscreenDisplays.contains($0) }
+                ?? !fullscreenDisplays.isEmpty,
+            screenSaverIsOurs: screenSaverIsOurs,
+            powerState: powerState,
+            powerProfile: powerProfile,
+        )
     }
 
     private func postStateNotification() {

@@ -134,20 +134,33 @@ final class LumaWallExtension: NSObject, AppExtension {
     /// Recompute playback policy from current state and apply to all renderers.
     static func recomputeAndApplyPolicy() {
         let state = WallpaperState.shared
-
-        // When we know the screen is locked but the WallpaperAgent hasn't
-        // updated the presentation mode yet (e.g., right after display wake),
-        // use "locked" to prevent stale desktop-mode policy from blocking
-        // lock screen playback.
-        let effectiveMode = state.isScreenLocked && state.presentationMode != "locked"
-            ? "locked"
-            : state.presentationMode
-
         WallpaperPrefs.shared.applyPolicies(
-            presentationMode: effectiveMode,
+            presentationMode: effectivePresentationMode(state),
             activityState: state.activityState,
             powerState: PowerMonitor.shared.currentState,
         )
+    }
+
+    /// The tier `recomputeAndApplyPolicy` would give a new renderer, so it
+    /// opens the right copy before its first frame. Previews take no policy
+    /// (`applyPolicies` skips them) and stay at Full.
+    static func policyForNewRenderer(displayID: UInt32?, isPreview: Bool) -> PlaybackPolicy {
+        guard !isPreview else { return .full }
+        let state = WallpaperState.shared
+        return WallpaperPrefs.shared.policy(
+            for: displayID,
+            presentationMode: effectivePresentationMode(state),
+            activityState: state.activityState,
+            powerState: PowerMonitor.shared.currentState,
+        )
+    }
+
+    /// When we know the screen is locked but the WallpaperAgent hasn't
+    /// updated the presentation mode yet (e.g., right after display wake),
+    /// use "locked" to prevent stale desktop-mode policy from blocking lock
+    /// screen playback.
+    private static func effectivePresentationMode(_ state: WallpaperState) -> String {
+        state.isScreenLocked && state.presentationMode != "locked" ? "locked" : state.presentationMode
     }
 
     /// Listen for Darwin notifications from the main app when it adds/removes videos.
