@@ -118,6 +118,7 @@ targets:
       # The extension can't host a test bundle; compile its pure sources here.
       - path: WallpaperExtension/VariantSelection.swift
       - path: WallpaperExtension/PlaybackPolicy.swift
+      - path: WallpaperExtension/ThermalHold.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.extension-tests

@@ -7,6 +7,8 @@ final class PowerMonitor: Sendable {
     static let shared = PowerMonitor()
 
     private let state = OSAllocatedUnfairLock(initialState: PowerState())
+    /// Smooths thermal flips so a one-second dip doesn't switch tiers.
+    private let thermalHold = OSAllocatedUnfairLock(initialState: ThermalHold(initial: ProcessInfo.processInfo.thermalState))
     private let continuations = OSAllocatedUnfairLock(initialState: [UUID: AsyncStream<PowerState>.Continuation]())
     private nonisolated(unsafe) var _batteryScheduler: NSBackgroundActivityScheduler?
     private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
@@ -138,11 +140,23 @@ final class PowerMonitor: Sendable {
     // MARK: - Private
 
     private func handleThermalChange() {
+        let raw = ProcessInfo.processInfo.thermalState
+        let (effective, releaseDate) = thermalHold.withLock { hold in
+            (hold.update(raw: raw, now: Date()), hold.releaseDate)
+        }
+        // A pending fall applies after the hold even if macOS posts nothing
+        // more; re-check then.
+        if let releaseDate {
+            let delay = max(0, releaseDate.timeIntervalSinceNow) + 0.5
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.handleThermalChange()
+            }
+        }
         let previous = state.withLock { $0 }
-        state.withLock { $0.thermalState = ProcessInfo.processInfo.thermalState }
+        state.withLock { $0.thermalState = effective }
         let current = state.withLock { $0 }
         guard previous != current else { return }
-        extensionLog("[PowerMonitor] Thermal → \(current.thermalState.rawValue)")
+        extensionLog("[PowerMonitor] Thermal → \(current.thermalState.rawValue) (raw \(raw.rawValue))")
         yieldToSubscribers(current)
     }
 

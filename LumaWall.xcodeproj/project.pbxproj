@@ -72,6 +72,7 @@
 		925C844AA691542D7E62FDC2 /* MenuBarPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63748F726DA7BB383A7158A /* MenuBarPopover.swift */; };
 		93B61883BB0DD5E7C93F3999 /* SharedPlaybackHubTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E0B72BAACBDD1A1F915454F /* SharedPlaybackHubTests.swift */; };
 		94DFC3618AA4027FA1230638 /* LoopingVideoViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDCB9B96D2A6A4DE581A711D /* LoopingVideoViewTests.swift */; };
+		96483EE8B97895AE3A2E7092 /* ThermalHold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10009BD2ED9A420EC55D7090 /* ThermalHold.swift */; };
 		A0515B2E9CCB91FD497753DC /* NativeWallpaperDeploymentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */; };
 		A1F36111D42A6D1C69393839 /* PlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C82E4B5715D67331F66B3 /* PlaybackPolicy.swift */; };
 		A2C0AF588475CFAED60E1E09 /* DisplayCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 580BF5B18E21C3C2F1E7A962 /* DisplayCoordinator.swift */; };
@@ -82,6 +83,7 @@
 		AE7569361ACE8075F9031015 /* AppModel+Displays.swift in Sources */ = {isa = PBXBuildFile; fileRef = B392584FC143C837C3708118 /* AppModel+Displays.swift */; };
 		B0C3C26B2C3C7EE160D6223E /* DisplayOcclusion.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6DBB8701C014457564B3EB5 /* DisplayOcclusion.swift */; };
 		B513A3FFD42A219D59B38C47 /* WallpaperHostCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B4F704A5C929E798E5FD1B /* WallpaperHostCapabilities.swift */; };
+		B7C362587997DA171CA39055 /* ThermalHold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10009BD2ED9A420EC55D7090 /* ThermalHold.swift */; };
 		B7DDEA43AFB03A86DE307F0E /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68C5D43D163EAB6096ACD99C /* SystemServices.swift */; };
 		B8CA5E4E4989FF8D7D465D03 /* StillFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBF8BF08C2B580120BF639E0 /* StillFrame.swift */; };
 		B949C9764113925CD7C98719 /* CrashReportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DB6A6048FB6D08B20B40515 /* CrashReportStore.swift */; };
@@ -99,6 +101,7 @@
 		D301EE4FA837B8A9F944EE08 /* PlaylistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 371BCDB4A844F28D29156BCC /* PlaylistStore.swift */; };
 		D46B85502DE56EF8C47278BC /* CrashMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBB5B8AF41A333E38BE8B0EA /* CrashMonitor.swift */; };
 		D6353F23179201E47B645E16 /* DisplayTopology.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDF5508DD0224D382183D97 /* DisplayTopology.swift */; };
+		D6948D9D450AB50E0272C8A4 /* ThermalHoldTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50AC3950C30CCB658EF253D0 /* ThermalHoldTests.swift */; };
 		D8030A6FEA705E4E7CC3F9A3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = DF4AC82CC46B940190BC7779 /* Localizable.xcstrings */; };
 		D9A6C2C9B0E9AEC614ADD52E /* LumaWallApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A30AF2E839F9A4C376A239 /* LumaWallApp.swift */; };
 		DAB2D9B16055FD6B4D3B167E /* SpanningGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE0B943653B35FEFE4EF4AE /* SpanningGeometry.swift */; };
@@ -177,6 +180,7 @@
 		0B19454371AFEB8BC36A88B6 /* EnergyLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyLogStore.swift; sourceTree = "<group>"; };
 		0CF12B9E3E2FCE2FADFDA7E2 /* SetLumaWallWallpaperIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetLumaWallWallpaperIntent.swift; sourceTree = "<group>"; };
 		0E0B72BAACBDD1A1F915454F /* SharedPlaybackHubTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedPlaybackHubTests.swift; sourceTree = "<group>"; };
+		10009BD2ED9A420EC55D7090 /* ThermalHold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalHold.swift; sourceTree = "<group>"; };
 		1574B693E71CFA6AC6A56F4D /* NativeWallpaperPrefsBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperPrefsBridge.swift; sourceTree = "<group>"; };
 		18E44026EDDCE2C7E0EABEEE /* StillBisect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StillBisect.swift; sourceTree = "<group>"; };
 		19D0E3B814FD25BF060BAFEB /* LoopingVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopingVideoView.swift; sourceTree = "<group>"; };
@@ -209,6 +213,7 @@
 		4514DB4DB9565BA8DD535913 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
 		48A30AF2E839F9A4C376A239 /* LumaWallApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumaWallApp.swift; sourceTree = "<group>"; };
 		4B4FDD5BDAB00E7ED9F1EA48 /* LibraryComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryComponents.swift; sourceTree = "<group>"; };
+		50AC3950C30CCB658EF253D0 /* ThermalHoldTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalHoldTests.swift; sourceTree = "<group>"; };
 		54C6731C377E9CD3FA6FDBF8 /* AppModel+Playback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Playback.swift"; sourceTree = "<group>"; };
 		5521AC1A8196EE62B0D65EB0 /* SolarSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolarSchedule.swift; sourceTree = "<group>"; };
 		580BF5B18E21C3C2F1E7A962 /* DisplayCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayCoordinator.swift; sourceTree = "<group>"; };
@@ -438,6 +443,7 @@
 		95B5D566193E4E6EE4CB192D /* WallpaperExtensionTests */ = {
 			isa = PBXGroup;
 			children = (
+				50AC3950C30CCB658EF253D0 /* ThermalHoldTests.swift */,
 				AD81E985B85F9C197EEEADEF /* VariantSelectionTests.swift */,
 			);
 			path = WallpaperExtensionTests;
@@ -466,6 +472,7 @@
 				32DFB08F9FEC701E681168B2 /* SpiralRecovery.swift */,
 				18E44026EDDCE2C7E0EABEEE /* StillBisect.swift */,
 				FBF8BF08C2B580120BF639E0 /* StillFrame.swift */,
+				10009BD2ED9A420EC55D7090 /* ThermalHold.swift */,
 				E29310CD5FF9A5DCEFFF01BB /* VariantSelection.swift */,
 				1AFC44150D63774B51059A01 /* VideoDiscovery.swift */,
 				7F82E6574A70C9A0333D0325 /* VideoLibrary.swift */,
@@ -708,6 +715,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AC3CC8BAC0C6F51E06C42E50 /* PlaybackPolicy.swift in Sources */,
+				96483EE8B97895AE3A2E7092 /* ThermalHold.swift in Sources */,
+				D6948D9D450AB50E0272C8A4 /* ThermalHoldTests.swift in Sources */,
 				54A65A26078CEDD85BD5097D /* VariantSelection.swift in Sources */,
 				24D48B66AFCD28E4CF3E7B5C /* VariantSelectionTests.swift in Sources */,
 			);
@@ -780,6 +789,7 @@
 				AE589C34D91A4831C452DA6A /* SpiralRecovery.swift in Sources */,
 				40FE8E9A025D712B8404EB07 /* StillBisect.swift in Sources */,
 				B8CA5E4E4989FF8D7D465D03 /* StillFrame.swift in Sources */,
+				B7C362587997DA171CA39055 /* ThermalHold.swift in Sources */,
 				AB633A03CB77A18D37A2D0EB /* VariantSelection.swift in Sources */,
 				E6964723BC4B7ABE24103786 /* VideoDiscovery.swift in Sources */,
 				683D3259C026AABE7101A28B /* VideoLibrary.swift in Sources */,
