@@ -230,7 +230,7 @@ private final class EncodeLog: @unchecked Sendable {
     }
     func start(_ job: NativeWallpaperDeployment.VariantEncodeQueue.Job) {
         lock.withLock {
-            _order.append(job.key)
+            _order.append(job.entryID + "/" + job.spec.filename)
             running += 1
             _maxRunning = max(_maxRunning, running)
         }
@@ -245,7 +245,7 @@ final class VariantEncodeQueueTests: XCTestCase {
         .map { ($0.filename, $0) })
 
     private func job(_ entry: String, _ filename: String) -> Queue.Job {
-        Queue.Job(entryID: entry, sourceURL: URL(fileURLWithPath: "/tmp/\(entry).mov"), spec: specs[filename]!)
+        Queue.Job(entryID: entry, sourceURL: URL(fileURLWithPath: "/tmp/\(entry).mov"), contentHash: "h", spec: specs[filename]!)
     }
 
     private func queue(_ log: EncodeLog, delay: Duration = .zero, succeeds: Bool = true,
@@ -316,5 +316,100 @@ final class VariantEncodeQueueTests: XCTestCase {
             attempts = await attempt()
         }
         XCTAssertEqual(attempts, Queue.maxAttempts)
+    }
+}
+
+final class VariantPublicationTests: XCTestCase {
+    private var root: URL!
+    private var videos: URL { root.appendingPathComponent("videos") }
+    private var staging: URL { root.appendingPathComponent("copy-staging") }
+    private let id = UUID().uuidString
+    private let minimal = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 3840, height: 2160), sourceFPS: 30)
+        .first { $0.filename == "Wallpaper.minimal.mov" }!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: videos.appendingPathComponent(id), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func deploy(hash: String) throws {
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: "Wallpaper.mov", duration: 5, fps: 30,
+            resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), contentHash: hash
+        )
+        try JSONEncoder().encode(entry).write(to: videos.appendingPathComponent(id).appendingPathComponent("metadata.json"))
+    }
+
+    private func job(hash: String) -> NativeWallpaperDeployment.VariantEncodeQueue.Job {
+        .init(entryID: id, sourceURL: URL(fileURLWithPath: "/tmp/x.mov"), contentHash: hash, spec: minimal)
+    }
+
+    private func stage(_ job: NativeWallpaperDeployment.VariantEncodeQueue.Job) throws -> URL {
+        let url = NativeWallpaperDeployment.stagedURL(for: job, stagingFolderURL: staging)
+        try Data("copy".utf8).write(to: url)
+        return url
+    }
+
+    private var dest: URL { videos.appendingPathComponent(id).appendingPathComponent(minimal.filename) }
+    private let size = CGSize(width: 1280, height: 720)
+
+    func testPublishesACopyForTheCurrentDeployment() throws {
+        try deploy(hash: "aaa")
+        let staged = try stage(job(hash: "aaa"))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .published)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+        let entry = try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)
+        XCTAssertEqual(entry?.variants?.map(\.filename), [minimal.filename])
+    }
+
+    func testCopyOfAReplacedSourceIsDiscarded() throws {
+        // Jobs were keyed by entry and filename only, so a copy planned for
+        // the old source could be published into the redeployed entry.
+        try deploy(hash: "new")
+        let staged = try stage(job(hash: "old"))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "old"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .stale)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+        XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)?.variants)
+    }
+
+    func testFailedMetadataWriteKeepsTheExportForRetry() throws {
+        // A failed metadata write counted as success: the extension never
+        // saw the copy and the next request encoded it again.
+        try deploy(hash: "aaa")
+        let staged = try stage(job(hash: "aaa"))
+        let failed = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos,
+                                                       writeMetadata: { _, _ in throw CocoaError(.fileWriteOutOfSpace) })
+        XCTAssertEqual(failed, .failed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        let retried = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(retried, .published)
+    }
+
+    func testStartupCleanupRemovesAbandonedExports() throws {
+        // A quit mid-export left a multi-GB temp movie that the extension's
+        // recovery scan could pick as the wallpaper.
+        try deploy(hash: "aaa")
+        let fm = FileManager.default
+        let partial = staging.appendingPathComponent("\(id).\(UUID().uuidString).partial.mov")
+        let legacyTemp = videos.appendingPathComponent(id).appendingPathComponent("Wallpaper.minimal.mov.\(UUID().uuidString).tmp.mov")
+        let current = try stage(job(hash: "aaa"))
+        let stale = try stage(job(hash: "old"))
+        for url in [partial, legacyTemp] { try Data("x".utf8).write(to: url) }
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        XCTAssertFalse(fm.fileExists(atPath: partial.path))
+        XCTAssertFalse(fm.fileExists(atPath: legacyTemp.path))
+        XCTAssertFalse(fm.fileExists(atPath: stale.path))
+        XCTAssertTrue(fm.fileExists(atPath: current.path))
+        XCTAssertTrue(fm.fileExists(atPath: videos.appendingPathComponent(id).appendingPathComponent("metadata.json").path))
     }
 }

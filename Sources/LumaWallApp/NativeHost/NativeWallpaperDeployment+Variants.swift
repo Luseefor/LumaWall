@@ -112,7 +112,7 @@ extension NativeWallpaperDeployment {
 
     /// The 1440p copy only helps Full Quality on AC power, so it waits for AC
     /// instead of spending battery on an encode.
-    private static var canMakeFullQualityCopies: Bool {
+    static var canMakeFullQualityCopies: Bool {
         !PowerStatus.current().isOnBattery && !ProcessInfo.processInfo.isLowPowerModeEnabled
     }
 
@@ -122,98 +122,35 @@ extension NativeWallpaperDeployment {
         return current.filter { !replaced.contains($0.filename) } + added
     }
 
-    /// Queue the copies `variantSpecs` plans for encoding. Copies already
-    /// listed with a file on disk are skipped and missing ones regenerated.
-    /// A multi-GB 4K transcode must never block applying the wallpaper, so
-    /// this returns once the jobs are queued.
-    ///
-    /// Without these files the extension's variant selector always falls back
-    /// to the full file, so Automatic-on-battery and Battery Saver resolve a
-    /// cheaper tier and then play the exact same bytes ("does nothing").
-    static func ensureVariants(for entryID: String, sourceURL: URL, sourceFPS: Double, sourceSize: CGSize, displayPixels: [CGSize]) async {
-        guard PathSafety.isValidEntryID(entryID),
-              FileManager.default.fileExists(atPath: entryDirectory(entryID).path)
-        else { return }
-        let specs = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: displayPixels)
-        await encodeQueue.enqueue(specs.map { VariantEncodeQueue.Job(entryID: entryID, sourceURL: sourceURL, spec: $0) })
-    }
-
-    private static func entryDirectory(_ entryID: String) -> URL {
-        videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
-    }
-
-    /// The one queue every copy encode goes through.
-    private static let encodeQueue = VariantEncodeQueue(
-        canMakeOptionalCopies: { canMakeFullQualityCopies },
-        isDone: { job in
-            let dir = entryDirectory(job.entryID)
-            // A wallpaper removed while its jobs waited has nothing to encode.
-            return !FileManager.default.fileExists(atPath: dir.path) || isRecorded(job.spec, entryID: job.entryID, in: dir)
-        },
-        encode: { job in
-            let dir = entryDirectory(job.entryID)
-            guard let variant = await transcode(sourceURL: job.sourceURL, dir: dir, spec: job.spec) else { return false }
-            record([variant], for: job.entryID, in: dir)
-            notifyLibraryChanged()
-            return true
-        }
-    )
-
-    private static func isRecorded(_ spec: VariantSpec, entryID: String, in dir: URL) -> Bool {
-        guard let entry = try? entry(id: entryID),
-              (entry.variants ?? []).contains(where: { $0.filename == spec.filename && $0.fps == spec.recordedFPS })
-        else { return false }
-        return FileManager.default.fileExists(atPath: dir.appendingPathComponent(spec.filename).path)
-    }
-
-    /// Re-reads metadata.json and merges `produced` into it. Another worker
-    /// may have recorded its own copy since this one started; writing the
-    /// list read before transcoding dropped that copy.
-    private static func record(_ produced: [NativeVideoVariant], for entryID: String, in dir: URL) {
-        variantMetadataLock.withLock {
-            guard var latest = try? entry(id: entryID) else { return }
-            let fm = FileManager.default
-            let current = (latest.variants ?? []).filter { fm.fileExists(atPath: dir.appendingPathComponent($0.filename).path) }
-            latest.variants = merging(current, with: produced)
-            if let data = try? JSONEncoder().encode(latest) {
-                try? data.write(to: dir.appendingPathComponent("metadata.json"), options: .atomic)
-            }
-        }
-    }
-
-    /// Serializes the read-merge-write of metadata.json across workers.
-    private static let variantMetadataLock = NSLock()
-
-    private static func transcode(sourceURL: URL, dir: URL, spec: VariantSpec) async -> NativeVideoVariant? {
+    /// Exports `spec` to `output`, writing a `.partial.mov` beside it first
+    /// so an interrupted export never sits under the finished name.
+    static func transcode(sourceURL: URL, to output: URL, spec: VariantSpec) async -> Bool {
         let source = AVURLAsset(url: sourceURL)
-        guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return nil }
-        let temp = dir.appendingPathComponent("\(spec.filename).\(UUID().uuidString).tmp.mov")
+        guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return false }
+        let partial = output.deletingPathExtension().appendingPathExtension("\(UUID().uuidString).partial.mov")
         do {
-            guard let composition = try await scaledComposition(for: source, fitting: spec.fitting, fps: spec.fps) else { return nil }
+            guard let composition = try await scaledComposition(for: source, fitting: spec.fitting, fps: spec.fps) else { return false }
             export.videoComposition = composition
-            try await export.export(to: temp, as: .mov)
-            let probed = AVURLAsset(url: temp)
-            var resolution = CGSize.zero
-            if let track = try? await probed.loadTracks(withMediaType: .video).first,
-               let natural = try? await track.load(.naturalSize),
-               let transform = try? await track.load(.preferredTransform) {
-                let transformed = natural.applying(transform)
-                resolution = CGSize(width: abs(transformed.width), height: abs(transformed.height))
-            }
-            guard resolution.width > 0, resolution.height > 0 else {
-                try? FileManager.default.removeItem(at: temp)
-                return nil
-            }
-            let dest = dir.appendingPathComponent(spec.filename)
-            if FileManager.default.fileExists(atPath: dest.path) {
-                try? FileManager.default.removeItem(at: dest)
-            }
-            try FileManager.default.moveItem(at: temp, to: dest)
-            return NativeVideoVariant(filename: spec.filename, fps: spec.recordedFPS, resolution: resolution)
+            try await export.export(to: partial, as: .mov)
+            try? FileManager.default.removeItem(at: output)
+            try FileManager.default.moveItem(at: partial, to: output)
+            return true
         } catch {
-            try? FileManager.default.removeItem(at: temp)
-            return nil
+            try? FileManager.default.removeItem(at: partial)
+            return false
         }
+    }
+
+    /// Oriented pixel size of a movie's video track, or nil when unreadable.
+    static func videoSize(of url: URL) async -> CGSize? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let natural = try? await track.load(.naturalSize),
+              let transform = try? await track.load(.preferredTransform)
+        else { return nil }
+        let transformed = natural.applying(transform)
+        let size = CGSize(width: abs(transformed.width), height: abs(transformed.height))
+        return size.width > 0 && size.height > 0 ? size : nil
     }
 
     /// Frame duration for a copy that keeps the source cadence. NTSC rates

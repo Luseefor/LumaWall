@@ -175,6 +175,10 @@ enum NativeWallpaperDeployment {
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
         }
+        if !copyEncodingPrepared {
+            copyEncodingPrepared = true
+            Task.detached(priority: .utility) { await prepareCopyEncoding() }
+        }
         // Concurrent applies of the same wallpaper (double-click, playlist +
         // manual racing) used to interleave remove-dir → copy and corrupt the
         // entry. Second callers await the running deploy instead of staging
@@ -190,6 +194,11 @@ enum NativeWallpaperDeployment {
         defer { deploymentTasks.removeValue(forKey: entryID) }
         return try await task.value
     }
+
+    /// Set once the first deploy of this run has queued the cleanup of
+    /// exports a previous run left behind.
+    @MainActor
+    private static var copyEncodingPrepared = false
 
     /// Deploys currently running per entry (see `ensureDeployed`).
     @MainActor
@@ -207,6 +216,7 @@ enum NativeWallpaperDeployment {
                 Task.detached {
                     await ensureVariants(
                         for: entryID,
+                        contentHash: hash,
                         sourceURL: asset.mediaURL,
                         sourceFPS: existing.fps,
                         sourceSize: existing.resolution,
@@ -223,8 +233,12 @@ enum NativeWallpaperDeployment {
             let fm = FileManager.default
             try fm.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
             let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
-            if fm.fileExists(atPath: dir.path) {
-                try fm.removeItem(at: dir)
+            // Under the entry lock, so a copy of the previous source that is
+            // being published finishes first and can't land after the reset.
+            try entryLock.withLock {
+                if fm.fileExists(atPath: dir.path) {
+                    try fm.removeItem(at: dir)
+                }
             }
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             let filename = PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
@@ -254,6 +268,7 @@ enum NativeWallpaperDeployment {
         Task.detached {
             await ensureVariants(
                 for: entryID,
+                contentHash: hash,
                 sourceURL: staged.dest,
                 sourceFPS: probe.fps,
                 sourceSize: probe.resolution,

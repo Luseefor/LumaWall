@@ -11,8 +11,11 @@ extension NativeWallpaperDeployment {
         struct Job: Sendable, Equatable {
             let entryID: String
             let sourceURL: URL
+            /// Hash of the source this copy is made from; a redeploy with a
+            /// different file makes the job stale.
+            let contentHash: String
             let spec: VariantSpec
-            var key: String { entryID + "/" + spec.filename }
+            var key: String { entryID + "/" + contentHash + "/" + spec.filename }
         }
 
         static let maxAttempts = 4
@@ -22,6 +25,8 @@ extension NativeWallpaperDeployment {
         private let isDone: @Sendable (Job) -> Bool
         private let encode: @Sendable (Job) async -> Bool
         private let now: @Sendable () -> Date
+        private let prepare: @Sendable () -> Void
+        private var prepared = false
         private var pending: [Job] = []
         private var runningKey: String?
         private var worker: Task<Void, Never>?
@@ -31,15 +36,25 @@ extension NativeWallpaperDeployment {
             canMakeOptionalCopies: @escaping @Sendable () -> Bool,
             isDone: @escaping @Sendable (Job) -> Bool,
             encode: @escaping @Sendable (Job) async -> Bool,
-            now: @escaping @Sendable () -> Date = { Date() }
+            now: @escaping @Sendable () -> Date = { Date() },
+            prepare: @escaping @Sendable () -> Void = {}
         ) {
             self.canMakeOptionalCopies = canMakeOptionalCopies
             self.isDone = isDone
             self.encode = encode
             self.now = now
+            self.prepare = prepare
+        }
+
+        /// Runs `prepare` once, before any encode starts.
+        func prepareIfNeeded() {
+            guard !prepared else { return }
+            prepared = true
+            prepare()
         }
 
         func enqueue(_ jobs: [Job]) {
+            prepareIfNeeded()
             let ordered = jobs.filter { !$0.spec.forFullQuality } + jobs.filter(\.spec.forFullQuality)
             for job in ordered where job.key != runningKey && !pending.contains(where: { $0.key == job.key }) {
                 if job.spec.forFullQuality {
