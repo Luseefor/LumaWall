@@ -11,7 +11,7 @@ struct LibrarySelectionTile: View {
     var body: some View {
         Button(action: select) {
             VStack(alignment: .leading, spacing: 9) {
-                WallpaperPosterFrame(posterURL: asset.posterURL, cornerRadius: 13) {
+                WallpaperPosterFrame(posterURL: asset.posterURL, fallbackVideoURL: asset.mediaURL, cornerRadius: 13) {
                     EmptyView()
                 }
                 .overlay(alignment: .topLeading) {
@@ -175,7 +175,7 @@ struct LibraryInspector: View {
 
     private func poster(_ asset: WallpaperAsset) -> some View {
         Group {
-            PosterImage(url: asset.posterURL)
+            PosterImage(url: asset.posterURL, fallbackVideo: asset.mediaURL)
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(16 / 10, contentMode: .fit)

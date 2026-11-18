@@ -6,15 +6,18 @@ import SwiftUI
 
 struct WallpaperPosterFrame<Overlay: View>: View {
     let posterURL: URL?
+    var fallbackVideoURL: URL?
     var cornerRadius: CGFloat = 16
     @ViewBuilder var overlay: () -> Overlay
 
     init(
         posterURL: URL?,
+        fallbackVideoURL: URL? = nil,
         cornerRadius: CGFloat = 16,
         @ViewBuilder overlay: @escaping () -> Overlay = { EmptyView() }
     ) {
         self.posterURL = posterURL
+        self.fallbackVideoURL = fallbackVideoURL
         self.cornerRadius = cornerRadius
         self.overlay = overlay
     }
@@ -24,7 +27,7 @@ struct WallpaperPosterFrame<Overlay: View>: View {
             .fill(Theme.panelStrong)
             .aspectRatio(16 / 10, contentMode: .fit)
             .overlay {
-                PosterImage(url: posterURL)
+                PosterImage(url: posterURL, fallbackVideo: fallbackVideoURL)
             }
             .overlay { overlay() }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -72,12 +75,16 @@ struct WallpaperTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            WallpaperPosterFrame(posterURL: asset.posterURL, cornerRadius: 16) {
+            WallpaperPosterFrame(posterURL: asset.posterURL, fallbackVideoURL: asset.mediaURL, cornerRadius: 16) {
                 ZStack {
                     if hovering {
-                        LoopingVideoView(url: NativeWallpaperDeployment.previewURL(for: asset, minPixelWidth: NativeWallpaperDeployment.PreviewSize.thumbnail))
-                            .scaledToFill()
-                            .transition(.opacity)
+                        // No small copy: the poster underneath stays, instead of
+                        // decoding the original for a tile-size preview.
+                        if let url = NativeWallpaperDeployment.thumbnailPreviewURL(for: asset) {
+                            LoopingVideoView(url: url, isSuspended: model.screenIsHidden)
+                                .scaledToFill()
+                                .transition(.opacity)
+                        }
                         Color.black.opacity(0.28)
                             .transition(.opacity)
                     }

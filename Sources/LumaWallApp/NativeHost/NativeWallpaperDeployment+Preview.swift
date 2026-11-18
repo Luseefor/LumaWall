@@ -23,6 +23,25 @@ extension NativeWallpaperDeployment {
             .min { $0.resolution.width < $1.resolution.width }
     }
 
+    /// What a preview should show.
+    enum PreviewPlan: Equatable {
+        /// Play a deployed copy.
+        case copy(NativeVideoVariant)
+        /// Play the library original (hero and sheet only).
+        case original
+        /// Show the poster image instead of playing video.
+        case poster
+    }
+
+    /// Decides what a preview of the given width shows. A thumbnail-size
+    /// preview (`allowsOriginal == false`) with no wide-enough copy shows the
+    /// poster: decoding a 4K original for a ~300 pt tile costs far more than
+    /// the tile is worth.
+    static func previewPlan(_ variants: [NativeVideoVariant], minPixelWidth: CGFloat, allowsOriginal: Bool) -> PreviewPlan {
+        if let variant = previewVariant(variants, minPixelWidth: minPixelWidth) { return .copy(variant) }
+        return allowsOriginal ? .original : .poster
+    }
+
     /// Parsed metadata per entry, reused until metadata.json changes. Preview
     /// URLs are resolved inside SwiftUI view bodies, which re-run often.
     private struct MetadataStamp: Equatable {
@@ -52,9 +71,30 @@ extension NativeWallpaperDeployment {
         return entry
     }
 
-    /// File to play for a preview of a deployed wallpaper. Falls back to
-    /// `fallback` (the library original) when the wallpaper isn't deployed,
-    /// has no wide-enough copy, or the copy is missing on disk.
+    /// File to play for a preview of a deployed wallpaper, or nil when the
+    /// plan is not a copy that exists on disk.
+    @MainActor
+    private static func copyURL(
+        entryID: String,
+        minPixelWidth: CGFloat,
+        allowsOriginal: Bool,
+        videosFolderURL: URL
+    ) -> (plan: PreviewPlan, url: URL?) {
+        guard PathSafety.isValidEntryID(entryID),
+              let entry = cachedEntry(id: entryID, videosFolderURL: videosFolderURL)
+        else { return (allowsOriginal ? .original : .poster, nil) }
+        let plan = previewPlan(entry.variants ?? [], minPixelWidth: minPixelWidth, allowsOriginal: allowsOriginal)
+        guard case .copy(let variant) = plan else { return (plan, nil) }
+        let url = videosFolderURL
+            .appendingPathComponent(entryID, isDirectory: true)
+            .appendingPathComponent(variant.filename)
+        if FileManager.default.fileExists(atPath: url.path) { return (plan, url) }
+        return (allowsOriginal ? .original : .poster, nil)
+    }
+
+    /// File to play for a hero or sheet preview. Falls back to `fallback` (the
+    /// library original) when the wallpaper isn't deployed, has no wide-enough
+    /// copy, or the copy is missing on disk.
     @MainActor
     static func previewURL(
         entryID: String,
@@ -62,19 +102,29 @@ extension NativeWallpaperDeployment {
         fallback: URL,
         videosFolderURL: URL = videosFolderURL
     ) -> URL {
-        guard PathSafety.isValidEntryID(entryID),
-              let entry = cachedEntry(id: entryID, videosFolderURL: videosFolderURL),
-              let variant = previewVariant(entry.variants ?? [], minPixelWidth: minPixelWidth)
-        else { return fallback }
-        let url = videosFolderURL
-            .appendingPathComponent(entryID, isDirectory: true)
-            .appendingPathComponent(variant.filename)
-        return FileManager.default.fileExists(atPath: url.path) ? url : fallback
+        copyURL(entryID: entryID, minPixelWidth: minPixelWidth, allowsOriginal: true, videosFolderURL: videosFolderURL).url ?? fallback
+    }
+
+    /// File to play for a thumbnail-size preview (tiles, popover), or nil
+    /// when the poster should be shown instead of decoding the original.
+    @MainActor
+    static func thumbnailPreviewURL(
+        entryID: String,
+        minPixelWidth: CGFloat = PreviewSize.thumbnail,
+        videosFolderURL: URL = videosFolderURL
+    ) -> URL? {
+        copyURL(entryID: entryID, minPixelWidth: minPixelWidth, allowsOriginal: false, videosFolderURL: videosFolderURL).url
     }
 
     /// Preview file for a library asset.
     @MainActor
     static func previewURL(for asset: WallpaperAsset, minPixelWidth: CGFloat) -> URL {
         previewURL(entryID: asset.id.rawValue.uuidString, minPixelWidth: minPixelWidth, fallback: asset.mediaURL)
+    }
+
+    /// Thumbnail preview file for a library asset, nil to show the poster.
+    @MainActor
+    static func thumbnailPreviewURL(for asset: WallpaperAsset) -> URL? {
+        thumbnailPreviewURL(entryID: asset.id.rawValue.uuidString)
     }
 }

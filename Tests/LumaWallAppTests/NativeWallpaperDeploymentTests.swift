@@ -100,6 +100,44 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertEqual(unknown, original)
     }
 
+    func testSmallPreviewShowsPosterWhenNoCopyIsWideEnough() {
+        // A wallpaper never deployed natively has no copies. Hover tiles and the
+        // popover decoded the 4K original for a ~300 pt view.
+        let plan = NativeWallpaperDeployment.previewPlan([], minPixelWidth: 640, allowsOriginal: false)
+        XCTAssertEqual(plan, .poster)
+        XCTAssertEqual(NativeWallpaperDeployment.previewPlan(variants, minPixelWidth: 2560, allowsOriginal: false), .poster)
+    }
+
+    func testPreviewPlanKeepsOriginalForHeroAndSheet() {
+        XCTAssertEqual(NativeWallpaperDeployment.previewPlan([], minPixelWidth: 1920, allowsOriginal: true), .original)
+        XCTAssertEqual(
+            NativeWallpaperDeployment.previewPlan(variants, minPixelWidth: 640, allowsOriginal: false),
+            .copy(variants[1])
+        )
+    }
+
+    @MainActor
+    func testThumbnailPreviewURLIsNilWithoutAWideEnoughCopyOnDisk() throws {
+        let fm = FileManager.default
+        let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: videos) }
+        let id = UUID().uuidString
+        let dir = videos.appendingPathComponent(id)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: "Wallpaper.mp4", duration: 5, fps: 30,
+            resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants
+        )
+        try JSONEncoder().encode(entry).write(to: dir.appendingPathComponent("metadata.json"))
+        try Data().write(to: dir.appendingPathComponent("Wallpaper.minimal.mov"))
+
+        let copy = NativeWallpaperDeployment.thumbnailPreviewURL(entryID: id, minPixelWidth: 640, videosFolderURL: videos)
+        XCTAssertEqual(copy?.lastPathComponent, "Wallpaper.minimal.mov")
+        // Listed but missing on disk, and not deployed at all: show the poster.
+        XCTAssertNil(NativeWallpaperDeployment.thumbnailPreviewURL(entryID: id, minPixelWidth: 1600, videosFolderURL: videos))
+        XCTAssertNil(NativeWallpaperDeployment.thumbnailPreviewURL(entryID: UUID().uuidString, minPixelWidth: 640, videosFolderURL: videos))
+    }
+
     func testCopiesPlannedPerSourceSize() {
         let names = { (size: CGSize) in NativeWallpaperDeployment.variantSpecs(sourceSize: size, sourceFPS: 30).map(\.filename) }
         // 4K sources also get a 1440p copy at full frame rate for 1440p monitors.
