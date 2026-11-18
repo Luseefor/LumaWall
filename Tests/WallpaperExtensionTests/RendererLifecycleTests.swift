@@ -3,7 +3,6 @@ import XCTest
 /// Orderings on the renderer queue that kept a surface decoding with the
 /// displays off, overlapped two decoder flushes, or stranded it frozen (#10).
 final class RendererLifecycleTests: XCTestCase {
-    private let b = URL(fileURLWithPath: "/b.mov")
 
     /// A renderer that has started and is playing on an awake display, fed by
     /// registration 1.
@@ -96,6 +95,24 @@ final class RendererLifecycleTests: XCTestCase {
         assertStoppedAndIdle(life)
     }
 
+    func testRendererStartsOnTheTierItWasCreatedFor() {
+        // A new renderer used to begin at Full and learn its tier from the
+        // recompute after its first frame. Seeded, that recompute is a no-op,
+        // so it can't switch the copy the renderer opened.
+        var life = RendererLifecycle(policy: .reduced)
+        _ = life.handle(.started(displayAsleep: false))
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 1)])
+        XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [])
+        XCTAssertEqual(life.policy, .reduced)
+    }
+
+    func testRendererCreatedPausedShowsItsFirstFrameWithoutPlaying() {
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false))
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
+        assertStoppedAndIdle(life)
+    }
+
     func testSwitchBeforeStartIsLeftToStart() {
         var life = RendererLifecycle()
         XCTAssertEqual(life.handle(.assetChanged), [])
@@ -136,11 +153,8 @@ final class RendererLifecycleTests: XCTestCase {
     func testSwitchDuringSleepWaitsForWake() {
         var life = playing()
         _ = life.handle(.displaySleep)
-        XCTAssertEqual(life.handle(.switchDeferred(b)), [])
-        XCTAssertEqual(life.handle(.switchDeferred(URL(fileURLWithPath: "/a.mov"))), [])
-        XCTAssertEqual(life.deferredSwitch, URL(fileURLWithPath: "/a.mov"))
+        // RendererCopy holds the switch; the wake reports the file it opened.
         XCTAssertEqual(life.handle(.displayWake(assetChanged: true)), [.disarmDeepPause, .beginReset(.restart, generation: 1)])
-        XCTAssertNil(life.deferredSwitch)
         XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart)])
         XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 2)])
     }
@@ -150,7 +164,6 @@ final class RendererLifecycleTests: XCTestCase {
         _ = life.handle(.policy(.paused, animated: false))
         _ = life.handle(.displaySleep)
         XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
-        _ = life.handle(.switchDeferred(b))
         XCTAssertEqual(life.handle(.displayWake(assetChanged: true)), [.beginReset(.restart, generation: 1)])
         XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart)])
         XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
@@ -162,7 +175,6 @@ final class RendererLifecycleTests: XCTestCase {
         // behind the wake switch. Only the switch's reset may flush.
         var life = playing()
         _ = life.handle(.displaySleep)
-        _ = life.handle(.switchDeferred(b))
         var effects = life.handle(.displayWake(assetChanged: true))
         effects += life.handle(.decoderFailed(token: 1))
         effects += life.handle(.resetFlushed(generation: 1))

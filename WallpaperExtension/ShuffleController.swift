@@ -271,8 +271,7 @@ final class ShuffleController: @unchecked Sendable {
 
         let renderers = WallpaperState.shared.renderers(forVideoID: choiceID)
         for renderer in renderers {
-            renderer.variantSelector = makeVariantSelector(choice: next, fallback: url)
-            renderer.switchVideo(to: url)
+            renderer.switchVideo(to: url, variantSelector: makeVariantSelector(choice: next, fallback: url))
         }
         LumaWallExtension.recomputeAndApplyPolicy()
         WallpaperState.shared.currentVideoID = next
@@ -294,8 +293,7 @@ final class ShuffleController: @unchecked Sendable {
         persistState()
         let renderers = WallpaperState.shared.renderers(forVideoID: choiceID)
         for renderer in renderers {
-            renderer.variantSelector = makeVariantSelector(choice: pair.0, fallback: url)
-            renderer.switchVideo(to: url)
+            renderer.switchVideo(to: url, variantSelector: makeVariantSelector(choice: pair.0, fallback: url))
         }
         LumaWallExtension.recomputeAndApplyPolicy()
         WallpaperState.shared.currentVideoID = pair.0

@@ -166,8 +166,7 @@ final class AutomationController: NSObject, @unchecked Sendable {
         else { return }
         let renderers = WallpaperState.shared.renderers(forVideoID: choiceID)
         for renderer in renderers {
-            renderer.variantSelector = makeVariantSelector(choice: videoID, fallback: url)
-            renderer.switchVideo(to: url)
+            renderer.switchVideo(to: url, variantSelector: makeVariantSelector(choice: videoID, fallback: url))
         }
         guard !renderers.isEmpty else { return }
         LumaWallExtension.recomputeAndApplyPolicy()

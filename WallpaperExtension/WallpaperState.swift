@@ -200,21 +200,6 @@ final class WallpaperState: Sendable {
         }
     }
 
-    /// Execute a closure for renderers on live (non-preview) surfaces.
-    /// Playback policy (pause, battery tiers, occlusion) governs desktop
-    /// surfaces. Preview surfaces (Settings picker, prewarm) keep playing
-    /// what the user is looking at instead of freezing with desktop policy.
-    /// Sleep and teardown paths deliberately keep using `forEachRenderer`
-    /// (nothing should decode while displays sleep).
-    func forEachLiveRenderer(_ body: (VideoRenderer) -> Void) {
-        let renderers = lock.withLock { state in
-            state.contexts.values.filter { !$0.isPreview }.compactMap(\.renderer)
-        }
-        for renderer in renderers {
-            body(renderer)
-        }
-    }
-
     /// Whether ANY acquired context tracks the given choice id. Scans every context.
     /// `activeDisplayContexts()` samples one arbitrary context per display, which
     /// misreports when desktop, lock-screen, and preview surfaces coexist on one
@@ -236,8 +221,13 @@ final class WallpaperState: Sendable {
     }
 
     /// Execute a closure for renderers on live (non-preview) surfaces of a
-    /// display. See `forEachLiveRenderer` for why policy skips previews.
-    func forLiveRenderers(displayID: UInt32, _ body: (VideoRenderer) -> Void) {
+    /// display, or on surfaces without a display ID when `displayID` is nil.
+    /// Playback policy (pause, battery tiers, occlusion) governs desktop
+    /// surfaces. Preview surfaces (Settings picker, prewarm) keep playing
+    /// what the user is looking at instead of freezing with desktop policy.
+    /// Sleep and teardown paths deliberately keep using `forEachRenderer`
+    /// (nothing should decode while displays sleep).
+    func forLiveRenderers(displayID: UInt32?, _ body: (VideoRenderer) -> Void) {
         let renderers = lock.withLock { state in
             state.contexts.values
                 .filter { $0.displayID == displayID && !$0.isPreview }

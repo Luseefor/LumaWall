@@ -434,8 +434,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // Building a fresh renderer here (new AVSampleBufferDisplayLayer) is
                 // what broke switching. A layer added to an already-hosted context
                 // doesn't composite. Reuse the existing layer instead.
-                renderer.variantSelector = selector
-                renderer.switchVideo(to: videoURL)
+                renderer.switchVideo(to: videoURL, variantSelector: selector)
                 WallpaperState.shared.updateVideoID(choiceConfiguration, for: key)
                 WallpaperPrefs.shared.setActive(true)
             } else if WallpaperState.shared.claimRendererCreate(for: key) {
@@ -443,16 +442,18 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // attach one to the existing root layer. The claim prevents a racing
                 // (preview) acquire from creating a duplicate renderer on the same layer.
                 let boxedRoot = SendableBox(value: existing.rootLayer)
-                Task { [boxedRoot, videoURL, cachedStill, selector, key, choiceConfiguration] in
+                Task { [boxedRoot, videoURL, cachedStill, selector, key, choiceConfiguration, displayID, isPreview] in
                     let renderer: VideoRenderer
                     do {
-                        renderer = try await VideoRenderer.create(rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill)
+                        renderer = try await VideoRenderer.create(
+                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
+                            tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
+                        )
                     } catch {
                         extensionLog("  [Renderer] swap create failed: \(error)")
                         WallpaperState.shared.clearRendererPending(for: key)
                         return
                     }
-                    renderer.variantSelector = selector
                     let old = WallpaperState.shared.setRenderer(renderer, videoID: choiceConfiguration, for: key)
                     old?.stop()
                     WallpaperPrefs.shared.setActive(true)
@@ -564,10 +565,13 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             // The reply object is non-Sendable; box it to cross into the render Task.
             let boxedReply = SendableBox(value: replyObj)
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
-            Task { [coldStart, boxedRoot, boxedReply, videoURL, cachedStill, selector, key, choiceConfiguration] in
+            Task { [coldStart, boxedRoot, boxedReply, videoURL, cachedStill, selector, key, choiceConfiguration, displayID, isPreview] in
                 let renderer: VideoRenderer
                 do {
-                    renderer = try await VideoRenderer.create(rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill)
+                    renderer = try await VideoRenderer.create(
+                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
+                        tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
+                    )
                 } catch {
                     extensionLog("  [Renderer] Failed to create: \(error)")
                     WallpaperState.shared.clearRendererPending(for: key)
@@ -581,7 +585,6 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     reply(boxedReply.value, nil)
                     traceLog("  [acquire] cold start → replied after still seeded for \(videoURL.lastPathComponent)")
                 }
-                renderer.variantSelector = selector
                 let old = WallpaperState.shared.setRenderer(renderer, videoID: choiceConfiguration, for: key)
                 WallpaperPrefs.shared.setActive(true)
                 // Switch: reply only once the first video frame is composited (cold start

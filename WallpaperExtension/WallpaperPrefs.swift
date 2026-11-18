@@ -237,36 +237,42 @@ final class WallpaperPrefs: @unchecked Sendable {
         let displayIDs = state.liveDisplayIDs()
 
         func policy(for displayID: UInt32?) -> PlaybackPolicy {
-            PlaybackPolicy.compute(
-                presentationMode: presentationMode,
-                activityState: activityState,
-                userPaused: userPaused || displayID.map { pausedDisplays.contains($0) } ?? false,
-                alwaysPauseDesktop: alwaysPauseDesktop,
-                pauseWhenOccluded: pauseWhenOccluded,
-                desktopOccluded: displayID.map(isOccluded(displayID:)) ?? desktopOccluded,
-                displayHasFullscreenApp: displayID.map { fullscreenDisplays.contains($0) }
-                    ?? !fullscreenDisplays.isEmpty,
-                screenSaverIsOurs: screenSaverIsOurs,
-                powerState: powerState,
-                powerProfile: powerProfile,
-            )
+            self.policy(for: displayID, presentationMode: presentationMode, activityState: activityState, powerState: powerState)
         }
 
-        if displayIDs.isEmpty {
-            // Without per-display info, apply globally (backward compat). Live
-            // surfaces only; previews are exempt (see forEachLiveRenderer).
-            let global = policy(for: nil)
-            state.forEachLiveRenderer { renderer in
-                renderer.applyPolicy(global, animated: animated)
-            }
-        } else {
-            for displayID in displayIDs {
-                let displayPolicy = policy(for: displayID)
-                state.forLiveRenderers(displayID: displayID) { renderer in
-                    renderer.applyPolicy(displayPolicy, animated: animated)
-                }
+        // Surfaces without a display ID take the global policy, also beside
+        // displays that have one: skipping them left one seeded Paused (a
+        // fullscreen app on another display) stuck there. Live surfaces only;
+        // previews are exempt (see forLiveRenderers).
+        for displayID in displayIDs.map(Optional.some) + [nil] {
+            let displayPolicy = policy(for: displayID)
+            state.forLiveRenderers(displayID: displayID) { renderer in
+                renderer.applyPolicy(displayPolicy, animated: animated)
             }
         }
+    }
+
+    /// The tier `applyPolicies` gives live renderers on `displayID`, or every
+    /// live renderer when `displayID` is nil.
+    func policy(
+        for displayID: UInt32?,
+        presentationMode: String,
+        activityState: String,
+        powerState: PowerMonitor.PowerState,
+    ) -> PlaybackPolicy {
+        PlaybackPolicy.compute(
+            presentationMode: presentationMode,
+            activityState: activityState,
+            userPaused: userPaused || displayID.map { pausedDisplays.contains($0) } ?? false,
+            alwaysPauseDesktop: alwaysPauseDesktop,
+            pauseWhenOccluded: pauseWhenOccluded,
+            desktopOccluded: displayID.map(isOccluded(displayID:)) ?? desktopOccluded,
+            displayHasFullscreenApp: displayID.map { fullscreenDisplays.contains($0) }
+                ?? !fullscreenDisplays.isEmpty,
+            screenSaverIsOurs: screenSaverIsOurs,
+            powerState: powerState,
+            powerProfile: powerProfile,
+        )
     }
 
     private func postStateNotification() {
