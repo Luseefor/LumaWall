@@ -6,10 +6,10 @@ import Foundation
 /// passes the file it reads as `current` and loads tracks through `open`,
 /// which returns nil for a file with no video track.
 ///
-/// A new choice opens its copy for the display and tier and falls back to
-/// its original, so a bad copy can't keep a valid wallpaper off screen. The
-/// selector changes only when one of them opens (or is already playing), so
-/// a failed switch leaves the old choice's selector with the old file.
+/// Every open tries the choice's copy for the display and tier, then its
+/// original, so a bad copy can't keep a valid wallpaper off screen. The
+/// choice (original and selector) changes only when one of them opens (or
+/// is already playing), so a failed switch leaves the old choice in place.
 struct RendererCopy {
     typealias Selector = @Sendable (CGSize, PlaybackPolicy) -> URL
 
@@ -24,11 +24,13 @@ struct RendererCopy {
         case failed
     }
 
-    private var selector: Selector?
-    private var held: (url: URL, selector: Selector)?
+    private typealias Choice = (original: URL, selector: Selector)
 
-    init(selector: Selector?) {
-        self.selector = selector
+    private var active: Choice
+    private var held: Choice?
+
+    init(original: URL, selector: @escaping Selector) {
+        active = (original, selector)
     }
 
     /// The first file a new renderer reads: the copy for `tier`, else
@@ -61,21 +63,19 @@ struct RendererCopy {
             held = (url, selector)
             return .held
         }
-        let urls = Self.candidates(url, selector: selector, tier: tier, displayPixels: displayPixels)
-        return openFirst(urls, adopting: selector, current: current, open: open)
+        return openFirst((url, selector), tier: tier, displayPixels: displayPixels, current: current, open: open)
     }
 
-    /// Move to the current choice's copy for `tier`. If it won't open, the
-    /// current file keeps playing.
+    /// Move to the active choice's copy for `tier`, or its original. Start
+    /// calls this with the tier current then, whatever the lifecycle has
+    /// recorded, because a paused tier opens a different copy than it plays.
     mutating func retier<Loaded>(
         current: URL,
         tier: PlaybackPolicy,
         displayPixels: CGSize,
         open: (URL) -> Loaded?,
     ) -> Opened<Loaded> {
-        guard let selector else { return .unchanged }
-        let url = VariantSelection.openingURL(requested: current, tier: tier, displayPixels: displayPixels, selector: selector)
-        return openFirst([url], adopting: selector, current: current, open: open)
+        openFirst(active, tier: tier, displayPixels: displayPixels, current: current, open: open)
     }
 
     /// The displays woke: open the held switch, or the copy for a tier that
@@ -89,15 +89,14 @@ struct RendererCopy {
     ) -> Opened<Loaded> {
         if let held {
             self.held = nil
-            let urls = Self.candidates(held.url, selector: held.selector, tier: tier, displayPixels: displayPixels)
-            return openFirst(urls, adopting: held.selector, current: current, open: open)
+            return openFirst(held, tier: tier, displayPixels: displayPixels, current: current, open: open)
         }
         guard tier != .paused else { return .unchanged }
         return retier(current: current, tier: tier, displayPixels: displayPixels, open: open)
     }
 
     func preloadURL(current: URL, tier: PlaybackPolicy, displayPixels: CGSize) -> URL {
-        VariantSelection.preloadURL(current: current, tier: tier, displayPixels: displayPixels, selector: selector)
+        VariantSelection.preloadURL(current: current, tier: tier, displayPixels: displayPixels, selector: active.selector)
     }
 
     /// The copy for the display and tier, then the original.
@@ -106,19 +105,22 @@ struct RendererCopy {
         return copy == requested ? [requested] : [copy, requested]
     }
 
+    /// Open `choice`'s copy for `tier`, else its original, and make it the
+    /// active choice when one opens or is already `current`.
     private mutating func openFirst<Loaded>(
-        _ urls: [URL],
-        adopting selector: @escaping Selector,
+        _ choice: Choice,
+        tier: PlaybackPolicy,
+        displayPixels: CGSize,
         current: URL,
         open: (URL) -> Loaded?,
     ) -> Opened<Loaded> {
-        for url in urls {
+        for url in Self.candidates(choice.original, selector: choice.selector, tier: tier, displayPixels: displayPixels) {
             if url == current {
-                self.selector = selector
+                active = choice
                 return .unchanged
             }
             if let loaded = open(url) {
-                self.selector = selector
+                active = choice
                 return .opened(loaded)
             }
         }

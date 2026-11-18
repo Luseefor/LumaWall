@@ -48,7 +48,7 @@ final class RendererCopyTests: XCTestCase {
         // An audio-only or deleted copy left the old wallpaper on screen
         // with the new wallpaper's selector installed.
         playable.remove("b.full.mov")
-        var copy = RendererCopy(selector: selector("a"))
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         let result = copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: false, open: open)
         XCTAssertEqual(result, opened("b.mp4"))
         XCTAssertEqual(copy.preloadURL(current: url("b.mp4"), tier: .full, displayPixels: display).lastPathComponent, "b.full.mov")
@@ -56,14 +56,14 @@ final class RendererCopyTests: XCTestCase {
 
     func testSwitchThatOpensNothingKeepsTheCurrentChoice() {
         playable.subtract(["b.full.mov", "b.mp4"])
-        var copy = RendererCopy(selector: selector("a"))
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         let result = copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: false, open: open)
         XCTAssertEqual(result, .failed)
         XCTAssertEqual(copy.preloadURL(current: url("a.full.mov"), tier: .reduced, displayPixels: display).lastPathComponent, "a.reduced.mov")
     }
 
     func testSwitchToTheFilePlayingAdoptsTheSelectorWithoutReopening() {
-        var copy = RendererCopy(selector: selector("old"))
+        var copy = RendererCopy(original: url("old.mp4"), selector: selector("old"))
         let result = copy.switchTo(url("a.mp4"), selector: selector("a"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: false, open: open)
         XCTAssertEqual(result, .unchanged)
         XCTAssertEqual(attempts, [])
@@ -73,7 +73,7 @@ final class RendererCopyTests: XCTestCase {
     // MARK: Sleep
 
     func testLatestSwitchHeldThroughSleepOpensOnWakeForTheWakeTier() {
-        var copy = RendererCopy(selector: selector("a"))
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         for id in ["b", "c"] {
             let result = copy.switchTo(url("\(id).mp4"), selector: selector(id), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: true, open: open)
             XCTAssertEqual(result, .held)
@@ -84,14 +84,14 @@ final class RendererCopyTests: XCTestCase {
     }
 
     func testHeldSwitchFallsBackToTheOriginalOnWake() {
-        var copy = RendererCopy(selector: selector("a"))
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         _ = copy.switchTo(url("c.mp4"), selector: selector("c"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: true, open: open)
         XCTAssertEqual(copy.wake(current: url("a.full.mov"), tier: .full, displayPixels: display, open: open), opened("c.mp4"))
         XCTAssertEqual(attempts, ["c.full.mov", "c.mp4"])
     }
 
     func testPausedWakeWithNothingHeldKeepsTheCurrentCopy() {
-        var copy = RendererCopy(selector: selector("a"))
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         XCTAssertEqual(copy.wake(current: url("a.reduced.mov"), tier: .paused, displayPixels: display, open: open), .unchanged)
         XCTAssertEqual(attempts, [])
     }
@@ -101,14 +101,36 @@ final class RendererCopyTests: XCTestCase {
     func testPausedRendererResumingOnBatteryMovesToTheBatteryCopy() async {
         let first = await RendererCopy.opening(url("a.mp4"), selector: selector("a"), tier: .paused, displayPixels: display) { self.open($0) }
         XCTAssertEqual(first, "a.full.mov")
-        var copy = RendererCopy(selector: selector("a"))
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         XCTAssertEqual(copy.preloadURL(current: url("a.full.mov"), tier: .paused, displayPixels: display).lastPathComponent, "a.full.mov")
         XCTAssertEqual(copy.retier(current: url("a.full.mov"), tier: .reduced, displayPixels: display, open: open), opened("a.reduced.mov"))
     }
 
-    func testTierCopyThatWontOpenKeepsTheCurrentFile() {
+    func testTierCopyThatWontOpenFallsBackToTheOriginal() {
+        // Create opened the reduced copy; the tier went to Full while it
+        // loaded and the Full copy has no video. The original still plays.
+        playable.remove("a.full.mov")
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(copy.retier(current: url("a.reduced.mov"), tier: .full, displayPixels: display, open: open), opened("a.mp4"))
+        XCTAssertEqual(attempts, ["a.full.mov", "a.mp4"])
+    }
+
+    func testPauseRecordedBeforeStartOpensTheFullCopy() {
+        // Created on Reduced; a pause reached the renderer before start(),
+        // so start reselects for the tier now, not the one it recorded.
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(copy.retier(current: url("a.reduced.mov"), tier: .paused, displayPixels: display, open: open), opened("a.full.mov"))
+    }
+
+    func testWakeTierChangeFallsBackToTheOriginal() {
         playable.remove("a.reduced.mov")
-        var copy = RendererCopy(selector: selector("a"))
-        XCTAssertEqual(copy.retier(current: url("a.full.mov"), tier: .reduced, displayPixels: display, open: open), .failed)
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(copy.wake(current: url("a.full.mov"), tier: .reduced, displayPixels: display, open: open), opened("a.mp4"))
+    }
+
+    func testTierChangeAfterASwitchFallsBackToTheNewChoicesOriginal() {
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: false, open: open), opened("b.full.mov"))
+        XCTAssertEqual(copy.retier(current: url("b.full.mov"), tier: .reduced, displayPixels: display, open: open), opened("b.mp4"))
     }
 }

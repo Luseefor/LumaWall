@@ -127,6 +127,7 @@ final class VideoRenderer: @unchecked Sendable {
             videoTrack: track,
             stillImage: stillImage,
             nominalFrameRate: nominalFrameRate,
+            originalURL: videoURL,
             variantSelector: variantSelector,
             tierSource: tierSource,
             policy: policy,
@@ -140,12 +141,13 @@ final class VideoRenderer: @unchecked Sendable {
         videoTrack: AVAssetTrack,
         stillImage: CGImage?,
         nominalFrameRate: Double,
+        originalURL: URL,
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
         policy: PlaybackPolicy,
     ) {
         self.displayLayer = displayLayer
-        self.copy = RendererCopy(selector: variantSelector)
+        self.copy = RendererCopy(original: originalURL, selector: variantSelector)
         self.tierSource = tierSource
         self.lifecycle = RendererLifecycle(policy: policy)
         self.pixelSize = OSAllocatedUnfairLock(initialState: CGSize(
@@ -233,17 +235,15 @@ final class VideoRenderer: @unchecked Sendable {
             guard let self else { onFirstFrameReady?(); return }
             traceLog("  [start #\(debugID)] asset=\(asset.url.lastPathComponent)")
             guard isRunning else { traceLog("  [start #\(debugID)] aborted, already stopped"); onFirstFrameReady?(); return }
-            // The tier can change while `create` loads the track, before any
-            // recompute can reach this renderer; move to its copy now rather
-            // than after the first frame.
+            // The tier can change while `create` loads the track, and a
+            // policy recorded before this job doesn't pick a copy when it
+            // pauses. Pick the first frame's copy for the tier now.
             let tier = tierSource()
-            if tier != lifecycle.policy {
-                traceLog("  [start #\(debugID)] tier \(lifecycle.policy) → \(tier) since create")
-                if case let .opened(loaded) = copy.retier(current: asset.url, tier: tier, displayPixels: displayPixelSize, open: loadBlocking) {
-                    adopt(loaded)
-                }
-                send(.policy(tier, animated: false))
+            if case let .opened(loaded) = copy.retier(current: asset.url, tier: tier, displayPixels: displayPixelSize, open: loadBlocking) {
+                traceLog("  [start #\(debugID)] tier \(tier) opens a different file than create")
+                adopt(loaded)
             }
+            send(.policy(tier, animated: false))
             // Starts the clock and the feed once the pipeline reports built,
             // unless the displays sleep or a pause was applied before this ran.
             // The global flag is read here, on the queue: sleep sets it before
