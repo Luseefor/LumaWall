@@ -83,9 +83,8 @@ struct RendererLifecycle: Equatable {
         case policy(PlaybackPolicy, animated: Bool)
         /// The renderer loaded a different asset (switch or battery-tier copy).
         case assetChanged
-        case switchDeferred(URL)
         case displaySleep
-        /// `assetChanged`: the renderer loaded the deferred or preferred copy.
+        /// `assetChanged`: the renderer loaded the held switch or the tier's copy.
         case displayWake(assetChanged: Bool)
         case resetFlushed(generation: Int)
         /// The reader reached the end of the clip.
@@ -123,8 +122,6 @@ struct RendererLifecycle: Equatable {
     /// Times this video fell back to the still; sets the retry delay.
     private(set) var failedRounds = 0
     private(set) var retryArmed = false
-    /// The latest switch requested while the displays slept.
-    private(set) var deferredSwitch: URL?
     /// Bumped whenever a reset starts, so a stale flush completion is dropped.
     private(set) var generation = 0
 
@@ -175,9 +172,6 @@ struct RendererLifecycle: Equatable {
             failures = 0
             failedRounds = 0
             requestReset(.restart, &effects)
-        case let .switchDeferred(url):
-            deferredSwitch = url
-            return []
         case .displaySleep:
             guard !displayAsleep else { return [] }
             displayAsleep = true
@@ -185,7 +179,6 @@ struct RendererLifecycle: Equatable {
         case let .displayWake(assetChanged):
             guard displayAsleep else { return [] }
             displayAsleep = false
-            deferredSwitch = nil
             if assetChanged { failures = 0 }
             if case let .awaitingBuild(kind) = readers {
                 let build = assetChanged ? max(kind, .restart) : kind

@@ -445,8 +445,10 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 Task { [boxedRoot, videoURL, cachedStill, selector, key, choiceConfiguration, displayID, isPreview] in
                     let renderer: VideoRenderer
                     do {
-                        let tier = LumaWallExtension.policyForNewRenderer(displayID: displayID, isPreview: isPreview)
-                        renderer = try await VideoRenderer.create(rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector, policy: tier)
+                        renderer = try await VideoRenderer.create(
+                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
+                            tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
+                        )
                     } catch {
                         extensionLog("  [Renderer] swap create failed: \(error)")
                         WallpaperState.shared.clearRendererPending(for: key)
@@ -566,8 +568,10 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             Task { [coldStart, boxedRoot, boxedReply, videoURL, cachedStill, selector, key, choiceConfiguration, displayID, isPreview] in
                 let renderer: VideoRenderer
                 do {
-                    let tier = LumaWallExtension.policyForNewRenderer(displayID: displayID, isPreview: isPreview)
-                    renderer = try await VideoRenderer.create(rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector, policy: tier)
+                    renderer = try await VideoRenderer.create(
+                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
+                        tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
+                    )
                 } catch {
                     extensionLog("  [Renderer] Failed to create: \(error)")
                     WallpaperState.shared.clearRendererPending(for: key)

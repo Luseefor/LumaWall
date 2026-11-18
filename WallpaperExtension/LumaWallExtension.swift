@@ -141,10 +141,11 @@ final class LumaWallExtension: NSObject, AppExtension {
         )
     }
 
-    /// The tier `recomputeAndApplyPolicy` would give a new renderer, so it
-    /// opens the right copy before its first frame. Previews take no policy
-    /// (`applyPolicies` skips them) and stay at Full.
-    static func policyForNewRenderer(displayID: UInt32?, isPreview: Bool) -> PlaybackPolicy {
+    /// The tier `recomputeAndApplyPolicy` would give a renderer on
+    /// `displayID` now, so it opens the right copy before its first frame and
+    /// on a switch. Previews take no policy (`applyPolicies` skips them) and
+    /// stay at Full.
+    static func policyForRenderer(displayID: UInt32?, isPreview: Bool) -> PlaybackPolicy {
         guard !isPreview else { return .full }
         let state = WallpaperState.shared
         return WallpaperPrefs.shared.policy(
