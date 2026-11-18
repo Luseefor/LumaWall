@@ -397,9 +397,14 @@ final class OverlayWallpaperEngine {
         }
     }
 
-    private func scheduleSurfaceRecovery() {
+    var pendingRecoveryPassCount: Int { recoveryWorkItems.count }
+
+    func scheduleSurfaceRecovery() {
         recoveryWorkItems.forEach { $0.cancel() }
         recoveryWorkItems.removeAll(keepingCapacity: true)
+        // Native-only sessions have no overlay windows to reassert; native
+        // topology restore runs separately.
+        guard !sessions.isEmpty else { return }
         reassertAll()
         for delay in [0.016, 0.08, 0.20] {
             let work = DispatchWorkItem { [weak self] in self?.reassertAll() }

@@ -50,6 +50,30 @@ final class SharedPlaybackHubTests: XCTestCase {
     }
 
     @MainActor
+    func testPumpStopsWhenLastLayerPausesAndRestartsOnResume() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await writeVideo(to: url)
+        let hub = SharedPlaybackHub.acquire(url: url)
+        let layers = [CALayer(), CALayer()]
+        for layer in layers { hub.attach(layer) }
+        defer {
+            for layer in layers { hub.detach(layer) }
+            hub.release()
+        }
+        XCTAssertTrue(hub.isPumping)
+        hub.setLayerPaused(true, for: layers[0])
+        XCTAssertTrue(hub.isPumping, "One live layer left, the pump must keep running")
+        hub.setLayerPaused(true, for: layers[1])
+        XCTAssertFalse(hub.isPumping, "No live layer, the pump must stop")
+        // The async frame-rate probe restarts the pump; it must respect the gate.
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertFalse(hub.isPumping, "The frame-rate probe must not revive an idle pump")
+        hub.setLayerPaused(false, for: layers[1])
+        XCTAssertTrue(hub.isPumping, "Resuming must restart the pump")
+    }
+
+    @MainActor
     func testSwitchingFromPrivateToSharedPlaybackKeepsVideoVisible() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
         defer { try? FileManager.default.removeItem(at: url) }
