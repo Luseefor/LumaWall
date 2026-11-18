@@ -96,6 +96,24 @@ final class RendererLifecycleTests: XCTestCase {
         assertStoppedAndIdle(life)
     }
 
+    func testRendererStartsOnTheTierItWasCreatedFor() {
+        // A new renderer used to begin at Full and learn its tier from the
+        // recompute after its first frame. Seeded, that recompute is a no-op,
+        // so it can't switch the copy the renderer opened.
+        var life = RendererLifecycle(policy: .reduced)
+        _ = life.handle(.started(displayAsleep: false))
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 1)])
+        XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [])
+        XCTAssertEqual(life.policy, .reduced)
+    }
+
+    func testRendererCreatedPausedShowsItsFirstFrameWithoutPlaying() {
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false))
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
+        assertStoppedAndIdle(life)
+    }
+
     func testSwitchBeforeStartIsLeftToStart() {
         var life = RendererLifecycle()
         XCTAssertEqual(life.handle(.assetChanged), [])

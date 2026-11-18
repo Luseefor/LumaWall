@@ -96,3 +96,65 @@ final class VariantSelectionTests: XCTestCase {
         }
     }
 }
+
+/// The file a renderer opens for a new asset, before any loop boundary.
+final class OpeningURLTests: XCTestCase {
+    private let original = URL(fileURLWithPath: "/videos/a/Wallpaper.mp4")
+    private let qhdDisplay = CGSize(width: 2560, height: 1440)
+
+    /// Stands in for `makeVariantSelector`: names the copy after the tier
+    /// and records the display size it was asked for.
+    private func selector(_ display: CGSize, _ tier: PlaybackPolicy) -> URL {
+        URL(fileURLWithPath: "/videos/a/\(tier)-\(Int(display.width))x\(Int(display.height)).mov")
+    }
+
+    private func opening(_ tier: PlaybackPolicy) -> String {
+        VariantSelection.openingURL(requested: original, tier: tier, displayPixels: qhdDisplay, selector: selector).lastPathComponent
+    }
+
+    func testOpensTheCopyForTheDisplayAndTierInsteadOfTheOriginal() {
+        // Acquire, shuffle, and automation hand over the original; a 1440p
+        // display decoded 4K for one loop before the preload swapped in its copy.
+        XCTAssertEqual(opening(.full), "full-2560x1440.mov")
+        XCTAssertEqual(opening(.reduced), "reduced-2560x1440.mov")
+        XCTAssertEqual(opening(.minimal), "minimal-2560x1440.mov")
+    }
+
+    func testPausedOpensTheFullCopy() {
+        // Paused resolves to the original, which would decode 4K for the held
+        // frame and then rebuild on the copy when playback resumes.
+        XCTAssertEqual(opening(.paused), "full-2560x1440.mov")
+    }
+
+    func testWithoutASelectorOpensTheRequestedFile() {
+        let url = VariantSelection.openingURL(requested: original, tier: .full, displayPixels: qhdDisplay, selector: nil)
+        XCTAssertEqual(url, original)
+    }
+}
+
+/// The file preloaded for the next loop.
+final class PreloadURLTests: XCTestCase {
+    private let reducedCopy = URL(fileURLWithPath: "/videos/a/Wallpaper.reduced.mov")
+    private let display = CGSize(width: 2560, height: 1440)
+
+    private func selector(_: CGSize, _ tier: PlaybackPolicy) -> URL {
+        URL(fileURLWithPath: "/videos/a/\(tier).mov")
+    }
+
+    func testPlayingTiersPreloadWhatTheyWouldOpen() {
+        for tier in [PlaybackPolicy.full, .reduced, .minimal] {
+            XCTAssertEqual(
+                VariantSelection.preloadURL(current: reducedCopy, tier: tier, displayPixels: display, selector: selector),
+                VariantSelection.openingURL(requested: reducedCopy, tier: tier, displayPixels: display, selector: selector),
+                "\(tier)",
+            )
+        }
+    }
+
+    func testPausedKeepsTheCurrentCopy() {
+        XCTAssertEqual(
+            VariantSelection.preloadURL(current: reducedCopy, tier: .paused, displayPixels: display, selector: selector),
+            reducedCopy,
+        )
+    }
+}

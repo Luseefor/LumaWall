@@ -59,6 +59,33 @@ enum VariantSelection {
         }
     }
 
+    /// The file a renderer opens for a new asset (create, switch, a switch
+    /// held through sleep): the selector's copy for the display and tier, so
+    /// the first frame already comes from it instead of the original the
+    /// caller names. Paused has no copy of its own (it resolves to the
+    /// original), so it opens the Full copy, which a resume on mains plays.
+    static func openingURL(
+        requested: URL,
+        tier: PlaybackPolicy,
+        displayPixels: CGSize,
+        selector: ((CGSize, PlaybackPolicy) -> URL)?,
+    ) -> URL {
+        selector?(displayPixels, tier == .paused ? .full : tier) ?? requested
+    }
+
+    /// The file to preload for the next loop: the same copy `openingURL`
+    /// picks, except that paused keeps `current`. A paused renderer may be
+    /// holding a battery copy, and a preloaded Full copy would play at the
+    /// next loop after it resumes on battery without changing its asset.
+    static func preloadURL(
+        current: URL,
+        tier: PlaybackPolicy,
+        displayPixels: CGSize,
+        selector: ((CGSize, PlaybackPolicy) -> URL)?,
+    ) -> URL {
+        tier == .paused ? current : openingURL(requested: current, tier: tier, displayPixels: displayPixels, selector: selector)
+    }
+
     static let reducedFilename = "Wallpaper.reduced.mov"
     static let minimalFilename = "Wallpaper.minimal.mov"
 

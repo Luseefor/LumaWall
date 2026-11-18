@@ -128,6 +128,12 @@ struct RendererLifecycle: Equatable {
     /// Bumped whenever a reset starts, so a stale flush completion is dropped.
     private(set) var generation = 0
 
+    /// `policy` is the tier the renderer was created for, so the recompute
+    /// after its first frame doesn't move it off the copy it opened.
+    init(policy: PlaybackPolicy = .full) {
+        self.policy = policy
+    }
+
     var wantsPlayback: Bool { wouldPlay(policy) }
 
     func wouldPlay(_ policy: PlaybackPolicy) -> Bool {
