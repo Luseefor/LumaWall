@@ -9,23 +9,15 @@ import QuartzCore
 /// Reading the per-context `choice` (not the process-wide `currentVideoID`) keeps
 /// each display on its own selection. Otherwise every renderer would converge on
 /// whichever choice was set most recently (multi-monitor bug).
-func makeVariantSelector(choice: String?, fallback: URL) -> @Sendable (CGSize) -> URL {
-    { displayPixels in
+///
+/// The renderer passes its own resolved tier. Recomputing one here from the raw
+/// presentation mode disagreed with it whenever the screen-lock override applied
+/// (the lock screen before the Agent reports it), so the renderer played the
+/// paused tier's original file on Battery Saver.
+func makeVariantSelector(choice: String?, fallback: URL) -> @Sendable (CGSize, PlaybackPolicy) -> URL {
+    { displayPixels, tier in
         guard let videoID = choice else { return fallback }
-        let state = WallpaperState.shared
-        let prefs = WallpaperPrefs.shared
-        let policy = PlaybackPolicy.compute(
-            presentationMode: state.presentationMode,
-            activityState: state.activityState,
-            userPaused: prefs.userPaused,
-            alwaysPauseDesktop: prefs.alwaysPauseDesktop,
-            pauseWhenOccluded: prefs.pauseWhenOccluded,
-            desktopOccluded: prefs.desktopOccluded,
-            screenSaverIsOurs: prefs.screenSaverIsOurs,
-            powerState: PowerMonitor.shared.currentState,
-            powerProfile: prefs.powerProfile,
-        )
-        return VideoLibrary.shared.bestVariantURL(for: videoID, policy: policy, displayPixels: displayPixels) ?? fallback
+        return VideoLibrary.shared.bestVariantURL(for: videoID, policy: tier, displayPixels: displayPixels) ?? fallback
     }
 }
 

@@ -76,9 +76,10 @@ final class LumaWallExtension: NSObject, AppExtension {
             forName: NSWorkspace.screensDidSleepNotification,
             object: nil, queue: .main,
         ) { _ in
+            // Set before notifying: a renderer starting now reads it instead.
             WallpaperState.shared.isDisplayAsleep = true
             WallpaperState.shared.forEachRenderer { renderer in
-                renderer.applyPolicy(.paused)
+                renderer.displayDidSleep()
             }
             extensionLog("[Extension] Displays asleep, paused all renderers")
         }
@@ -87,7 +88,14 @@ final class LumaWallExtension: NSObject, AppExtension {
             object: nil, queue: .main,
         ) { _ in
             WallpaperState.shared.isDisplayAsleep = false
+            // Recompute first: renderers still asleep only record the new tiers,
+            // so the wake below resumes on fresh policy instead of briefly
+            // playing on the one from before sleep. Wake also reaches the
+            // previews the recompute skips.
             Self.recomputeAndApplyPolicy()
+            WallpaperState.shared.forEachRenderer { renderer in
+                renderer.displayDidWake()
+            }
             ShuffleController.shared.noteWake()
             extensionLog("[Extension] Displays awake, recomputed policy (locked: \(WallpaperState.shared.isScreenLocked))")
 
