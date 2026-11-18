@@ -76,9 +76,10 @@ final class LumaWallExtension: NSObject, AppExtension {
             forName: NSWorkspace.screensDidSleepNotification,
             object: nil, queue: .main,
         ) { _ in
+            // Set before halting: the renderers check it until wake.
             WallpaperState.shared.isDisplayAsleep = true
             WallpaperState.shared.forEachRenderer { renderer in
-                renderer.applyPolicy(.paused)
+                renderer.haltForDisplaySleep()
             }
             extensionLog("[Extension] Displays asleep, paused all renderers")
         }

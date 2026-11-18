@@ -468,6 +468,23 @@ final class VideoRenderer: @unchecked Sendable {
         }
     }
 
+    /// Display sleep: stop the clock now. Unlike `pause()`, this also stops a
+    /// ramp-down already in flight. Its pause flag and `.paused` policy are
+    /// already set, so `applyPolicy(.paused)` and `pause()` were no-ops and the
+    /// ramp kept decoding for up to 6 s with the displays off.
+    func haltForDisplaySleep() {
+        currentPolicy = .paused
+        let newlyPaused = takePaused()
+        queue.async { [weak self] in
+            guard let self, isRunning else { return }
+            let wasRamping = rampTimer != nil
+            cancelRamp()
+            CMTimebaseSetRate(timebase, rate: 0.0)
+            if newlyPaused || wasRamping { scheduleDeepPause() }
+            traceLog("  [haltForDisplaySleep #\(debugID)] newlyPaused=\(newlyPaused) cancelledRamp=\(wasRamping)")
+        }
+    }
+
     // MARK: - Ramp (Apple-like lock screen transition)
 
     /// Ramp durations in seconds and step interval aligned to display refresh rate.
