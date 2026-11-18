@@ -72,7 +72,7 @@ extension AppModel {
         }
         lastPlaylistWakeAdvance = Date()
         // Advance once on wake so overnight playlists move without waiting for the next timer fire.
-        stepPlaylist(1)
+        stepPlaylist(1, persist: false)
         if let playlistID = activePlaylistID,
            let playlist = playlists.first(where: { $0.id == playlistID }) {
             startPlaylistRotation(ids: playlistIDs, intervalMinutes: playlist.intervalMinutes)
@@ -85,7 +85,7 @@ extension AppModel {
         // Login item launches stay accessory and usually never become active for a click.
         guard launchAtLogin, NSApp.activationPolicy() == .accessory || !NSApp.isActive else { return }
         guard activePlaylistID != nil else { return }
-        stepPlaylist(1)
+        stepPlaylist(1, persist: false)
         if let playlistID = activePlaylistID,
            let playlist = playlists.first(where: { $0.id == playlistID }) {
             startPlaylistRotation(ids: playlistIDs, intervalMinutes: playlist.intervalMinutes)

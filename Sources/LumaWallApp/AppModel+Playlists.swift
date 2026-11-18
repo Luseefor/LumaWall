@@ -118,10 +118,19 @@ extension AppModel {
         startPlaylistRotation(ids: ids, intervalMinutes: playlist.intervalMinutes)
     }
 
-    func stepPlaylist(_ delta: Int) {
+    /// `persist: false` is for callers that restart the rotation right after,
+    /// since `startPlaylistRotation` saves the cursor with the new deadline.
+    func stepPlaylist(_ delta: Int, persist: Bool = true) {
         guard !playlistIDs.isEmpty else { return }
-        playlistCursor = (playlistCursor + delta + playlistIDs.count) % playlistIDs.count
-        persistPlaylistPlaybackState()
+        let step = PlaylistSchedule.step(
+            ids: playlistIDs,
+            cursor: playlistCursor,
+            delta: delta,
+            shownOnDisplays: displays.compactMap { activeByDisplay[$0.displayID] }
+        )
+        playlistCursor = step.cursor
+        if persist { persistPlaylistPlaybackState() }
+        guard step.needsApply else { return }
         let nextID = playlistIDs[playlistCursor]
         guard let asset = assets.first(where: { $0.id == nextID }) else { return }
         applyToAll(asset, continuingPlaylist: true)
@@ -151,7 +160,7 @@ extension AppModel {
             Task { @MainActor in
                 guard let self, let playlistID = self.activePlaylistID,
                       let playlist = self.playlists.first(where: { $0.id == playlistID }) else { return }
-                self.stepPlaylist(1)
+                self.stepPlaylist(1, persist: false)
                 self.startPlaylistRotation(ids: self.playlistIDs, intervalMinutes: playlist.intervalMinutes)
             }
         }

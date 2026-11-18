@@ -39,4 +39,24 @@ struct PlaylistScheduleTests {
         #expect(result.cursor == 1)
         #expect(result.nextAdvanceAt == now.addingTimeInterval(300))
     }
+
+    @Test func singleItemStepSkipsApplyWhenAlreadyShown() {
+        let a = WallpaperID()
+        let step = PlaylistSchedule.step(ids: [a], cursor: 0, delta: 1, shownOnDisplays: [a, a])
+        #expect(step.cursor == 0)
+        #expect(!step.needsApply)
+    }
+
+    @Test func stepAppliesWhenAnyDisplayShowsSomethingElse() {
+        let a = WallpaperID(), b = WallpaperID()
+        #expect(PlaylistSchedule.step(ids: [a], cursor: 0, delta: 1, shownOnDisplays: [a, b]).needsApply)
+        #expect(PlaylistSchedule.step(ids: [a], cursor: 0, delta: 1, shownOnDisplays: []).needsApply)
+    }
+
+    @Test func stepAdvancesAndAppliesForMultiItemPlaylist() {
+        let a = WallpaperID(), b = WallpaperID()
+        let step = PlaylistSchedule.step(ids: [a, b], cursor: 1, delta: 1, shownOnDisplays: [b])
+        #expect(step.cursor == 0)
+        #expect(step.needsApply)
+    }
 }
