@@ -5,7 +5,29 @@ public struct PlaylistScheduleResult: Equatable, Sendable {
     public let nextAdvanceAt: Date
 }
 
+public struct PlaylistStepResult: Equatable, Sendable {
+    public let cursor: Int
+    /// False when the target wallpaper is already on every display.
+    public let needsApply: Bool
+}
+
 public enum PlaylistSchedule {
+    /// Moves the cursor by `delta`. Skips the apply when every display already
+    /// shows the target (a nil entry is a display with no wallpaper), so a
+    /// one-item playlist doesn't rewrite the system wallpaper store on each tick.
+    public static func step(
+        ids: [WallpaperID],
+        cursor: Int,
+        delta: Int,
+        shownOnDisplays: [WallpaperID?]
+    ) -> PlaylistStepResult {
+        guard !ids.isEmpty else { return .init(cursor: 0, needsApply: false) }
+        let next = normalized(cursor + delta, count: ids.count)
+        let target = ids[next]
+        let satisfied = !shownOnDisplays.isEmpty && shownOnDisplays.allSatisfy { $0 == target }
+        return .init(cursor: next, needsApply: !satisfied)
+    }
+
     public static func resume(
         nextAdvanceAt: Date?,
         intervalMinutes: Int,
