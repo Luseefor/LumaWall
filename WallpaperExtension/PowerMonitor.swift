@@ -8,7 +8,14 @@ final class PowerMonitor: Sendable {
 
     private let state = OSAllocatedUnfairLock(initialState: PowerState())
     /// Smooths thermal flips so a one-second dip doesn't switch tiers.
-    private let thermalHold = OSAllocatedUnfairLock(initialState: ThermalHold(initial: ProcessInfo.processInfo.thermalState))
+    /// Confined to `thermalQueue` with `pendingRelease`.
+    nonisolated(unsafe) private var thermalHold = ThermalHold(initial: ProcessInfo.processInfo.thermalState)
+    /// Release time already scheduled, so repeated readings don't stack timers.
+    nonisolated(unsafe) private var pendingRelease: Date?
+    /// Serializes every thermal reading (notifications and release timers).
+    /// Without it a late "cooled" timer could publish nominal after a newer
+    /// critical notification and resume playback on a hot machine.
+    private let thermalQueue = DispatchQueue(label: "app.lumawall.thermal")
     private let continuations = OSAllocatedUnfairLock(initialState: [UUID: AsyncStream<PowerState>.Continuation]())
     private nonisolated(unsafe) var _batteryScheduler: NSBackgroundActivityScheduler?
     private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
@@ -78,7 +85,8 @@ final class PowerMonitor: Sendable {
             forName: ProcessInfo.thermalStateDidChangeNotification,
             object: nil, queue: nil,
         ) { [weak self] _ in
-            self?.handleThermalChange()
+            guard let self else { return }
+            thermalQueue.async { [weak self] in self?.handleThermalChange() }
         }
         NotificationCenter.default.addObserver(
             forName: .NSProcessInfoPowerStateDidChange,
@@ -139,17 +147,20 @@ final class PowerMonitor: Sendable {
 
     // MARK: - Private
 
+    /// Runs on `thermalQueue` only.
     private func handleThermalChange() {
+        dispatchPrecondition(condition: .onQueue(thermalQueue))
         let raw = ProcessInfo.processInfo.thermalState
-        let (effective, releaseDate) = thermalHold.withLock { hold in
-            (hold.update(raw: raw, now: Date()), hold.releaseDate)
-        }
+        let effective = thermalHold.update(raw: raw, now: Date())
         // A pending fall applies after the hold even if macOS posts nothing
-        // more; re-check then.
-        if let releaseDate {
+        // more; re-check then, once per release time.
+        if let releaseDate = thermalHold.releaseDate, releaseDate != pendingRelease {
+            pendingRelease = releaseDate
             let delay = max(0, releaseDate.timeIntervalSinceNow) + 0.5
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.handleThermalChange()
+            thermalQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                if pendingRelease == releaseDate { pendingRelease = nil }
+                handleThermalChange()
             }
         }
         let previous = state.withLock { $0 }

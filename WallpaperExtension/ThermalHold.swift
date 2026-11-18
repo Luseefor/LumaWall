@@ -9,6 +9,10 @@ struct ThermalHold {
 
     private(set) var effective: ProcessInfo.ThermalState = .nominal
     private var coolingSince: Date?
+    /// Warmest reading below `effective` since cooling began. Releasing
+    /// straight to the latest reading could skip a tier that was seen
+    /// moments ago (critical, serious, then nominal just before the hold).
+    private var coolingCeiling: ProcessInfo.ThermalState = .nominal
 
     init(initial: ProcessInfo.ThermalState = .nominal) {
         effective = initial
@@ -26,12 +30,20 @@ struct ThermalHold {
             coolingSince = nil
             return effective
         }
-        let since = coolingSince ?? now
-        if now.timeIntervalSince(since) >= Self.releaseDelay {
-            effective = raw
-            coolingSince = nil
+        guard let since = coolingSince else {
+            coolingSince = now
+            coolingCeiling = raw
+            return effective
+        }
+        if raw.rawValue > coolingCeiling.rawValue { coolingCeiling = raw }
+        guard now.timeIntervalSince(since) >= Self.releaseDelay else { return effective }
+        effective = coolingCeiling
+        if raw.rawValue < effective.rawValue {
+            // Still cooler than the tier just released to: hold again from now.
+            coolingSince = now
+            coolingCeiling = raw
         } else {
-            coolingSince = since
+            coolingSince = nil
         }
         return effective
     }
