@@ -18,6 +18,9 @@ public actor LibraryStore {
     public let rootURL: URL
     private let indexURL: URL
     private var assetsByID: [WallpaperID: WallpaperAsset] = [:]
+    /// Last folder-walk result. Cleared whenever the library changes, so the
+    /// walk runs once per change instead of once per ask.
+    private var cachedDiskUsage: Int64?
 
     public init(rootURL: URL? = nil) throws {
         let base = try StorePaths.appSupportBase(rootURL: rootURL)
@@ -62,12 +65,14 @@ public actor LibraryStore {
             throw StoreError.duplicate(duplicate)
         }
         assetsByID[asset.id] = asset
+        cachedDiskUsage = nil
         try persist()
     }
 
     public func update(_ asset: WallpaperAsset) throws {
         guard assetsByID[asset.id] != nil else { throw StoreError.missingAsset }
         assetsByID[asset.id] = asset
+        cachedDiskUsage = nil
         try persist()
     }
 
@@ -95,6 +100,7 @@ public actor LibraryStore {
 
     public func remove(id: WallpaperID) throws {
         guard let asset = assetsByID.removeValue(forKey: id) else { throw StoreError.missingAsset }
+        cachedDiskUsage = nil
         try persist()
         // The media folder must be exactly this entry's own folder. A corrupt
         // or hand-edited Library.json could otherwise point mediaURL at an
@@ -113,7 +119,19 @@ public actor LibraryStore {
         rootURL.appendingPathComponent(id.rawValue.uuidString, isDirectory: true)
     }
 
+    /// Bytes under the library root. Walks the folder only when the library
+    /// changed since the last call (install, update, remove); call
+    /// `invalidateDiskUsage()` after changing files outside those paths.
     public func diskUsageBytes() -> Int64 {
+        if let cachedDiskUsage { return cachedDiskUsage }
+        let total = measureDiskUsage()
+        cachedDiskUsage = total
+        return total
+    }
+
+    public func invalidateDiskUsage() { cachedDiskUsage = nil }
+
+    private func measureDiskUsage() -> Int64 {
         let urls = FileManager.default.enumerator(at: rootURL, includingPropertiesForKeys: [.fileSizeKey])
         var total: Int64 = 0
         while let url = urls?.nextObject() as? URL {

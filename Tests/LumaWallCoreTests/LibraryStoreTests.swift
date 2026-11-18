@@ -169,6 +169,19 @@ struct LibraryStoreTests {
         #expect(await store.diskUsageBytes() >= 4096)
     }
 
+    @Test func diskUsageIsCachedUntilTheLibraryChanges() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        try await store.install(sampleAsset(hash: "first"))
+        let first = await store.diskUsageBytes()
+        try Data(repeating: 1, count: 8192).write(to: root.appendingPathComponent("late.bin"))
+        // No library change since the last measurement: no new folder walk.
+        #expect(await store.diskUsageBytes() == first)
+        try await store.install(sampleAsset(hash: "second"))
+        #expect(await store.diskUsageBytes() >= first + 8192)
+    }
+
     @Test func removeRefusesPathsOutsideEntryFolder() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
