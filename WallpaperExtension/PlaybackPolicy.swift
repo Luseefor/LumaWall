@@ -124,4 +124,37 @@ enum PlaybackPolicy: Int, Comparable {
         return worst
     }
 
+    /// The tier for a preview surface (the System Settings picker), which the
+    /// user is looking at whatever the desktop shows. The desktop rules
+    /// (presentation, occlusion, fullscreen apps, the desktop and per-display
+    /// pauses) don't reach it. The hard pauses (user pause, critical thermal
+    /// or battery, Game Mode, zero brightness) and the power tiers do, and
+    /// Full picks the copy that fits the preview's viewport.
+    static func preview(
+        userPaused: Bool,
+        thermalState: ProcessInfo.ThermalState,
+        isOnBattery: Bool,
+        batteryLevel: Int,
+        isGameModeActive: Bool,
+        isLowPowerModeEnabled: Bool = false,
+        displayBrightness: Float = 1.0,
+        powerProfile: String = "automatic",
+    ) -> PlaybackPolicy {
+        compute(
+            presentationMode: "default",
+            activityState: "active",
+            userPaused: userPaused,
+            alwaysPauseDesktop: false,
+            pauseWhenOccluded: false,
+            desktopOccluded: false,
+            screenSaverIsOurs: false,
+            thermalState: thermalState,
+            isOnBattery: isOnBattery,
+            batteryLevel: batteryLevel,
+            isGameModeActive: isGameModeActive,
+            isLowPowerModeEnabled: isLowPowerModeEnabled,
+            displayBrightness: displayBrightness,
+            powerProfile: powerProfile,
+        )
+    }
 }

@@ -41,7 +41,7 @@ final class RendererLifecycleTests: XCTestCase {
     }
 
     func testWakeResumesTheLatestTierWithoutARecompute() {
-        // Previews get no policy recompute on wake; their tier never changed.
+        // No recompute is needed: wake resumes the tier recorded before sleep.
         var life = playing()
         _ = life.handle(.displaySleep)
         XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])

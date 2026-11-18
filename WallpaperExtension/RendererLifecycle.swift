@@ -8,10 +8,10 @@ import Foundation
 ///
 /// Display sleep is held apart from the policy. Sleep stops the clock, the
 /// feed, and any rebuild without overwriting the requested tier, so wake
-/// resumes whatever the latest policy asks for, including on previews that no
-/// policy recompute reaches. Because sleep and wake arrive as events on the
-/// same queue as policy updates, an update decided before sleep is undone by
-/// the sleep event and one decided after it sees the gate.
+/// resumes whatever the latest policy asks for. Because sleep and wake
+/// arrive as events on the same queue as policy updates, an update decided
+/// before sleep is undone by the sleep event and one decided after it sees
+/// the gate.
 ///
 /// A closed surface (invalidated by the agent, or a preview past its lease)
 /// is a second gate beside sleep. It stops the clock and feed but keeps the
