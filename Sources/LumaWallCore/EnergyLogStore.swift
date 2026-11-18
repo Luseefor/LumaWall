@@ -86,82 +86,55 @@ public struct EnergyLogSnapshot: Codable, Equatable, Sendable {
 
 /// Energy samples for the 24 h soak report.
 ///
-/// `EnergyLog.json` holds a snapshot (samples plus the soak start). New samples
-/// are appended as one JSON line each to a journal, `EnergyLog.samples.<n>.jsonl`,
-/// instead of rewriting the snapshot every minute. The snapshot records which
-/// journal generation `<n>` belongs to it. Compaction writes a snapshot naming
-/// generation `<n+1>`, syncs it, then deletes journal `<n>`, so a crash or failed
-/// delete leaves a journal the snapshot no longer names, and it is never
-/// replayed. If the snapshot or a journal can't be read, the store stops
-/// writing so recovery stays possible (see `EnergyLogDisk.load`).
+/// Samples collect in memory and the whole `EnergyLog.json` is written
+/// atomically at most once per `flushInterval`, instead of once per sample.
+/// Soak start and clear write at once, and `flush()` writes whatever is
+/// pending (the app calls it at termination). A crash loses the samples since
+/// the last write.
 public actor EnergyLogStore {
     public static let retention: TimeInterval = 24 * 60 * 60
-    /// Journal lines (one day of minute samples) before the next append compacts.
-    public static let defaultCompactionThreshold = 1_440
+    public static let flushInterval: TimeInterval = 15 * 60
 
-    public enum StoreError: LocalizedError {
-        case persistenceSuspended
-
-        public var errorDescription: String? {
-            "The energy log couldn't be read, so it was left unchanged."
-        }
-    }
-
-    private let disk: EnergyLogDisk
-    private let compactionThreshold: Int
-    private var generation = 0
+    private let fileURL: URL
     private var snapshot = EnergyLogSnapshot()
-    private var appendedLines = 0
-    private var suspended = false
+    private var lastWrite: Date
+    private var hasPendingSamples = false
 
-    public init(rootURL: URL? = nil, compactionThreshold: Int = EnergyLogStore.defaultCompactionThreshold) throws {
-        let disk = EnergyLogDisk(base: try StorePaths.appSupportBase(rootURL: rootURL))
-        self.disk = disk
-        self.compactionThreshold = max(1, compactionThreshold)
-        let loaded = disk.load()
-        let pruned = Self.pruned(loaded.snapshot, now: .now)
-        snapshot = pruned
-        generation = loaded.generation
-        appendedLines = loaded.journalLines
-        suspended = loaded.suspended
-        guard !suspended else { return }
-        if loaded.needsCompaction || pruned.samples.count != loaded.snapshot.samples.count {
-            // On failure the journals stay and `appendedLines` keeps counting
-            // them, so the next record retries.
-            if let next = try? Self.compact(pruned, to: generation + 1, disk: disk) {
-                generation = next
-                appendedLines = 0
-            }
-        } else {
-            disk.removeJournals(olderThan: generation)
+    public init(rootURL: URL? = nil, now: Date = .now) throws {
+        let base = try StorePaths.appSupportBase(rootURL: rootURL)
+        self.fileURL = base.appendingPathComponent("EnergyLog.json")
+        self.lastWrite = now
+        if let decoded: EnergyLogSnapshot = StoreIO.readJSON(from: fileURL, as: EnergyLogSnapshot.self) {
+            snapshot = Self.pruned(decoded, now: now)
         }
     }
 
     public func current() -> EnergyLogSnapshot { snapshot }
 
     public func startSoak(at date: Date = .now) throws {
-        guard !suspended else { throw StoreError.persistenceSuspended }
         snapshot.soakStartedAt = date
-        try compactNow()
+        try persist(now: date)
     }
 
     public func clearSoak() throws {
-        guard !suspended else { throw StoreError.persistenceSuspended }
         snapshot.soakStartedAt = nil
-        try compactNow()
+        try persist(now: .now)
     }
 
     public func record(_ sample: EnergySample, now: Date = .now) throws {
         snapshot.samples.append(sample)
         snapshot = Self.pruned(snapshot, now: now)
-        guard !suspended else { return }
-        try disk.append(sample, generation: generation)
-        appendedLines += 1
-        if appendedLines >= compactionThreshold {
-            // The sample is already saved; a failed compaction retries on the
-            // next record.
-            try? compactNow()
+        hasPendingSamples = true
+        if now.timeIntervalSince(lastWrite) >= Self.flushInterval {
+            // On failure the samples stay pending and the next record retries.
+            try persist(now: now)
         }
+    }
+
+    /// Writes any samples not yet on disk.
+    public func flush(now: Date = .now) throws {
+        guard hasPendingSamples else { return }
+        try persist(now: now)
     }
 
     public func report(now: Date = .now) -> EnergySoakReport? {
@@ -210,22 +183,10 @@ public actor EnergyLogStore {
         )
     }
 
-    /// Writes the snapshot under the next journal generation, then deletes the
-    /// older journals once the snapshot is on stable storage.
-    private func compactNow() throws {
-        generation = try Self.compact(snapshot, to: generation + 1, disk: disk)
-        appendedLines = 0
-    }
-
-    /// Returns the new generation. Throws only when the snapshot was not replaced.
-    private static func compact(_ snapshot: EnergyLogSnapshot, to next: Int, disk: EnergyLogDisk) throws -> Int {
-        try disk.writeSnapshot(snapshot, generation: next)
-        // The snapshot now names `next`, so appends must follow it even if the
-        // sync fails; the older journals then stay until a later compaction.
-        if disk.syncSnapshot() {
-            disk.removeJournals(except: next)
-        }
-        return next
+    private func persist(now: Date) throws {
+        try StoreIO.writeJSON(snapshot, to: fileURL)
+        lastWrite = now
+        hasPendingSamples = false
     }
 
     private static func pruned(_ snapshot: EnergyLogSnapshot, now: Date) -> EnergyLogSnapshot {

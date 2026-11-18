@@ -133,7 +133,7 @@ extension AppModel {
     }
 
     /// One energy sample a minute for the 24 h report, whether or not any
-    /// view is open. Each sample is appended to the log, not rewritten.
+    /// view is open. The store batches them and writes at most every 15 minutes.
     func startEnergyLogging() {
         guard energyTimer == nil else { return }
         // The first sample should cover the first minute, not start its baseline.

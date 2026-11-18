@@ -110,14 +110,13 @@ struct EnergyLogStoreTests {
 
         // A fresh process loading the persisted file must prune on init, so a
         // relaunch never resurrects out-of-retention samples.
+        try await first.flush()
         let second = try EnergyLogStore(rootURL: root)
         let snapshot = await second.current()
         #expect(snapshot.samples.count == 1)
         #expect(snapshot.samples[0].processCPUPercent == 2)
     }
-}
 
-extension EnergyLogStoreTests {
     private func sample(at date: Date, cpu: Double) -> EnergySample {
         EnergySample(
             date: date, processCPUPercent: cpu, systemCPUPercent: 10, processMemoryMB: 100,
@@ -126,242 +125,77 @@ extension EnergyLogStoreTests {
         )
     }
 
-    private func logBytes(in root: URL) -> Int {
-        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey])) ?? []
-        return files
-            .filter { $0.lastPathComponent.hasPrefix("EnergyLog") }
-            .reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-    }
+    private func logFile(in root: URL) -> URL { root.appendingPathComponent("EnergyLog.json") }
 
-    @Test func recordingASampleDoesNotRewriteTheWholeLog() async throws {
+    @Test func samplesAreBatchedUntilTheFlushIntervalPasses() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = try EnergyLogStore(rootURL: root)
-        let now = Date()
-        for index in 0..<200 {
-            try await store.record(sample(at: now.addingTimeInterval(Double(index - 300) * 60), cpu: 1), now: now)
+        let start = Date()
+        let store = try EnergyLogStore(rootURL: root, now: start)
+        // Fifteen one-minute samples, all before the 15-minute boundary.
+        for minute in 0..<15 {
+            let at = start.addingTimeInterval(Double(minute) * 60)
+            try await store.record(sample(at: at, cpu: Double(minute)), now: at)
         }
-        let before = logBytes(in: root)
-        try await store.record(sample(at: now, cpu: 2), now: now)
-        let grown = logBytes(in: root) - before
-        // An append adds one sample's worth of bytes; a rewrite would also
-        // re-encode (and so change the size of) the 200 older ones.
-        #expect(grown > 0)
-        #expect(grown < before / 20)
+        #expect(!FileManager.default.fileExists(atPath: logFile(in: root).path))
+        #expect(await store.current().samples.count == 15)
+
+        // The first record at or past the boundary writes the whole batch once.
+        let boundary = start.addingTimeInterval(15 * 60)
+        try await store.record(sample(at: boundary, cpu: 15), now: boundary)
+        let written = try Data(contentsOf: logFile(in: root))
+        let first = try EnergyLogStore(rootURL: root, now: boundary)
+        #expect(await first.current().samples.count == 16)
+
+        // Then it stays quiet for another interval.
+        let later = boundary.addingTimeInterval(60)
+        try await store.record(sample(at: later, cpu: 16), now: later)
+        #expect(try Data(contentsOf: logFile(in: root)) == written)
     }
 
-    @Test func appendedSamplesSurviveRelaunchAlongsideSoakStart() async throws {
+    @Test func soakStartAndClearWriteImmediately() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let now = Date()
-        let first = try EnergyLogStore(rootURL: root)
-        let soakStart = now.addingTimeInterval(-3_600)
-        try await first.startSoak(at: soakStart)
-        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 3), now: now)
-        try await first.record(sample(at: now.addingTimeInterval(-60), cpu: 4), now: now)
+        let store = try EnergyLogStore(rootURL: root, now: now)
+        try await store.record(sample(at: now, cpu: 1), now: now)
+        let started = Date(timeIntervalSince1970: (now.timeIntervalSince1970 - 60).rounded(.down))
+        try await store.startSoak(at: started)
+        let afterStart = try EnergyLogStore(rootURL: root, now: now)
+        #expect(await afterStart.current().soakStartedAt == started)
+        // The pending sample goes out with the same write.
+        #expect(await afterStart.current().samples.count == 1)
 
-        let second = try EnergyLogStore(rootURL: root)
-        let snapshot = await second.current()
-        #expect(snapshot.samples.map(\.processCPUPercent) == [3, 4])
-        #expect(snapshot.soakStartedAt != nil)
+        try await store.clearSoak()
+        let afterClear = try EnergyLogStore(rootURL: root, now: now)
+        #expect(await afterClear.current().soakStartedAt == nil)
     }
 
-    @Test func legacySnapshotFileStillLoads() async throws {
+    @Test func flushWritesPendingSamplesOnce() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        let store = try EnergyLogStore(rootURL: root, now: now)
+        try await store.record(sample(at: now, cpu: 3), now: now)
+        #expect(!FileManager.default.fileExists(atPath: logFile(in: root).path))
+        try await store.flush()
+        let reloaded = try EnergyLogStore(rootURL: root, now: now)
+        #expect(await reloaded.current().samples.map(\.processCPUPercent) == [3])
+
+        // Nothing pending: flush leaves the file alone.
+        let written = try Data(contentsOf: logFile(in: root))
+        try await store.flush()
+        #expect(try Data(contentsOf: logFile(in: root)) == written)
+    }
+
+    @Test func legacyFileWithoutAnyBatchingMetadataStillLoads() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let now = Date()
         let legacy = EnergyLogSnapshot(samples: [sample(at: now.addingTimeInterval(-60), cpu: 7)], soakStartedAt: nil)
-        try StoreIO.writeJSON(legacy, to: root.appendingPathComponent("EnergyLog.json"))
-        let store = try EnergyLogStore(rootURL: root)
+        try StoreIO.writeJSON(legacy, to: logFile(in: root))
+        let store = try EnergyLogStore(rootURL: root, now: now)
         #expect(await store.current().samples.map(\.processCPUPercent) == [7])
-    }
-}
-
-extension EnergyLogStoreTests {
-    private func journalFiles(in root: URL) -> [URL] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-        return files.filter { $0.lastPathComponent.hasPrefix("EnergyLog.samples.") }
-    }
-
-    private func journalLineCount(in root: URL) -> Int {
-        journalFiles(in: root).reduce(0) { total, url in
-            total + ((try? Data(contentsOf: url)) ?? Data()).split(separator: 0x0A).count
-        }
-    }
-
-    @Test func journalLeftBehindByACrashedCompactionIsNotReplayed() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let now = Date()
-        let first = try EnergyLogStore(rootURL: root)
-        for index in 0..<3 {
-            try await first.record(sample(at: now.addingTimeInterval(Double(index - 5) * 60), cpu: Double(index)), now: now)
-        }
-        // Keep the journal's bytes, let the next launch compact it into the
-        // snapshot, then put the journal back: a crash after the snapshot was
-        // replaced but before the journal was deleted looks exactly like this.
-        let journal = try #require(journalFiles(in: root).first)
-        let bytes = try Data(contentsOf: journal)
-        _ = try EnergyLogStore(rootURL: root)
-        try bytes.write(to: journal)
-
-        let relaunched = try EnergyLogStore(rootURL: root)
-        #expect(await relaunched.current().samples.map(\.processCPUPercent) == [0, 1, 2])
-    }
-
-    @Test func tornJournalLineDoesNotSwallowTheNextSample() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let now = Date()
-        let first = try EnergyLogStore(rootURL: root)
-        try await first.record(sample(at: now.addingTimeInterval(-180), cpu: 1), now: now)
-        // A write cut short in this session leaves an unterminated tail.
-        let journal = try #require(journalFiles(in: root).first)
-        let handle = try FileHandle(forWritingTo: journal)
-        try handle.seekToEnd()
-        try handle.write(contentsOf: Data("{\"date\":\"2026-".utf8))
-        try handle.close()
-        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 2), now: now)
-
-        let relaunched = try EnergyLogStore(rootURL: root)
-        #expect(await relaunched.current().samples.map(\.processCPUPercent) == [1, 2])
-    }
-
-    @Test func journalThatOnlyHoldsATornLineIsDiscardedAtLaunch() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let now = Date()
-        let first = try EnergyLogStore(rootURL: root)
-        try await first.record(sample(at: now.addingTimeInterval(-180), cpu: 1), now: now)
-        let journal = try #require(journalFiles(in: root).first)
-        try Data("{\"date\":\"2026-".utf8).write(to: journal)
-
-        let second = try EnergyLogStore(rootURL: root)
-        try await second.record(sample(at: now.addingTimeInterval(-60), cpu: 5), now: now)
-        let third = try EnergyLogStore(rootURL: root)
-        #expect(await third.current().samples.map(\.processCPUPercent) == [5])
-    }
-
-    @Test func journalLengthStaysBoundedWithoutAnySamplesAgingOut() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let store = try EnergyLogStore(rootURL: root, compactionThreshold: 5)
-        let now = Date()
-        for index in 0..<23 {
-            try await store.record(sample(at: now.addingTimeInterval(Double(index - 30) * 60), cpu: Double(index)), now: now)
-            #expect(journalLineCount(in: root) <= 5)
-        }
-        #expect(await store.current().samples.count == 23)
-        let relaunched = try EnergyLogStore(rootURL: root)
-        #expect(await relaunched.current().samples.count == 23)
-    }
-}
-
-extension EnergyLogStoreTests {
-    private func makeRoot() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-    }
-
-    private func setPermissions(_ mode: Int, _ url: URL) {
-        try? FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
-    }
-
-    private func cleanUp(_ root: URL) {
-        setPermissions(0o755, root)
-        for url in (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
-            setPermissions(0o644, url)
-        }
-        try? FileManager.default.removeItem(at: root)
-    }
-
-    @Test func failedLaunchCompactionKeepsCountingTheRetainedJournal() async throws {
-        let root = makeRoot()
-        defer { cleanUp(root) }
-        let now = Date()
-        let first = try EnergyLogStore(rootURL: root, compactionThreshold: 5)
-        for index in 0..<3 {
-            try await first.record(sample(at: now.addingTimeInterval(Double(index - 20) * 60), cpu: Double(index)), now: now)
-        }
-        // A read-only directory fails the snapshot write but still allows
-        // appending to the existing journal.
-        setPermissions(0o555, root)
-        let second = try EnergyLogStore(rootURL: root, compactionThreshold: 5)
-        #expect(journalLineCount(in: root) == 3)
-        try await second.record(sample(at: now.addingTimeInterval(-10 * 60), cpu: 3), now: now)
-        try await second.record(sample(at: now.addingTimeInterval(-9 * 60), cpu: 4), now: now)
-        #expect(journalLineCount(in: root) == 5)
-        setPermissions(0o755, root)
-        try await second.record(sample(at: now.addingTimeInterval(-8 * 60), cpu: 5), now: now)
-        #expect(journalLineCount(in: root) == 0)
-
-        let third = try EnergyLogStore(rootURL: root)
-        #expect(await third.current().samples.map(\.processCPUPercent) == [0, 1, 2, 3, 4, 5])
-    }
-
-    @Test func unreadableSnapshotLeavesTheLiveJournalAlone() async throws {
-        let root = makeRoot()
-        defer { cleanUp(root) }
-        let now = Date()
-        let first = try EnergyLogStore(rootURL: root)
-        try await first.startSoak(at: now.addingTimeInterval(-3_600))
-        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 1), now: now)
-        try await first.record(sample(at: now.addingTimeInterval(-60), cpu: 2), now: now)
-        let journalBefore = journalFiles(in: root)
-        let snapshotURL = root.appendingPathComponent("EnergyLog.json")
-        setPermissions(0o000, snapshotURL)
-
-        let blind = try EnergyLogStore(rootURL: root)
-        // Nothing is written or deleted while the generation is unknown, and
-        // new samples stay in memory only.
-        try await blind.record(sample(at: now, cpu: 9), now: now)
-        #expect(journalFiles(in: root) == journalBefore)
-        #expect(journalLineCount(in: root) == 2)
-        await #expect(throws: (any Error).self) { try await blind.startSoak() }
-
-        setPermissions(0o644, snapshotURL)
-        let recovered = try EnergyLogStore(rootURL: root)
-        #expect(await recovered.current().samples.map(\.processCPUPercent) == [1, 2])
-        #expect(await recovered.current().soakStartedAt != nil)
-    }
-
-    @Test func unreadableJournalIsNotDeletedByLaunchCompaction() async throws {
-        let root = makeRoot()
-        defer { cleanUp(root) }
-        let now = Date()
-        let first = try EnergyLogStore(rootURL: root)
-        try await first.startSoak(at: now.addingTimeInterval(-3_600))
-        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 1), now: now)
-        try await first.record(sample(at: now.addingTimeInterval(-60), cpu: 2), now: now)
-        let journal = try #require(journalFiles(in: root).first)
-        let snapshotBefore = try Data(contentsOf: root.appendingPathComponent("EnergyLog.json"))
-        setPermissions(0o000, journal)
-
-        let blind = try EnergyLogStore(rootURL: root)
-        #expect(FileManager.default.fileExists(atPath: journal.path))
-        #expect(try Data(contentsOf: root.appendingPathComponent("EnergyLog.json")) == snapshotBefore)
-        _ = blind
-
-        setPermissions(0o644, journal)
-        let recovered = try EnergyLogStore(rootURL: root)
-        #expect(await recovered.current().samples.map(\.processCPUPercent) == [1, 2])
-    }
-
-    @Test func corruptSnapshotIsQuarantinedAndJournalsAreRecovered() async throws {
-        let root = makeRoot()
-        defer { cleanUp(root) }
-        let now = Date()
-        let first = try EnergyLogStore(rootURL: root)
-        try await first.startSoak(at: now.addingTimeInterval(-3_600))
-        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 1), now: now)
-        try await first.record(sample(at: now.addingTimeInterval(-60), cpu: 2), now: now)
-        try Data("not json".utf8).write(to: root.appendingPathComponent("EnergyLog.json"))
-
-        let recovered = try EnergyLogStore(rootURL: root)
-        #expect(await recovered.current().samples.map(\.processCPUPercent) == [1, 2])
-        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
-        #expect(names.contains { $0.hasPrefix("EnergyLog.json.corrupt-") })
-        let relaunched = try EnergyLogStore(rootURL: root)
-        #expect(await relaunched.current().samples.map(\.processCPUPercent) == [1, 2])
     }
 }
