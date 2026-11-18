@@ -23,8 +23,10 @@ final class VideoRenderer: @unchecked Sendable {
 
     let displayLayer: AVSampleBufferDisplayLayer
     /// The display's size in pixels, so Full Quality can pick a copy that
-    /// fills it without decoding more than it can show.
-    let displayPixelSize: CGSize
+    /// fills it without decoding more than it can show. Updated by `resize`
+    /// (Lifecycle queue) and read on the renderer queue, so lock-backed.
+    var displayPixelSize: CGSize { pixelSize.withLock { $0 } }
+    private let pixelSize: OSAllocatedUnfairLock<CGSize>
     let timebase: CMTimebase
     private let renderer: AVSampleBufferVideoRenderer
     private let stillFrameLayer: CALayer
@@ -157,10 +159,10 @@ final class VideoRenderer: @unchecked Sendable {
         nominalFrameRate: Double,
     ) {
         self.displayLayer = displayLayer
-        self.displayPixelSize = CGSize(
+        self.pixelSize = OSAllocatedUnfairLock(initialState: CGSize(
             width: rootLayer.bounds.width * rootLayer.contentsScale,
             height: rootLayer.bounds.height * rootLayer.contentsScale
-        )
+        ))
         self.renderer = LWSampleBufferRenderer(displayLayer)
         self.asset = asset
         self.videoTrack = videoTrack
@@ -307,6 +309,8 @@ final class VideoRenderer: @unchecked Sendable {
         stillFrameLayer.contentsScale = scale
         CATransaction.commit()
         CATransaction.flush()
+        // The next loop boundary picks the copy for the new size.
+        pixelSize.withLock { $0 = CGSize(width: destSize.width * scale, height: destSize.height * scale) }
         traceLog("  [resize #\(debugID)] → \(destSize) @\(scale)x")
     }
 

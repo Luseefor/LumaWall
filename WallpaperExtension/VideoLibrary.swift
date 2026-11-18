@@ -74,7 +74,11 @@ final class VideoLibrary: Sendable {
             for: policy,
             sourceFPS: Int(entry.fps.rounded()),
             sourceResolution: entry.resolution,
-            variants: entry.variants ?? [],
+            // A copy listed in metadata but missing on disk would leave the
+            // renderer retrying a dead URL; choose among files that exist.
+            variants: (entry.variants ?? []).filter {
+                FileManager.default.fileExists(atPath: variantURL(for: id, variant: $0).path)
+            },
             displayPixels: displayPixels,
         ) else {
             return videoURL(for: entry)
