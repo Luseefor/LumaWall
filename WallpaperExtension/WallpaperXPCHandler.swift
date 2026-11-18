@@ -49,6 +49,33 @@ enum Lifecycle {
     /// gone (asleep/removed) lets it fire. Short enough to save power promptly, long enough
     /// to ride out a brief sleep/wake flicker.
     static let teardownGrace: TimeInterval = 15.0
+
+    /// Pending preview lease expiries. Touched ONLY on `queue`.
+    nonisolated(unsafe) static var previewLeaseTimers: [DisplayKey: DispatchWorkItem] = [:]
+
+    /// How long a preview surface plays after its last acquire. The agent
+    /// doesn't always invalidate a Settings preview, and one left open kept
+    /// decoding for minutes. Expiry closes the surface (its frame stays, so
+    /// the picker never goes blank) and the next acquire reopens it.
+    static let previewLease: TimeInterval = 120.0
+}
+
+/// Start (or restart) a preview surface's lease. MUST be called on `Lifecycle.queue`.
+private func renewPreviewLease(for key: DisplayKey) {
+    Lifecycle.previewLeaseTimers[key]?.cancel()
+    let item = DispatchWorkItem {
+        Lifecycle.previewLeaseTimers[key] = nil
+        if WallpaperState.shared.setSurfaceOpen(false, for: key) {
+            extensionLog("  [lease] preview on display \(key.displayID) not re-acquired in \(Lifecycle.previewLease)s → stopped playback, frame held")
+        }
+    }
+    Lifecycle.previewLeaseTimers[key] = item
+    Lifecycle.queue.asyncAfter(deadline: .now() + Lifecycle.previewLease, execute: item)
+}
+
+/// Drop a surface's lease once it is invalidated or removed. MUST be called on `Lifecycle.queue`.
+private func endPreviewLease(for key: DisplayKey) {
+    Lifecycle.previewLeaseTimers.removeValue(forKey: key)?.cancel()
 }
 
 /// Arm (or re-arm) the teardown timer for a display whose live wallpaper was invalidated.
@@ -363,6 +390,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         cancelTeardown(for: key)
         if WallpaperState.shared.setSurfaceOpen(true, for: key) {
             extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
+        }
+        // The surface's own role decides: a preview request that lands on a
+        // live surface (role mismatch below) leaves it unleased.
+        if WallpaperState.shared.context(for: key)?.isPreview ?? isPreview {
+            renewPreviewLease(for: key)
         }
         let videoURL = findVideoURL(forChoice: renderChoice)
         let cachedStill = loadCachedSnapshotImage(forChoice: choiceConfiguration)
@@ -751,6 +783,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Nobody hosts the surface now: stop decoding at once, but keep the
         // context and its frame so a re-acquire within the grace is seamless.
         WallpaperState.shared.setSurfaceOpen(false, for: key)
+        endPreviewLease(for: key)
         scheduleTeardown(for: key)
         extensionLog("=== INVALIDATE === UUID \(uuid) → stopped playback, tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
         reply(nil)
@@ -841,6 +874,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         let removedKeys = WallpaperState.shared.removeContexts(forVideoID: videoID)
         for key in removedKeys {
             cancelTeardown(for: key)
+            endPreviewLease(for: key)
         }
         if !removedKeys.isEmpty {
             if WallpaperState.shared.currentVideoID == videoID {
