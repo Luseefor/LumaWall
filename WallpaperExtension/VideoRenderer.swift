@@ -440,6 +440,10 @@ final class VideoRenderer: @unchecked Sendable {
             cancelRamp()
             cancelDeepPauseTimer()
             stillFrameLayer.opacity = 0
+            // A switch's restart is mid-flush: its completion builds the readers
+            // and sets the rate from the pause flag. Recreating here would start
+            // a second flush on top of it.
+            guard !flushInFlight else { return }
             if currentReader == nil {
                 // Woke from deep pause. Readers were freed. Recreate CONTINUING from the paused
                 // position (seamless, no black) so a screen-lock/display-sleep wake resumes the
@@ -554,6 +558,8 @@ final class VideoRenderer: @unchecked Sendable {
             guard let self, isRunning else { return }
             cancelDeepPauseTimer()
             stillFrameLayer.opacity = 0
+            // Mid-flush switch: its completion starts playback (see resume()).
+            guard !flushInFlight else { cancelRamp(); return }
 
             if currentReader == nil {
                 // Deep-paused: no frames to ramp into. Wake instantly (continuing from the paused
