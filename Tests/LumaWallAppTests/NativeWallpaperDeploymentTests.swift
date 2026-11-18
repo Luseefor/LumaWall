@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import XCTest
 @testable import LumaWall
@@ -133,9 +134,23 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
             resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants
         )
         // Has 1080p and 720p, not the 1440p copy added later.
-        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(entry))
+        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(entry, fileExists: { _ in true }))
         var complete = entry
         complete.variants = variants + [.init(filename: "Wallpaper.qhd.mov", fps: 60, resolution: CGSize(width: 2560, height: 1440))]
-        XCTAssertFalse(NativeWallpaperDeployment.needsVariants(complete))
+        XCTAssertFalse(NativeWallpaperDeployment.needsVariants(complete, fileExists: { _ in true }))
+        // Listed in metadata but deleted from disk: repair it.
+        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(complete, fileExists: { $0 != "Wallpaper.qhd.mov" }))
+    }
+
+    func testCopyFrameDurationKeepsTheSourceCadence() {
+        let duration = NativeWallpaperDeployment.copyFrameDuration(nominalFPS:)
+        // NTSC rates stay exact; rounding 59.94 to 60 repeats a frame every ~17 s.
+        XCTAssertEqual(duration(59.94), CMTime(value: 1001, timescale: 60_000))
+        XCTAssertEqual(duration(29.97), CMTime(value: 1001, timescale: 30_000))
+        XCTAssertEqual(duration(23.976), CMTime(value: 1001, timescale: 24_000))
+        XCTAssertEqual(duration(60), CMTime(value: 1, timescale: 60))
+        // Irregular sources (29.75 nominal, 204 frames in 6.79 s) round to the
+        // nearest whole rate; the shortest frame gap gave one extra frame.
+        XCTAssertEqual(duration(29.75), CMTime(value: 1, timescale: 30))
     }
 }
