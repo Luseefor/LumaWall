@@ -200,9 +200,9 @@ final class VideoRenderer: @unchecked Sendable {
     /// mirroring Apple's own extensions. It is called exactly once on every path,
     /// including early exits, so a gated reply can never hang.
     func start(onFirstFrameReady: (@Sendable () -> Void)? = nil) {
-        traceLog("  [start #\(debugID)] asset=\(asset.url.lastPathComponent)")
         queue.async { [weak self] in
             guard let self else { onFirstFrameReady?(); return }
+            traceLog("  [start #\(debugID)] asset=\(asset.url.lastPathComponent)")
             guard isRunning else { traceLog("  [start #\(debugID)] aborted, already stopped"); onFirstFrameReady?(); return }
             guard let reader = try? AVAssetReader(asset: asset) else { onFirstFrameReady?(); return }
             let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
@@ -354,16 +354,16 @@ final class VideoRenderer: @unchecked Sendable {
     /// no callback is mid-flight before canceling the reader. Timer teardown
     /// joins the same hop so a pending event can't arm a timer after us.
     func stop() {
-        extensionLog("  [stop #\(debugID)] stopping renderer for \(asset.url.lastPathComponent)")
         queue.sync { [weak self] in
             guard let self else { return }
+            extensionLog("  [stop #\(debugID)] stopping renderer for \(asset.url.lastPathComponent)")
             cancelRamp()
             cancelDeepPauseTimer()
             isRunning = false
             renderer.stopRequestingMediaData()
             dropReaders()
+            CMTimebaseSetRate(timebase, rate: 0.0)
         }
-        CMTimebaseSetRate(timebase, rate: 0.0)
         variantSelector = nil
         // Clean up layers from the layer tree
         displayLayer.removeFromSuperlayer()
