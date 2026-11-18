@@ -25,6 +25,8 @@ final class SharedPlaybackHub {
     private var retainCount = 0
     private var sourceFrameRate: Double = 60
     private(set) var isLoaded = false
+    var isPumping: Bool { pumpTimer != nil }
+    private var hasLiveLayer: Bool { layers.keys.contains { !pausedLayers.contains($0) } }
 
     private struct WeakLayer {
         weak var layer: CALayer?
@@ -51,7 +53,6 @@ final class SharedPlaybackHub {
         player.actionAtItemEnd = .none
         player.automaticallyWaitsToMinimizeStalling = false
         configure(url: url)
-        startPump()
     }
 
     func attach(_ layer: CALayer) {
@@ -85,8 +86,10 @@ final class SharedPlaybackHub {
         let live = layers.keys.filter { !pausedLayers.contains($0) }
         if live.isEmpty {
             player.pause()
-        } else if player.rate == 0 {
-            player.play()
+            stopPump()
+        } else {
+            if player.rate == 0 { player.play() }
+            if pumpTimer == nil { startPump() }
         }
     }
 
@@ -142,7 +145,7 @@ final class SharedPlaybackHub {
 
     private func restartPump() {
         stopPump()
-        startPump()
+        if hasLiveLayer { startPump() }
     }
 
     private func startPump() {
