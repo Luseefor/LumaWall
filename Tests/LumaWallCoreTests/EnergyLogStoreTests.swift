@@ -116,3 +116,64 @@ struct EnergyLogStoreTests {
         #expect(snapshot.samples[0].processCPUPercent == 2)
     }
 }
+
+extension EnergyLogStoreTests {
+    private func sample(at date: Date, cpu: Double) -> EnergySample {
+        EnergySample(
+            date: date, processCPUPercent: cpu, systemCPUPercent: 10, processMemoryMB: 100,
+            batteryPercent: 80, isOnBattery: false, decoderCount: 1,
+            powerProfile: "automatic", playbackActive: true
+        )
+    }
+
+    private func logBytes(in root: URL) -> Int {
+        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        return files
+            .filter { $0.lastPathComponent.hasPrefix("EnergyLog") }
+            .reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+    }
+
+    @Test func recordingASampleDoesNotRewriteTheWholeLog() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try EnergyLogStore(rootURL: root)
+        let now = Date()
+        for index in 0..<200 {
+            try await store.record(sample(at: now.addingTimeInterval(Double(index - 300) * 60), cpu: 1), now: now)
+        }
+        let before = logBytes(in: root)
+        try await store.record(sample(at: now, cpu: 2), now: now)
+        let grown = logBytes(in: root) - before
+        // An append adds one sample's worth of bytes; a rewrite would also
+        // re-encode (and so change the size of) the 200 older ones.
+        #expect(grown > 0)
+        #expect(grown < before / 20)
+    }
+
+    @Test func appendedSamplesSurviveRelaunchAlongsideSoakStart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root)
+        let soakStart = now.addingTimeInterval(-3_600)
+        try await first.startSoak(at: soakStart)
+        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 3), now: now)
+        try await first.record(sample(at: now.addingTimeInterval(-60), cpu: 4), now: now)
+
+        let second = try EnergyLogStore(rootURL: root)
+        let snapshot = await second.current()
+        #expect(snapshot.samples.map(\.processCPUPercent) == [3, 4])
+        #expect(snapshot.soakStartedAt != nil)
+    }
+
+    @Test func legacySnapshotFileStillLoads() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let now = Date()
+        let legacy = EnergyLogSnapshot(samples: [sample(at: now.addingTimeInterval(-60), cpu: 7)], soakStartedAt: nil)
+        try StoreIO.writeJSON(legacy, to: root.appendingPathComponent("EnergyLog.json"))
+        let store = try EnergyLogStore(rootURL: root)
+        #expect(await store.current().samples.map(\.processCPUPercent) == [7])
+    }
+}

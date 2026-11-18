@@ -84,17 +84,35 @@ public struct EnergyLogSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+/// Energy samples for the 24 h soak report.
+///
+/// `EnergyLog.json` holds a snapshot (samples plus the soak start). New samples
+/// are appended as one JSON line each to `EnergyLog.samples.jsonl` instead of
+/// rewriting the snapshot every minute. The snapshot is rewritten, and the
+/// line file emptied, on launch, when the soak window changes, and about once
+/// a day while samples age out.
 public actor EnergyLogStore {
     public static let retention: TimeInterval = 24 * 60 * 60
+    /// Appended lines tolerated before an in-session compaction drops the
+    /// aged-out ones (one day of minute samples).
+    private static let compactionLineThreshold = 1_440
 
     private let fileURL: URL
+    private let appendURL: URL
     private var snapshot = EnergyLogSnapshot()
+    private var appendedLines = 0
 
     public init(rootURL: URL? = nil) throws {
         let base = try StorePaths.appSupportBase(rootURL: rootURL)
         self.fileURL = base.appendingPathComponent("EnergyLog.json")
-        if let decoded: EnergyLogSnapshot = StoreIO.readJSON(from: fileURL, as: EnergyLogSnapshot.self) {
-            snapshot = Self.pruned(decoded, now: .now)
+        self.appendURL = base.appendingPathComponent("EnergyLog.samples.jsonl")
+        var loaded = StoreIO.readJSON(from: fileURL, as: EnergyLogSnapshot.self) ?? EnergyLogSnapshot()
+        let appended = Self.readAppended(from: appendURL)
+        loaded.samples.append(contentsOf: appended)
+        let pruned = Self.pruned(loaded, now: .now)
+        snapshot = pruned
+        if !appended.isEmpty || pruned.samples.count != loaded.samples.count {
+            try? Self.writeSnapshot(pruned, to: fileURL, removingAppendFile: appendURL)
         }
     }
 
@@ -112,8 +130,14 @@ public actor EnergyLogStore {
 
     public func record(_ sample: EnergySample, now: Date = .now) throws {
         snapshot.samples.append(sample)
+        let before = snapshot.samples.count
         snapshot = Self.pruned(snapshot, now: now)
-        try persist()
+        let droppedAny = snapshot.samples.count < before
+        if droppedAny && appendedLines >= Self.compactionLineThreshold {
+            try persist()
+        } else {
+            try append(sample)
+        }
     }
 
     public func report(now: Date = .now) -> EnergySoakReport? {
@@ -162,8 +186,42 @@ public actor EnergyLogStore {
         )
     }
 
+    /// Rewrites the snapshot and empties the line file.
     private func persist() throws {
-        try StoreIO.writeJSON(snapshot, to: fileURL)
+        try Self.writeSnapshot(snapshot, to: fileURL, removingAppendFile: appendURL)
+        appendedLines = 0
+    }
+
+    private static func writeSnapshot(_ snapshot: EnergyLogSnapshot, to url: URL, removingAppendFile appendURL: URL) throws {
+        try StoreIO.writeJSON(snapshot, to: url)
+        try? FileManager.default.removeItem(at: appendURL)
+    }
+
+    private func append(_ sample: EnergySample) throws {
+        var line = try Self.lineEncoder.encode(sample)
+        line.append(0x0A)
+        if FileManager.default.fileExists(atPath: appendURL.path) {
+            let handle = try FileHandle(forWritingTo: appendURL)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: line)
+        } else {
+            try line.write(to: appendURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        }
+        appendedLines += 1
+    }
+
+    private static var lineEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    /// Skips lines that don't decode, such as one cut short by a crash.
+    private static func readAppended(from url: URL) -> [EnergySample] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        let decoder = JSONDecoder.lumaWall
+        return data.split(separator: 0x0A).compactMap { try? decoder.decode(EnergySample.self, from: Data($0)) }
     }
 
     private static func pruned(_ snapshot: EnergyLogSnapshot, now: Date) -> EnergyLogSnapshot {
