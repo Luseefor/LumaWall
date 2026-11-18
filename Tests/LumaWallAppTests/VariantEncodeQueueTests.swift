@@ -17,6 +17,8 @@ private final class EncodeLog: @unchecked Sendable {
     private var readiness: [String: Queue.Readiness] = [:]
     private var clock = Date(timeIntervalSinceReferenceDate: 0)
     var result: Queue.Outcome = .done
+    /// Outcomes for the first encodes, before `result` applies.
+    var results: [Queue.Outcome] = []
 
     var order: [String] { lock.withLock { started } }
     var completed: [String] { lock.withLock { finished } }
@@ -45,8 +47,10 @@ private final class EncodeLog: @unchecked Sendable {
             if Task.isCancelled { return .notNow }
             try? await Task.sleep(for: .milliseconds(1))
         }
-        lock.withLock { finished.append(job.name) }
-        return result
+        return lock.withLock {
+            finished.append(job.name)
+            return results.isEmpty ? result : results.removeFirst()
+        }
     }
 
     func waitUntilStarted(_ name: String, count: Int = 1) async {
@@ -201,5 +205,19 @@ final class VariantEncodeQueueTests: XCTestCase {
         for _ in 0..<5 { await queue.wake() }
         await queue.drained()
         XCTAssertEqual(log.order.count, 2)
+    }
+
+    func testAWakeDuringAnAttemptIsNotLostWhenItStops() async {
+        // The pre-export check saw power blocked, AC came back and woke the
+        // queue before the job parked, so it stayed parked until another wake.
+        let log = EncodeLog()
+        log.results = [.notNow]
+        let queue = queue(log)
+        await queue.enqueue([job("a", "Wallpaper.qhd.mov")])
+        await log.waitUntilStarted("a/Wallpaper.qhd.mov")
+        await queue.wake()
+        log.openAll()
+        await queue.drained()
+        XCTAssertEqual(log.order, ["a/Wallpaper.qhd.mov", "a/Wallpaper.qhd.mov"])
     }
 }

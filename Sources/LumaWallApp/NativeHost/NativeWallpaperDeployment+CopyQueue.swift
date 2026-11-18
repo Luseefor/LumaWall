@@ -52,6 +52,9 @@ extension NativeWallpaperDeployment {
         private var parked: [Job] = []
         private var running: (job: Job, task: Task<Outcome, Never>, preempted: Bool)?
         private var worker: Task<Void, Never>?
+        /// Counts `wake()` calls, so a job that stops with `.notNow` after a
+        /// wake arrived mid-attempt is checked again instead of parked.
+        private var wakes = 0
         private var failures: [String: (count: Int, retryAfter: Date)] = [:]
 
         init(
@@ -84,6 +87,7 @@ extension NativeWallpaperDeployment {
         /// Re-evaluates waiting jobs and the running one. Call when power,
         /// tiers, or displays change.
         func wake() {
+            wakes += 1
             pending += parked
             parked.removeAll()
             preemptIfNeeded()
@@ -152,6 +156,7 @@ extension NativeWallpaperDeployment {
             while let job = next() {
                 let encode = self.encode
                 let task = Task(priority: .utility) { await encode(job) }
+                let wakesAtStart = wakes
                 running = (job, task, false)
                 let outcome = await task.value
                 let preempted = running?.preempted ?? false
@@ -159,7 +164,7 @@ extension NativeWallpaperDeployment {
                 switch outcome {
                 case .done:
                     failures[job.key] = nil
-                case _ where preempted:
+                case _ where preempted, .notNow where wakes != wakesAtStart:
                     pending.insert(job, at: 0)
                 case .notNow:
                     parked.append(job)
