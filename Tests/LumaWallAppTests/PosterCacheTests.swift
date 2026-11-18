@@ -149,6 +149,64 @@ final class PosterCacheTests: XCTestCase {
         XCTAssertEqual(writer.status, .completed)
     }
 
+    private actor CallCounter {
+        private(set) var count = 0
+        func hit() { count += 1 }
+    }
+
+    private func stillFrame() -> CGImage {
+        CGContext(
+            data: nil, width: 64, height: 36, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )!.makeImage()!
+    }
+
+    func testFailedStillGenerationRunsOnceUntilTheVideoIsRemoved() async {
+        // Every view update re-ran .task and retried a video that can't be read.
+        let counter = CallCounter()
+        let cache = PosterCache(frameGenerator: { _, _ in
+            await counter.hit()
+            return nil
+        })
+        let video = folder.appendingPathComponent("broken.mov")
+        let missing = folder.appendingPathComponent("missing.jpg")
+        for _ in 0..<3 {
+            let image = await cache.image(for: missing, fallbackVideo: video, maxPixelWidth: 640)
+            XCTAssertNil(image)
+        }
+        let afterRepeats = await counter.count
+        XCTAssertEqual(afterRepeats, 1)
+        // Another width is a different request.
+        _ = await cache.image(for: missing, fallbackVideo: video, maxPixelWidth: 1280)
+        let afterOtherWidth = await counter.count
+        XCTAssertEqual(afterOtherWidth, 2)
+        await cache.remove(video)
+        _ = await cache.image(for: missing, fallbackVideo: video, maxPixelWidth: 640)
+        let afterRemove = await counter.count
+        XCTAssertEqual(afterRemove, 3)
+    }
+
+    func testConcurrentRequestsForOneStillShareOneGeneration() async {
+        let counter = CallCounter()
+        let frame = stillFrame()
+        let cache = PosterCache(frameGenerator: { _, _ in
+            await counter.hit()
+            try? await Task.sleep(for: .milliseconds(100))
+            return frame
+        })
+        let video = folder.appendingPathComponent("clip.mov")
+        let missing = folder.appendingPathComponent("missing.jpg")
+        let images = await withTaskGroup(of: NSImage?.self) { group in
+            for _ in 0..<5 {
+                group.addTask { await cache.image(for: missing, fallbackVideo: video, maxPixelWidth: 640) }
+            }
+            return await group.reduce(into: [NSImage?]()) { $0.append($1) }
+        }
+        XCTAssertEqual(images.compactMap { $0 }.count, 5)
+        let calls = await counter.count
+        XCTAssertEqual(calls, 1)
+    }
+
     func testRemoveDropsEverySizeOfAPoster() async throws {
         let url = try writePoster("a.jpg", width: 2000, height: 1250)
         let cache = PosterCache()

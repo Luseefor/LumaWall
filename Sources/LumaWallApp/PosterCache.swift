@@ -30,16 +30,37 @@ actor PosterCache {
         let bytes: Int
     }
 
+    /// Makes a still from a video at a pixel width; nil when it can't.
+    typealias FrameGenerator = @Sendable (URL, CGFloat) async -> CGImage?
+
+    /// A request that already failed: poster and fallback together, so a
+    /// poster that appears later isn't shadowed once the video changes.
+    private struct FailedRequest: Hashable {
+        let poster: URL?
+        let video: URL?
+        let width: Int
+    }
+
     private let maxBytes: Int
     private let maxCount: Int
+    private let maxFailures = 256
+    private let frameGenerator: FrameGenerator
+    private var inFlightFrames: [Key: Task<CGImage?, Never>] = [:]
+    /// Oldest first; bounded so a library full of broken files can't grow it.
+    private var failures: [FailedRequest] = []
     private var entries: [Key: Entry] = [:]
     /// Least recently used first.
     private var order: [Key] = []
     private(set) var totalBytes = 0
 
-    init(maxBytes: Int = 96 * 1_024 * 1_024, maxCount: Int = 200) {
+    init(
+        maxBytes: Int = 96 * 1_024 * 1_024,
+        maxCount: Int = 200,
+        frameGenerator: @escaping FrameGenerator = { await PosterCache.videoFrame($0, maxPixelWidth: $1) }
+    ) {
         self.maxBytes = maxBytes
         self.maxCount = maxCount
+        self.frameGenerator = frameGenerator
     }
 
     /// Poster decoded to at most `maxPixelWidth` wide. When the poster is nil,
@@ -56,14 +77,39 @@ actor PosterCache {
                 return entry.image
             }
         }
+        let request = FailedRequest(poster: url, video: fallbackVideo, width: width)
+        if failures.contains(request) { return nil }
         if let url, let cgImage = Self.decode(url, maxPixelWidth: maxPixelWidth) {
             return store(cgImage, for: Key(url: url, width: width))
         }
-        guard let fallbackVideo, let frame = await Self.videoFrame(fallbackVideo, maxPixelWidth: maxPixelWidth) else { return nil }
+        guard let fallbackVideo else {
+            if url != nil { remember(request) }
+            return nil
+        }
         let key = Key(url: fallbackVideo, width: width)
+        guard let frame = await frame(for: fallbackVideo, key: key, maxPixelWidth: maxPixelWidth) else {
+            remember(request)
+            return nil
+        }
         // Another caller may have stored this frame while we awaited.
         if let entry = entries[key] { return entry.image }
         return store(frame, for: key)
+    }
+
+    /// One generation per video and width: concurrent requests await the same task.
+    private func frame(for video: URL, key: Key, maxPixelWidth: CGFloat) async -> CGImage? {
+        if let running = inFlightFrames[key] { return await running.value }
+        let generate = frameGenerator
+        let task = Task.detached { await generate(video, maxPixelWidth) }
+        inFlightFrames[key] = task
+        let frame = await task.value
+        inFlightFrames[key] = nil
+        return frame
+    }
+
+    private func remember(_ request: FailedRequest) {
+        failures.append(request)
+        if failures.count > maxFailures { failures.removeFirst(failures.count - maxFailures) }
     }
 
     func contains(_ url: URL, maxPixelWidth: CGFloat) -> Bool {
@@ -73,11 +119,13 @@ actor PosterCache {
     /// Drops every cached size of `url`.
     func remove(_ url: URL) {
         for key in order where key.url == url { drop(key) }
+        failures.removeAll { $0.poster == url || $0.video == url }
     }
 
     func removeAll() {
         entries.removeAll()
         order.removeAll()
+        failures.removeAll()
         totalBytes = 0
     }
 
@@ -127,7 +175,7 @@ actor PosterCache {
     }
 
     /// A frame from near the start of `url`, at most `maxPixelWidth` wide.
-    nonisolated private static func videoFrame(_ url: URL, maxPixelWidth: CGFloat) async -> CGImage? {
+    nonisolated static func videoFrame(_ url: URL, maxPixelWidth: CGFloat) async -> CGImage? {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
