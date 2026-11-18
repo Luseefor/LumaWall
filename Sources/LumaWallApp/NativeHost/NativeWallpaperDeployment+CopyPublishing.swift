@@ -205,12 +205,29 @@ extension NativeWallpaperDeployment {
                 && (try? entry(id: parts[0], videosFolderURL: videosFolderURL))??.contentHash == parts[1]
             if !keep { try? fm.removeItem(at: file) }
         }
+        // Older versions exported "<copy name>.<UUID>.tmp.mov" inside the
+        // entry. Only entries whose metadata.json reads and names another
+        // primary are touched: the extension may have recovered one of these
+        // as the primary, and deleting it makes the extension prune the entry.
         let entries = (try? fm.contentsOfDirectory(at: videosFolderURL, includingPropertiesForKeys: nil)) ?? []
         for dir in entries {
+            let id = dir.lastPathComponent
+            guard PathSafety.isValidEntryID(id),
+                  let entry = try? entry(id: id, videosFolderURL: videosFolderURL)
+            else { continue }
             let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-            for file in files where file.lastPathComponent.hasSuffix(".tmp.mov") {
+            for file in files where file.lastPathComponent != entry.filename && isLegacyExport(file.lastPathComponent) {
                 try? fm.removeItem(at: file)
             }
         }
+    }
+
+    private static func isLegacyExport(_ name: String) -> Bool {
+        let copies = ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov", "Wallpaper.qhd.mov"]
+        guard name.hasSuffix(".tmp.mov"),
+              let copy = copies.first(where: { name.hasPrefix($0 + ".") })
+        else { return false }
+        let uuid = name.dropFirst(copy.count + 1).dropLast(".tmp.mov".count)
+        return UUID(uuidString: String(uuid)) != nil
     }
 }

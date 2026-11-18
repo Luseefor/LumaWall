@@ -340,4 +340,29 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: current.path))
         XCTAssertTrue(fm.fileExists(atPath: videos.appendingPathComponent(id).appendingPathComponent("metadata.json").path))
     }
+
+    func testLegacyCleanupKeepsAPrimaryRecoveredFromAnExport() throws {
+        // The extension can recover an old export as an entry's primary
+        // video. Deleting it made the extension prune the whole entry.
+        let fm = FileManager.default
+        let recovered = "Wallpaper.minimal.mov.\(UUID().uuidString).tmp.mov"
+        let dir = videos.appendingPathComponent(id)
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: recovered, duration: 5, fps: 30,
+            resolution: CGSize(width: 1280, height: 720), dateAdded: Date()
+        )
+        try JSONEncoder().encode(entry).write(to: dir.appendingPathComponent("metadata.json"))
+        let userFile = dir.appendingPathComponent("Holiday.tmp.mov")
+        for url in [dir.appendingPathComponent(recovered), userFile] { try Data("x".utf8).write(to: url) }
+        // No readable metadata: the extension may still recover this one.
+        let unlisted = videos.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: unlisted, withIntermediateDirectories: true)
+        let orphan = unlisted.appendingPathComponent("Wallpaper.qhd.mov.\(UUID().uuidString).tmp.mov")
+        try Data("x".utf8).write(to: orphan)
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(recovered).path))
+        XCTAssertTrue(fm.fileExists(atPath: userFile.path))
+        XCTAssertTrue(fm.fileExists(atPath: orphan.path))
+    }
 }
