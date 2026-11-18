@@ -77,4 +77,22 @@ final class VariantSelectionTests: XCTestCase {
         let reduced = VariantSelection.variant(for: .reduced, sourceFPS: 30, sourceResolution: source, variants: copies)
         XCTAssertEqual(reduced?.filename, "Wallpaper.reduced.mov")
     }
+
+    func testFullQualityPicksTheQHDCopyWhereTheAppPlansIt() {
+        // Rows shared with the app's planning test (QHDFitFixtures.swift).
+        for fixture in QHDFitFixtures.rows {
+            // Battery copies are capped at 30 fps; the 1440p one keeps the source rate.
+            let battery = Int(min(fixture.fps, 30).rounded())
+            let copies = [
+                VideoVariant(filename: "Wallpaper.reduced.mov", fps: battery, resolution: fixture.reduced),
+                VideoVariant(filename: "Wallpaper.minimal.mov", fps: battery, resolution: fixture.minimal),
+                VideoVariant(filename: "Wallpaper.qhd.mov", fps: Int(fixture.fps.rounded()), resolution: fixture.qhd),
+            ]
+            let pick = VariantSelection.variant(
+                for: .full, sourceFPS: Int(fixture.fps.rounded()), sourceResolution: fixture.source,
+                variants: copies, displayPixels: fixture.display
+            )
+            XCTAssertEqual(pick?.filename == "Wallpaper.qhd.mov", fixture.playsQHD, "\(fixture)")
+        }
+    }
 }

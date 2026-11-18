@@ -5,28 +5,8 @@ import LumaWallCore
 /// Smaller copies of deployed wallpapers: the battery tiers play them, and
 /// Full Quality plays one when it still fills the display.
 extension NativeWallpaperDeployment {
-    /// Transcoded-sibling work currently running, keyed "entryID/filename".
-    /// Restores fan out one `ensureVariants` per display and tier switches can
-    /// overlap them; without this two workers transcode the same multi-GB
-    /// source at once and race the move into place. Lock-guarded: this runs on
-    /// detached tasks, not MainActor.
-    private static let variantWorkLock = NSLock()
-    nonisolated(unsafe) private static var variantWorkInFlight = Set<String>()
-
-    private static func claimVariantWork(_ key: String) -> Bool {
-        variantWorkLock.lock()
-        defer { variantWorkLock.unlock() }
-        return variantWorkInFlight.insert(key).inserted
-    }
-
-    private static func finishVariantWork(_ key: String) {
-        variantWorkLock.lock()
-        defer { variantWorkLock.unlock() }
-        variantWorkInFlight.remove(key)
-    }
-
     /// One smaller copy to keep next to a deployed wallpaper.
-    struct VariantSpec: Equatable {
+    struct VariantSpec: Equatable, Sendable {
         let filename: String
         let preset: String
         /// Scaled into this box, keeping the source aspect.
@@ -52,8 +32,48 @@ extension NativeWallpaperDeployment {
     /// The copies a source should have. The 1080p and 720p copies serve the
     /// battery tiers, capped at 30 fps. The 1440p copy keeps the source rate
     /// so Full Quality on a 1440p monitor can skip decoding 4K. Copies at or
-    /// above the source size are never made.
-    static func variantSpecs(sourceSize: CGSize, sourceFPS: Double) -> [VariantSpec] {
+    /// above the source size are never made. With `displayPixels` (connected
+    /// displays, in pixels) the 1440p copy is planned only when one of them
+    /// would play it.
+    static func variantSpecs(sourceSize: CGSize, sourceFPS: Double, displayPixels: [CGSize]? = nil) -> [VariantSpec] {
+        let specs = allVariantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS)
+        guard let displayPixels else { return specs }
+        return specs.filter { spec in
+            !spec.forFullQuality || displayPixels.contains { display in
+                fullQualityPick(among: specs, sourceSize: sourceSize, sourceFPS: sourceFPS, display: display) == spec
+            }
+        }
+    }
+
+    /// The copy the extension's Full Quality selection would play on
+    /// `display`: the smallest one at the source rate that aspect-fills it
+    /// without upscaling. Mirrors `VariantSelection.smallestFilling`.
+    static func fullQualityPick(among specs: [VariantSpec], sourceSize: CGSize, sourceFPS: Double, display: CGSize) -> VariantSpec? {
+        guard display.width > 0, display.height > 0 else { return nil }
+        let sourceRate = Int(sourceFPS.rounded())
+        func area(_ spec: VariantSpec) -> CGFloat {
+            let size = copySize(source: sourceSize, fitting: spec.fitting)
+            return size.width * size.height
+        }
+        return specs
+            .filter { $0.recordedFPS >= sourceRate }
+            .filter { spec in
+                let size = copySize(source: sourceSize, fitting: spec.fitting)
+                return size.width > 0 && size.height > 0
+                    && max(display.width / size.width, display.height / size.height) <= 1
+            }
+            .min { area($0) < area($1) }
+    }
+
+    /// The frame size `scaledComposition` renders: the source scaled into
+    /// `box` with its aspect kept, rounded to even dimensions.
+    static func copySize(source: CGSize, fitting box: CGSize) -> CGSize {
+        guard source.width > 0, source.height > 0 else { return .zero }
+        let scale = min(box.width / source.width, box.height / source.height, 1)
+        return CGSize(width: (source.width * scale / 2).rounded() * 2, height: (source.height * scale / 2).rounded() * 2)
+    }
+
+    private static func allVariantSpecs(sourceSize: CGSize, sourceFPS: Double) -> [VariantSpec] {
         let longSide = max(sourceSize.width, sourceSize.height)
         let portrait = sourceSize.height > sourceSize.width
         func box(_ long: CGFloat, _ short: CGFloat) -> CGSize {
@@ -78,26 +98,21 @@ extension NativeWallpaperDeployment {
 
     /// True when the entry lacks a copy it should have: one added in a later
     /// version, one deleted from disk, or one made at a different frame rate.
-    static func needsVariants(_ entry: EntryInfo, fileExists: ((String) -> Bool)? = nil) -> Bool {
+    static func needsVariants(_ entry: EntryInfo, displayPixels: [CGSize], fileExists: ((String) -> Bool)? = nil) -> Bool {
         let exists = fileExists ?? { filename in
             FileManager.default.fileExists(atPath: videosFolderURL
                 .appendingPathComponent(entry.id, isDirectory: true)
                 .appendingPathComponent(filename).path)
         }
         let have = entry.variants ?? []
-        return variantSpecs(sourceSize: entry.resolution, sourceFPS: entry.fps).contains { spec in
+        return variantSpecs(sourceSize: entry.resolution, sourceFPS: entry.fps, displayPixels: displayPixels).contains { spec in
             !have.contains { $0.filename == spec.filename && $0.fps == spec.recordedFPS && exists($0.filename) }
         }
     }
 
-    /// Copies that failed this session, keyed "entryID/filename". A failure
-    /// that keeps happening (disk full, unreadable source) would otherwise
-    /// re-run most of an encode on every apply and restore.
-    nonisolated(unsafe) private static var failedVariantWork = Set<String>()
-
     /// The 1440p copy only helps Full Quality on AC power, so it waits for AC
     /// instead of spending battery on an encode.
-    private static var canMakeFullQualityCopies: Bool {
+    static var canMakeFullQualityCopies: Bool {
         !PowerStatus.current().isOnBattery && !ProcessInfo.processInfo.isLowPowerModeEnabled
     }
 
@@ -107,98 +122,40 @@ extension NativeWallpaperDeployment {
         return current.filter { !replaced.contains($0.filename) } + added
     }
 
-    /// Transcode the copies `variantSpecs` plans and record them in
-    /// metadata.json. Idempotent: skips copies already listed with a file on
-    /// disk and regenerates missing ones. Runs detached in the background. A
-    /// multi-GB 4K transcode must never block applying the wallpaper.
-    ///
-    /// Without these files the extension's variant selector always falls back
-    /// to the full file, so Automatic-on-battery and Battery Saver resolve a
-    /// cheaper tier and then play the exact same bytes ("does nothing").
-    static func ensureVariants(for entryID: String, sourceURL: URL, sourceFPS: Double, sourceSize: CGSize) async {
-        guard PathSafety.isValidEntryID(entryID) else { return }
-        let fm = FileManager.default
-        let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
-        guard fm.fileExists(atPath: dir.path) else { return }
-        let fullQualityAllowed = canMakeFullQualityCopies
-        let specs = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS).filter { !$0.forFullQuality || fullQualityAllowed }
-        guard !specs.isEmpty else { return }
-        var changed = false
-        for spec in specs {
-            let workKey = entryID + "/" + spec.filename
-            guard claimVariantWork(workKey) else { continue }
-            defer { finishVariantWork(workKey) }
-            // Recheck under the claim: another worker may have finished this
-            // copy after the caller decided it was missing.
-            if isRecorded(spec, entryID: entryID, in: dir) { continue }
-            if variantWorkLock.withLock({ failedVariantWork.contains(workKey) }) { continue }
-            guard let variant = await transcode(sourceURL: sourceURL, dir: dir, spec: spec) else {
-                variantWorkLock.withLock { _ = failedVariantWork.insert(workKey) }
-                continue
-            }
-            // Record before releasing the claim, so no worker sees the file
-            // without its metadata entry and encodes it again.
-            record([variant], for: entryID, in: dir)
-            changed = true
-        }
-        if changed { notifyLibraryChanged() }
-    }
+    enum TranscodeResult { case finished, failed, skipped }
 
-    private static func isRecorded(_ spec: VariantSpec, entryID: String, in dir: URL) -> Bool {
-        guard let entry = try? entry(id: entryID),
-              (entry.variants ?? []).contains(where: { $0.filename == spec.filename && $0.fps == spec.recordedFPS })
-        else { return false }
-        return FileManager.default.fileExists(atPath: dir.appendingPathComponent(spec.filename).path)
-    }
-
-    /// Re-reads metadata.json and merges `produced` into it. Another worker
-    /// may have recorded its own copy since this one started; writing the
-    /// list read before transcoding dropped that copy.
-    private static func record(_ produced: [NativeVideoVariant], for entryID: String, in dir: URL) {
-        variantMetadataLock.withLock {
-            guard var latest = try? entry(id: entryID) else { return }
-            let fm = FileManager.default
-            let current = (latest.variants ?? []).filter { fm.fileExists(atPath: dir.appendingPathComponent($0.filename).path) }
-            latest.variants = merging(current, with: produced)
-            if let data = try? JSONEncoder().encode(latest) {
-                try? data.write(to: dir.appendingPathComponent("metadata.json"), options: .atomic)
-            }
-        }
-    }
-
-    /// Serializes the read-merge-write of metadata.json across workers.
-    private static let variantMetadataLock = NSLock()
-
-    private static func transcode(sourceURL: URL, dir: URL, spec: VariantSpec) async -> NativeVideoVariant? {
+    /// Exports `spec` to `output`, writing a `.partial.mov` beside it first
+    /// so an interrupted export never sits under the finished name.
+    /// `proceed` is asked once more right before the export starts, after
+    /// the composition is set up; a no, or task cancellation, skips it.
+    static func transcode(sourceURL: URL, to output: URL, spec: VariantSpec, proceed: () -> Bool) async -> TranscodeResult {
         let source = AVURLAsset(url: sourceURL)
-        guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return nil }
-        let temp = dir.appendingPathComponent("\(spec.filename).\(UUID().uuidString).tmp.mov")
+        guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return .failed }
+        let partial = output.deletingPathExtension().appendingPathExtension("\(UUID().uuidString).partial.mov")
         do {
-            guard let composition = try await scaledComposition(for: source, fitting: spec.fitting, fps: spec.fps) else { return nil }
+            guard let composition = try await scaledComposition(for: source, fitting: spec.fitting, fps: spec.fps) else { return .failed }
             export.videoComposition = composition
-            try await export.export(to: temp, as: .mov)
-            let probed = AVURLAsset(url: temp)
-            var resolution = CGSize.zero
-            if let track = try? await probed.loadTracks(withMediaType: .video).first,
-               let natural = try? await track.load(.naturalSize),
-               let transform = try? await track.load(.preferredTransform) {
-                let transformed = natural.applying(transform)
-                resolution = CGSize(width: abs(transformed.width), height: abs(transformed.height))
-            }
-            guard resolution.width > 0, resolution.height > 0 else {
-                try? FileManager.default.removeItem(at: temp)
-                return nil
-            }
-            let dest = dir.appendingPathComponent(spec.filename)
-            if FileManager.default.fileExists(atPath: dest.path) {
-                try? FileManager.default.removeItem(at: dest)
-            }
-            try FileManager.default.moveItem(at: temp, to: dest)
-            return NativeVideoVariant(filename: spec.filename, fps: spec.recordedFPS, resolution: resolution)
+            guard !Task.isCancelled, proceed() else { return .skipped }
+            try await export.export(to: partial, as: .mov)
+            try? FileManager.default.removeItem(at: output)
+            try FileManager.default.moveItem(at: partial, to: output)
+            return .finished
         } catch {
-            try? FileManager.default.removeItem(at: temp)
-            return nil
+            try? FileManager.default.removeItem(at: partial)
+            return Task.isCancelled || error is CancellationError ? .skipped : .failed
         }
+    }
+
+    /// Oriented pixel size of a movie's video track, or nil when unreadable.
+    static func videoSize(of url: URL) async -> CGSize? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let natural = try? await track.load(.naturalSize),
+              let transform = try? await track.load(.preferredTransform)
+        else { return nil }
+        let transformed = natural.applying(transform)
+        let size = CGSize(width: abs(transformed.width), height: abs(transformed.height))
+        return size.width > 0 && size.height > 0 ? size : nil
     }
 
     /// Frame duration for a copy that keeps the source cadence. NTSC rates
@@ -237,7 +194,7 @@ extension NativeWallpaperDeployment {
         instruction.layerInstructions = [layer]
         let composition = AVMutableVideoComposition()
         composition.instructions = [instruction]
-        composition.renderSize = CGSize(width: (width * scale / 2).rounded() * 2, height: (height * scale / 2).rounded() * 2)
+        composition.renderSize = copySize(source: CGSize(width: width, height: height), fitting: box)
         composition.frameDuration = copyFrameDuration(nominalFPS: fps)
         return composition
     }

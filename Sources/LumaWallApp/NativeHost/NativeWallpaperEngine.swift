@@ -52,7 +52,7 @@ final class NativeWallpaperEngine {
         }
         let entry: NativeWallpaperDeployment.EntryInfo
         do {
-            entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset)
+            entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, surfaces: surfaces(showing: asset.id, plus: [connected]))
             nativeHostLog.info("apply: deployment ready id=\(entry.id, privacy: .public)")
             try NativeWallpaperAssignmentService.apply(entry: entry, to: [connected.cgDisplayID])
         } catch {
@@ -62,7 +62,9 @@ final class NativeWallpaperEngine {
         }
         nativeHostLog.info("apply: \(asset.name, privacy: .public) → display \(displayID.rawValue, privacy: .public)")
         libraryByID[asset.id] = asset
+        let replaced = active[displayID]?.0
         active[displayID] = (asset.id, composition)
+        if let replaced, replaced != asset.id { reportSurfaces(of: replaced) }
         if let uuid = stableUUID(for: connected.cgDisplayID) {
             lastWrittenMap[uuid] = entry.id
         }
@@ -75,11 +77,13 @@ final class NativeWallpaperEngine {
     func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
         let connected = displays.refresh()
         guard !connected.isEmpty else { throw OverlayWallpaperEngine.EngineError.missingDisplay }
-        let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset)
+        let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, surfaces: connected.map(surface(on:)))
         try NativeWallpaperAssignmentService.apply(
             entry: entry,
             to: Set(connected.map(\.cgDisplayID))
         )
+        let previous = Set(active.values.map(\.0))
+        defer { reportSurfaces(ofAll: previous) }
         nativeHostLog.info("applyToAll: \(asset.name, privacy: .public) → \(connected.count) display(s)")
         libraryByID[asset.id] = asset
         for display in connected {
@@ -94,7 +98,7 @@ final class NativeWallpaperEngine {
     }
 
     func clear(_ displayID: DisplayID) async throws {
-        active.removeValue(forKey: displayID)
+        if let removed = active.removeValue(forKey: displayID)?.0 { reportSurfaces(of: removed) }
         tiers.removeValue(forKey: displayID)
         if let cg = displays.display(id: displayID)?.cgDisplayID,
            let uuid = stableUUID(for: cg) {
@@ -104,7 +108,9 @@ final class NativeWallpaperEngine {
     }
 
     func clearAll() async throws {
+        let removed = Set(active.values.map(\.0))
         active.removeAll()
+        reportSurfaces(ofAll: removed)
         tiers.removeAll()
         lastWrittenMap.removeAll()
         try await assignments.clearAll()
@@ -112,6 +118,29 @@ final class NativeWallpaperEngine {
 
     func apply(tier: PlaybackTier, to displayID: DisplayID) {
         tiers[displayID] = tier
+        if let wallpaperID = active[displayID]?.0 { reportSurfaces(of: wallpaperID) }
+    }
+
+    private func surface(on display: ConnectedDisplay) -> NativeWallpaperDeployment.Surface {
+        .init(pixelSize: display.pixelSize, tier: tiers[display.displayID] ?? .full)
+    }
+
+    /// The displays showing `wallpaperID`, plus `extra` it is about to go on.
+    private func surfaces(showing wallpaperID: WallpaperID, plus extra: [ConnectedDisplay] = []) -> [NativeWallpaperDeployment.Surface] {
+        let showing = displays.displays.filter { active[$0.displayID]?.0 == wallpaperID }
+        let extraIDs = Set(extra.map(\.displayID))
+        return (showing.filter { !extraIDs.contains($0.displayID) } + extra).map(surface(on:))
+    }
+
+    /// Reports every wallpaper in `previous` or showing now, so one that
+    /// lost all its displays reports none and its 1440p job is dropped.
+    private func reportSurfaces(ofAll previous: Set<WallpaperID>) {
+        previous.union(active.values.map(\.0)).forEach(reportSurfaces(of:))
+    }
+
+    /// Tells the copy queue where a wallpaper plays and at which tiers.
+    private func reportSurfaces(of wallpaperID: WallpaperID) {
+        NativeWallpaperDeployment.playbackChanged(entryID: wallpaperID.rawValue.uuidString, surfaces: surfaces(showing: wallpaperID))
     }
 
     /// Restores persisted assignments through the system host. When the overlay
@@ -121,6 +150,8 @@ final class NativeWallpaperEngine {
         let connected = displays.refresh()
         let connectedIDs = Set(connected.map(\.displayID))
         let connectedUUIDs = Set(connected.compactMap { stableUUID(for: $0.cgDisplayID) })
+        let previous = Set(active.values.map(\.0))
+        defer { reportSurfaces(ofAll: previous) }
         // Drop bookkeeping for removed displays so stale entries can't make
         // the restore look like a no-op (or leak ghost wallpapers into the UI).
         for id in Array(active.keys) where !connectedIDs.contains(id) {
@@ -148,21 +179,30 @@ final class NativeWallpaperEngine {
         let enabled = snapshot.assignments.filter(\.isEnabled)
         nativeHostLog.info("restore: \(enabled.count) enabled assignment(s), \(connected.count) display(s)")
         var map: [UInt32: NativeWallpaperDeployment.EntryInfo] = [:]
+        let skipped: (DisplayAssignment) -> Bool = { assignment in
+            onlyDefaultCrop && (!assignment.composition.usesDefaultCrop || assignment.composition.spanningCanvas != nil)
+        }
+        // Each wallpaper's copies are planned for the displays it goes on.
+        var targets: [WallpaperID: [ConnectedDisplay]] = [:]
+        for assignment in enabled where !skipped(assignment) {
+            if let wallpaperID = assignment.wallpaperID,
+               let display = connected.first(where: { $0.displayID == assignment.displayID }) {
+                targets[wallpaperID, default: []].append(display)
+            }
+        }
         for assignment in enabled {
             guard let wallpaperID = assignment.wallpaperID, let asset = byID[wallpaperID] else {
                 nativeHostLog.error("restore: wallpaper \(assignment.wallpaperID?.rawValue.uuidString ?? "nil", privacy: .public) not in library")
                 continue
             }
-            if onlyDefaultCrop, (!assignment.composition.usesDefaultCrop
-                || assignment.composition.spanningCanvas != nil) {
-                continue
-            }
+            if skipped(assignment) { continue }
             guard let display = connected.first(where: { $0.displayID == assignment.displayID }) else {
                 nativeHostLog.error("restore: display \(assignment.displayID.rawValue, privacy: .public) not connected")
                 continue
             }
             do {
-                let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset)
+                let surfaces = (targets[wallpaperID] ?? [display]).map(surface(on:))
+                let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, surfaces: surfaces)
                 map[display.cgDisplayID] = entry
                 active[assignment.displayID] = (asset.id, assignment.composition)
             } catch {

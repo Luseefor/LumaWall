@@ -109,6 +109,71 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertEqual(names(CGSize(width: 1280, height: 720)), [])
     }
 
+    func testQHDCopyIsPlannedOnlyForDisplaysThatPlayIt() {
+        // A 4K encode ran even when every display was 4K and would never play it.
+        for fixture in QHDFitFixtures.rows {
+            let planned = NativeWallpaperDeployment.variantSpecs(sourceSize: fixture.source, sourceFPS: fixture.fps, displayPixels: [fixture.display])
+            XCTAssertEqual(planned.contains { $0.filename == "Wallpaper.qhd.mov" }, fixture.playsQHD, "\(fixture)")
+        }
+        let uhd = CGSize(width: 3840, height: 2160)
+        func plansQHD(_ displays: [CGSize]) -> Bool {
+            NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: 60, displayPixels: displays)
+                .contains { $0.filename == "Wallpaper.qhd.mov" }
+        }
+        XCTAssertFalse(plansQHD([]))
+        XCTAssertTrue(plansQHD([uhd, CGSize(width: 2560, height: 1440)]))
+        // Battery copies don't depend on the displays.
+        XCTAssertEqual(NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: 60, displayPixels: [uhd]).map(\.filename),
+                       ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
+    }
+
+    func testCopySizesMatchTheSharedFixtures() {
+        // The extension's selection test builds its copies with these sizes.
+        let size = NativeWallpaperDeployment.copySize(source:fitting:)
+        for fixture in QHDFitFixtures.rows {
+            XCTAssertEqual(size(fixture.source, CGSize(width: 1920, height: 1080)), fixture.reduced)
+            XCTAssertEqual(size(fixture.source, CGSize(width: 1280, height: 720)), fixture.minimal)
+            XCTAssertEqual(size(fixture.source, CGSize(width: 2560, height: 1440)), fixture.qhd)
+        }
+    }
+
+    func testCopyReadinessFollowsWhatEachSurfacePlays() {
+        typealias Surface = NativeWallpaperDeployment.Surface
+        let uhd = CGSize(width: 3840, height: 2160)
+        let qhd = CGSize(width: 2560, height: 1440)
+        func readiness(_ filename: String, _ surfaces: [Surface], fps: Double = 60, power: Bool = true) -> NativeWallpaperDeployment.VariantEncodeQueue.Readiness {
+            let spec = NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: fps).first { $0.filename == filename }!
+            return NativeWallpaperDeployment.copyReadiness(spec, sourceSize: uhd, sourceFPS: fps, surfaces: surfaces, canMakeOptionalCopies: power)
+        }
+        // Battery Saver plays the 720p copy, so it goes before the 1080p one.
+        let saver = [Surface(pixelSize: qhd, tier: .minimal)]
+        XCTAssertEqual(readiness("Wallpaper.minimal.mov", saver), .ready(rank: 0))
+        XCTAssertEqual(readiness("Wallpaper.reduced.mov", saver), .ready(rank: 1))
+        XCTAssertEqual(readiness("Wallpaper.reduced.mov", [Surface(pixelSize: uhd, tier: .reduced)]), .ready(rank: 0))
+        // Full Quality on a 1440p display plays the 1440p copy: it went
+        // after both battery copies nobody was playing.
+        let full = [Surface(pixelSize: qhd, tier: .full)]
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", full), .ready(rank: 0))
+        XCTAssertEqual(readiness("Wallpaper.minimal.mov", full), .ready(rank: 1))
+        // A 30 fps source on a 1080p display at Full Quality plays the 1080p copy.
+        XCTAssertEqual(readiness("Wallpaper.reduced.mov", [Surface(pixelSize: CGSize(width: 1920, height: 1080), tier: .full)], fps: 30), .ready(rank: 0))
+        // The 1440p copy is held while power or the tier keeps it unplayed,
+        // and dropped once no surface fits it.
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", full, power: false), .hold)
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", saver), .hold)
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", [Surface(pixelSize: uhd, tier: .full)]), .drop)
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", []), .drop)
+    }
+
+    func testNoBackfillForAQHDCopyNoDisplayPlays() {
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: UUID().uuidString, name: "x", filename: "Wallpaper.mp4", duration: 5, fps: 60,
+            resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants
+        )
+        XCTAssertFalse(NativeWallpaperDeployment.needsVariants(entry, displayPixels: [CGSize(width: 3840, height: 2160)], fileExists: { _ in true }))
+        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(entry, displayPixels: [CGSize(width: 2560, height: 1440)], fileExists: { _ in true }))
+    }
+
     func testQHDCopyKeepsTheSourceAspect() {
         let qhd = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 4096, height: 2304), sourceFPS: 60).first { $0.filename == "Wallpaper.qhd.mov" }
         XCTAssertEqual(qhd?.fitting, CGSize(width: 2560, height: 1440))
@@ -143,23 +208,25 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertEqual(replaced.first?.fps, 30)
     }
 
+    private let qhdDisplay = [CGSize(width: 2560, height: 1440)]
+
     func testEntryMissingAnyPlannedCopyNeedsBackfill() {
         let entry = NativeWallpaperDeployment.EntryInfo(
             id: UUID().uuidString, name: "x", filename: "Wallpaper.mp4", duration: 5, fps: 60,
             resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants
         )
         // Has 1080p and 720p, not the 1440p copy added later.
-        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(entry, fileExists: { _ in true }))
+        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(entry, displayPixels: qhdDisplay, fileExists: { _ in true }))
         var complete = entry
         complete.variants = variants + [.init(filename: "Wallpaper.qhd.mov", fps: 60, resolution: CGSize(width: 2560, height: 1440))]
-        XCTAssertFalse(NativeWallpaperDeployment.needsVariants(complete, fileExists: { _ in true }))
+        XCTAssertFalse(NativeWallpaperDeployment.needsVariants(complete, displayPixels: qhdDisplay, fileExists: { _ in true }))
         // A battery copy made at 60 fps before the 30 fps cap: re-encode it.
         var stale = complete
         stale.variants = [.init(filename: "Wallpaper.reduced.mov", fps: 60, resolution: CGSize(width: 1920, height: 1080))] + variants.dropFirst()
             + [.init(filename: "Wallpaper.qhd.mov", fps: 60, resolution: CGSize(width: 2560, height: 1440))]
-        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(stale, fileExists: { _ in true }))
+        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(stale, displayPixels: qhdDisplay, fileExists: { _ in true }))
         // Listed in metadata but deleted from disk: repair it.
-        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(complete, fileExists: { $0 != "Wallpaper.qhd.mov" }))
+        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(complete, displayPixels: qhdDisplay, fileExists: { $0 != "Wallpaper.qhd.mov" }))
     }
 
     func testCopyFrameDurationKeepsTheSourceCadence() {
@@ -172,5 +239,125 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         // Irregular sources (29.75 nominal, 204 frames in 6.79 s) round to the
         // nearest whole rate; the shortest frame gap gave one extra frame.
         XCTAssertEqual(duration(29.75), CMTime(value: 1, timescale: 30))
+    }
+}
+
+final class VariantPublicationTests: XCTestCase {
+    private var root: URL!
+    private var videos: URL { root.appendingPathComponent("videos") }
+    private var staging: URL { root.appendingPathComponent("copy-staging") }
+    private let id = UUID().uuidString
+    private let minimal = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 3840, height: 2160), sourceFPS: 30)
+        .first { $0.filename == "Wallpaper.minimal.mov" }!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: videos.appendingPathComponent(id), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func deploy(hash: String) throws {
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: "Wallpaper.mov", duration: 5, fps: 30,
+            resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), contentHash: hash
+        )
+        try JSONEncoder().encode(entry).write(to: videos.appendingPathComponent(id).appendingPathComponent("metadata.json"))
+    }
+
+    private func job(hash: String) -> NativeWallpaperDeployment.VariantEncodeQueue.Job {
+        .init(entryID: id, sourceURL: URL(fileURLWithPath: "/tmp/x.mov"), contentHash: hash, spec: minimal)
+    }
+
+    private func stage(_ job: NativeWallpaperDeployment.VariantEncodeQueue.Job) throws -> URL {
+        let url = NativeWallpaperDeployment.stagedURL(for: job, stagingFolderURL: staging)
+        try Data("copy".utf8).write(to: url)
+        return url
+    }
+
+    private var dest: URL { videos.appendingPathComponent(id).appendingPathComponent(minimal.filename) }
+    private let size = CGSize(width: 1280, height: 720)
+
+    func testPublishesACopyForTheCurrentDeployment() throws {
+        try deploy(hash: "aaa")
+        let staged = try stage(job(hash: "aaa"))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .published)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+        let entry = try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)
+        XCTAssertEqual(entry?.variants?.map(\.filename), [minimal.filename])
+    }
+
+    func testCopyOfAReplacedSourceIsDiscarded() throws {
+        // Jobs were keyed by entry and filename only, so a copy planned for
+        // the old source could be published into the redeployed entry.
+        try deploy(hash: "new")
+        let staged = try stage(job(hash: "old"))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "old"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .stale)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+        XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)?.variants)
+    }
+
+    func testFailedMetadataWriteKeepsTheExportForRetry() throws {
+        // A failed metadata write counted as success: the extension never
+        // saw the copy and the next request encoded it again.
+        try deploy(hash: "aaa")
+        let staged = try stage(job(hash: "aaa"))
+        let failed = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos,
+                                                       writeMetadata: { _, _ in throw CocoaError(.fileWriteOutOfSpace) })
+        XCTAssertEqual(failed, .failed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        let retried = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(retried, .published)
+    }
+
+    func testStartupCleanupRemovesAbandonedExports() throws {
+        // A quit mid-export left a multi-GB temp movie that the extension's
+        // recovery scan could pick as the wallpaper.
+        try deploy(hash: "aaa")
+        let fm = FileManager.default
+        let partial = staging.appendingPathComponent("\(id).\(UUID().uuidString).partial.mov")
+        let legacyTemp = videos.appendingPathComponent(id).appendingPathComponent("Wallpaper.minimal.mov.\(UUID().uuidString).tmp.mov")
+        let current = try stage(job(hash: "aaa"))
+        let stale = try stage(job(hash: "old"))
+        for url in [partial, legacyTemp] { try Data("x".utf8).write(to: url) }
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        XCTAssertFalse(fm.fileExists(atPath: partial.path))
+        XCTAssertFalse(fm.fileExists(atPath: legacyTemp.path))
+        XCTAssertFalse(fm.fileExists(atPath: stale.path))
+        XCTAssertTrue(fm.fileExists(atPath: current.path))
+        XCTAssertTrue(fm.fileExists(atPath: videos.appendingPathComponent(id).appendingPathComponent("metadata.json").path))
+    }
+
+    func testLegacyCleanupKeepsAPrimaryRecoveredFromAnExport() throws {
+        // The extension can recover an old export as an entry's primary
+        // video. Deleting it made the extension prune the whole entry.
+        let fm = FileManager.default
+        let recovered = "Wallpaper.minimal.mov.\(UUID().uuidString).tmp.mov"
+        let dir = videos.appendingPathComponent(id)
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: recovered, duration: 5, fps: 30,
+            resolution: CGSize(width: 1280, height: 720), dateAdded: Date()
+        )
+        try JSONEncoder().encode(entry).write(to: dir.appendingPathComponent("metadata.json"))
+        let userFile = dir.appendingPathComponent("Holiday.tmp.mov")
+        for url in [dir.appendingPathComponent(recovered), userFile] { try Data("x".utf8).write(to: url) }
+        // No readable metadata: the extension may still recover this one.
+        let unlisted = videos.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: unlisted, withIntermediateDirectories: true)
+        let orphan = unlisted.appendingPathComponent("Wallpaper.qhd.mov.\(UUID().uuidString).tmp.mov")
+        try Data("x".utf8).write(to: orphan)
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(recovered).path))
+        XCTAssertTrue(fm.fileExists(atPath: userFile.path))
+        XCTAssertTrue(fm.fileExists(atPath: orphan.path))
     }
 }

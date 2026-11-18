@@ -75,41 +75,110 @@ enum NativeWallpaperDeployment {
         WallpaperHostCapabilities.extensionDocumentsURL.appendingPathComponent("videos", isDirectory: true)
     }
 
-    /// Content-hash cache keyed by file path. Restores call `ensureDeployed`
-    /// once per display, and without this each of them re-hashes the same
-    /// multi-GB source, stalling multi-monitor restores and burning battery
-    /// to prove what the first hash already proved. Entries are validated by
-    /// size + mtime; only touched on MainActor (all callers are).
+    /// Verified content hashes keyed by source path and a file fingerprint,
+    /// kept in memory and in a JSON file. Restores call `ensureDeployed` once
+    /// per display, and every launch used to SHA-256 each multi-GB source
+    /// again to prove what the last launch already proved.
     @MainActor
-    private static var hashCache: [String: (size: UInt64, mtime: Date, hash: String)] = [:]
+    final class ContentHashStore {
+        typealias Hasher = @Sendable (URL) async throws -> String
+
+        /// Size and modification date alone miss a same-size replacement
+        /// that keeps the old date. The inode catches a file swapped in, and
+        /// the change time catches any rewrite in place, since setting the
+        /// modification date back also bumps it.
+        struct Fingerprint: Codable, Equatable {
+            var device: Int64
+            var inode: UInt64
+            var size: Int64
+            var mtime: TimeInterval
+            var ctime: TimeInterval
+
+            init?(url: URL) {
+                var info = stat()
+                guard stat(url.path, &info) == 0 else { return nil }
+                func seconds(_ time: timespec) -> TimeInterval { TimeInterval(time.tv_sec) + TimeInterval(time.tv_nsec) / 1e9 }
+                device = Int64(info.st_dev)
+                inode = UInt64(info.st_ino)
+                size = Int64(info.st_size)
+                mtime = seconds(info.st_mtimespec)
+                ctime = seconds(info.st_ctimespec)
+            }
+        }
+
+        private struct Record: Codable {
+            var fingerprint: Fingerprint
+            var hash: String
+        }
+
+        private let fileURL: URL?
+        private let hasher: Hasher
+        private var records: [String: Record]?
+
+        init(fileURL: URL?, hasher: @escaping Hasher) {
+            self.fileURL = fileURL
+            self.hasher = hasher
+        }
+
+        func hash(for url: URL) async throws -> String {
+            let key = url.standardizedFileURL.path
+            let before = Fingerprint(url: url)
+            if let before, let cached = loaded()[key], cached.fingerprint == before {
+                return cached.hash
+            }
+            let hash = try await hasher(url)
+            // A file that changed while it was read has no hash worth keeping.
+            if let before, Fingerprint(url: url) == before {
+                records?[key] = Record(fingerprint: before, hash: hash)
+                save()
+            }
+            return hash
+        }
+
+        private func loaded() -> [String: Record] {
+            if let records { return records }
+            // A missing or unreadable file only costs one rehash per source.
+            let decoded = fileURL
+                .flatMap { try? Data(contentsOf: $0) }
+                .flatMap { try? JSONDecoder().decode([String: Record].self, from: $0) }
+            records = decoded ?? [:]
+            return records ?? [:]
+        }
+
+        private func save() {
+            guard let fileURL, let records else { return }
+            // Sources deleted from disk would otherwise stay listed forever.
+            let live = records.filter { FileManager.default.fileExists(atPath: $0.key) }
+            self.records = live
+            if let data = try? JSONEncoder().encode(live) {
+                try? data.write(to: fileURL, options: .atomic)
+            }
+        }
+    }
 
     @MainActor
-    private static func cachedContentHash(for url: URL) async throws -> String {
-        let key = url.standardizedFileURL.path
-        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attributes?[.size] as? NSNumber)?.uint64Value
-        let mtime = attributes?[.modificationDate] as? Date
-        if let size, let mtime,
-           let cached = hashCache[key], cached.size == size, cached.mtime == mtime {
-            return cached.hash
-        }
-        let hash = try await contentHash(for: url)
-        if let size, let mtime {
-            hashCache[key] = (size: size, mtime: mtime, hash: hash)
-        }
-        return hash
-    }
+    private static let hashStore = ContentHashStore(
+        fileURL: (try? StorePaths.appSupportBase())?.appendingPathComponent("content-hashes.json"),
+        hasher: { try await contentHash(for: $0) }
+    )
 
     static func videoURL(for entry: EntryInfo) -> URL {
         videosFolderURL.appendingPathComponent(entry.id, isDirectory: true)
             .appendingPathComponent(entry.filename)
     }
 
+    /// `surfaces` are the displays the wallpaper is going on, with their
+    /// tiers; they decide whether the optional 1440p copy is worth encoding
+    /// and which battery copy to encode first.
     @MainActor
-    static func ensureDeployed(asset: WallpaperAsset) async throws -> EntryInfo {
+    static func ensureDeployed(asset: WallpaperAsset, surfaces: [Surface]) async throws -> EntryInfo {
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
+        }
+        if !copyEncodingPrepared {
+            copyEncodingPrepared = true
+            Task.detached(priority: .utility) { await prepareCopyEncoding() }
         }
         // Concurrent applies of the same wallpaper (double-click, playlist +
         // manual racing) used to interleave remove-dir → copy and corrupt the
@@ -120,32 +189,47 @@ enum NativeWallpaperDeployment {
             return try await running.value
         }
         let task = Task<EntryInfo, Error> {
-            try await deploy(asset: asset, entryID: entryID)
+            try await deploy(asset: asset, entryID: entryID, surfaces: surfaces)
         }
         deploymentTasks[entryID] = task
         defer { deploymentTasks.removeValue(forKey: entryID) }
         return try await task.value
     }
 
+    /// Set once the first deploy of this run has queued the cleanup of
+    /// exports a previous run left behind.
+    @MainActor
+    private static var copyEncodingPrepared = false
+
     /// Deploys currently running per entry (see `ensureDeployed`).
     @MainActor
     private static var deploymentTasks: [String: Task<EntryInfo, Error>] = [:]
 
     @MainActor
-    private static func deploy(asset: WallpaperAsset, entryID: String) async throws -> EntryInfo {
-        let hash = try await cachedContentHash(for: asset.mediaURL)
+    private static func deploy(asset: WallpaperAsset, entryID: String, surfaces: [Surface]) async throws -> EntryInfo {
+        let displayPixels = surfaces.map(\.pixelSize)
+        playbackChanged(entryID: entryID, surfaces: surfaces)
+        let hash = try await hashStore.hash(for: asset.mediaURL)
         if let existing = try entry(id: entryID),
            FileManager.default.fileExists(atPath: videoURL(for: existing).path),
            existing.contentHash == hash {
             // Libraries missing any planned copy (pre-variant ones, or ones
             // made before the 1440p copy existed) backfill in the background.
-            if needsVariants(existing) {
+            if needsVariants(existing, displayPixels: displayPixels) {
+                // Encode from the deployed original, not the library file:
+                // the library file can change after the hash check, and only
+                // deploy replaces the deployed one, under entryLock and
+                // followed by metadata carrying the new hash, which makes
+                // publication reject a copy made from the old one.
+                let deployed = videoURL(for: existing)
                 Task.detached {
                     await ensureVariants(
                         for: entryID,
-                        sourceURL: asset.mediaURL,
+                        contentHash: hash,
+                        sourceURL: deployed,
                         sourceFPS: existing.fps,
-                        sourceSize: existing.resolution
+                        sourceSize: existing.resolution,
+                        displayPixels: displayPixels
                     )
                 }
             }
@@ -158,8 +242,12 @@ enum NativeWallpaperDeployment {
             let fm = FileManager.default
             try fm.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
             let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
-            if fm.fileExists(atPath: dir.path) {
-                try fm.removeItem(at: dir)
+            // Under the entry lock, so a copy of the previous source that is
+            // being published finishes first and can't land after the reset.
+            try entryLock.withLock {
+                if fm.fileExists(atPath: dir.path) {
+                    try fm.removeItem(at: dir)
+                }
             }
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             let filename = PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
@@ -189,9 +277,11 @@ enum NativeWallpaperDeployment {
         Task.detached {
             await ensureVariants(
                 for: entryID,
+                contentHash: hash,
                 sourceURL: staged.dest,
                 sourceFPS: probe.fps,
-                sourceSize: probe.resolution
+                sourceSize: probe.resolution,
+                displayPixels: displayPixels
             )
         }
         return entry
