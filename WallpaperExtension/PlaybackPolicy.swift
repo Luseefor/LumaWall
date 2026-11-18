@@ -124,4 +124,30 @@ enum PlaybackPolicy: Int, Comparable {
         return worst
     }
 
+    /// What a renderer does when asked to move from `current` to `requested`.
+    struct Transition: Equatable {
+        enum Action: Equatable { case none, pause, rampDown, resume, rampUp }
+        /// The policy the renderer records.
+        var policy: PlaybackPolicy
+        var action: Action
+    }
+
+    /// Display sleep overrides every requested tier: a power, prefs, or agent
+    /// update that lands while the displays sleep records `.paused` and never
+    /// resumes or ramps, and sleep pauses without a ramp (a ramp-down keeps
+    /// decoding for seconds in the dark). Recording `.paused` rather than the
+    /// requested tier is what lets the wake recompute resume the renderer.
+    static func transition(
+        from current: PlaybackPolicy,
+        to requested: PlaybackPolicy,
+        animated: Bool,
+        displayAsleep: Bool,
+    ) -> Transition {
+        let target: PlaybackPolicy = displayAsleep ? .paused : requested
+        guard target != current else { return Transition(policy: current, action: .none) }
+        if target == .paused {
+            return Transition(policy: target, action: animated && !displayAsleep ? .rampDown : .pause)
+        }
+        return Transition(policy: target, action: animated ? .rampUp : .resume)
+    }
 }

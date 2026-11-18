@@ -430,20 +430,24 @@ final class VideoRenderer: @unchecked Sendable {
         }
     }
 
-    func applyPolicy(_ policy: PlaybackPolicy, animated: Bool = false) {
-        guard policy != currentPolicy else { return }
+    func applyPolicy(_ requested: PlaybackPolicy, animated: Bool = false) {
         let oldPolicy = currentPolicy
-        currentPolicy = policy
-        extensionLog("  [applyPolicy #\(debugID)] \(oldPolicy) → \(policy) animated=\(animated) asset=\(asset.url.lastPathComponent)")
+        let step = PlaybackPolicy.transition(
+            from: oldPolicy, to: requested, animated: animated,
+            displayAsleep: WallpaperState.shared.isDisplayAsleep,
+        )
+        guard step.action != .none else { return }
+        currentPolicy = step.policy
+        extensionLog("  [applyPolicy #\(debugID)] \(oldPolicy) → \(step.policy) (requested \(requested)) \(step.action) asset=\(asset.url.lastPathComponent)")
 
-        switch policy {
-        case .paused:
-            if animated {
-                rampDown()
-            } else {
-                pause()
-            }
-        case .full, .reduced, .minimal:
+        switch step.action {
+        case .none:
+            return
+        case .pause:
+            pause()
+        case .rampDown:
+            rampDown()
+        case .resume, .rampUp:
             // Battery tiers resolve to downscaled siblings via variantSelector,
             // but the selector is otherwise consulted only at loop boundaries,
             // without this, flipping to Battery Saver (or unplugging on
@@ -456,7 +460,7 @@ final class VideoRenderer: @unchecked Sendable {
                     switchVideo(to: url)
                 }
             }
-            if animated {
+            if step.action == .rampUp {
                 rampUp()
             } else {
                 resume()
