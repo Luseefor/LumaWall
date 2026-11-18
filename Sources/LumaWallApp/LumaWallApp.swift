@@ -37,6 +37,21 @@ struct LumaWallApp: App {
 #endif
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Set by `AppModel`: writes pending energy samples before the app quits.
+    @MainActor static var flushBeforeTermination: (@MainActor () async -> Void)?
+
+    /// Defers quitting until pending work is flushed, without blocking the
+    /// main thread; the flush has its own deadline.
+    nonisolated func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let flush = MainActor.assumeIsolated { Self.flushBeforeTermination }
+        guard let flush else { return .terminateNow }
+        Task { @MainActor in
+            await flush()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     nonisolated func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         DispatchQueue.main.async { sender.setActivationPolicy(.accessory) }
         return false

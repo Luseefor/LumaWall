@@ -18,6 +18,9 @@ public actor LibraryStore {
     public let rootURL: URL
     private let indexURL: URL
     private var assetsByID: [WallpaperID: WallpaperAsset] = [:]
+    /// Last folder-walk result. Cleared whenever the library changes, so the
+    /// walk runs once per change instead of once per ask.
+    private var cachedDiskUsage: Int64?
 
     public init(rootURL: URL? = nil) throws {
         let base = try StorePaths.appSupportBase(rootURL: rootURL)
@@ -107,13 +110,26 @@ public actor LibraryStore {
             throw StoreError.invalidLocation
         }
         try? FileManager.default.removeItem(at: folder)
+        cachedDiskUsage = nil
     }
 
     public func folder(for id: WallpaperID) -> URL {
         rootURL.appendingPathComponent(id.rawValue.uuidString, isDirectory: true)
     }
 
+    /// Bytes under the library root. Walks the folder only when the library
+    /// changed since the last call (any index write or remove); call
+    /// `invalidateDiskUsage()` after changing files outside those paths.
     public func diskUsageBytes() -> Int64 {
+        if let cachedDiskUsage { return cachedDiskUsage }
+        let total = measureDiskUsage()
+        cachedDiskUsage = total
+        return total
+    }
+
+    public func invalidateDiskUsage() { cachedDiskUsage = nil }
+
+    private func measureDiskUsage() -> Int64 {
         let urls = FileManager.default.enumerator(at: rootURL, includingPropertiesForKeys: [.fileSizeKey])
         var total: Int64 = 0
         while let url = urls?.nextObject() as? URL {
@@ -123,6 +139,9 @@ public actor LibraryStore {
     }
 
     private func persist() throws {
+        // Every index write changes the measured size, and install, update and
+        // remove change the library folders around it.
+        cachedDiskUsage = nil
         let values = assetsByID.values.sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
         try StoreIO.writeJSON(values, to: indexURL)
     }

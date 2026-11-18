@@ -76,8 +76,21 @@ extension AppModel {
         displays = displayCoordinator.displays
     }
 
-    func startStatsPolling() {
-        refreshStats(includeDiskUsage: true)
+    /// A diagnostics view (Settings, menu bar popover) reports whether it is
+    /// on screen. Live stats poll only while at least one is.
+    func setDiagnosticsViewer(_ id: UUID, visible: Bool) {
+        switch diagnosticsVisibility.set(id, visible: visible) {
+        case .becameVisible:
+            startStatsPolling()
+            Task { await refreshEnergyReport() }
+        case .becameHidden: stopStatsPolling()
+        case nil: break
+        }
+    }
+
+    private func startStatsPolling() {
+        guard statsTimer == nil else { return }
+        refreshStats()
         let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshStats() }
         }
@@ -86,22 +99,24 @@ extension AppModel {
         statsTimer = timer
     }
 
-    func refreshStats(includeDiskUsage: Bool = false) {
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
-        let result = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
-            }
-        }
-        if result == KERN_SUCCESS {
-            processMemoryMB = Double(info.resident_size) / 1_048_576
-        }
-        activeDecoderCount = engine.activeDecoderCount
+    private func stopStatsPolling() {
+        statsTimer?.invalidate()
+        statsTimer = nil
+    }
+
+    /// Refreshes the numbers the diagnostics views show. Does nothing while no
+    /// such view is visible; the view's first appearance refreshes again.
+    func refreshStats() {
+        guard diagnosticsVisibility.isVisible else { return }
+        processMemoryMB = Self.residentMemoryMB() ?? processMemoryMB
+        let decoders = engine.activeDecoderCount
+        if decoders != activeDecoderCount { activeDecoderCount = decoders }
         reduceMotionActive = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let cpu = cpuSampler.sample()
         processCPUPercent = cpu.process
         systemCPUPercent = cpu.system
+        // The IOKit callback and applyPlaybackPolicy() track power changes
+        // while no view is open; this only catches a change they missed.
         let previousPower = PowerStatus(isOnBattery: isOnBattery, percent: batteryPercent)
         let power = PowerStatus.current()
         batteryPercent = power.percent
@@ -109,28 +124,58 @@ extension AppModel {
         if power != previousPower {
             applyPlaybackPolicy()
         }
-        statsTick += 1
-        if includeDiskUsage || statsTick.isMultiple(of: 4) {
-            Task { @MainActor in
-                let bytes = await store.diskUsageBytes()
-                libraryDiskMB = Double(bytes) / 1_048_576
-            }
+        // Cached in the store: walks the library only after it changed.
+        Task { @MainActor in
+            let bytes = await store.diskUsageBytes()
+            let megabytes = Double(bytes) / 1_048_576
+            if megabytes != libraryDiskMB { libraryDiskMB = megabytes }
         }
-        if statsTick == 1 || statsTick.isMultiple(of: 4) {
-            let sample = EnergySample(
-                processCPUPercent: processCPUPercent,
-                systemCPUPercent: systemCPUPercent,
-                processMemoryMB: processMemoryMB,
-                batteryPercent: batteryPercent,
-                isOnBattery: isOnBattery,
-                decoderCount: activeDecoderCount,
-                powerProfile: powerProfile.rawValue,
-                playbackActive: !playbackStopped && !activeByDisplay.isEmpty
-            )
-            Task { @MainActor in
-                try? await energyLogStore.record(sample)
+    }
+
+    /// One energy sample a minute for the 24 h report, whether or not any
+    /// view is open. The store batches them and writes at most every 15 minutes.
+    func startEnergyLogging() {
+        guard energyTimer == nil else { return }
+        // The first sample should cover the first minute, not start its baseline.
+        _ = energyCPUSampler.sample()
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.recordEnergySample() }
+        }
+        timer.tolerance = 15
+        RunLoop.main.add(timer, forMode: .common)
+        energyTimer = timer
+    }
+
+    private func recordEnergySample() {
+        let cpu = energyCPUSampler.sample()
+        let power = PowerStatus.current()
+        let sample = EnergySample(
+            processCPUPercent: cpu.process,
+            systemCPUPercent: cpu.system,
+            processMemoryMB: Self.residentMemoryMB() ?? 0,
+            batteryPercent: power.percent,
+            isOnBattery: power.isOnBattery,
+            decoderCount: engine.activeDecoderCount,
+            powerProfile: powerProfile.rawValue,
+            playbackActive: !playbackStopped && !activeByDisplay.isEmpty
+        )
+        Task { @MainActor in
+            try? await energyLogStore.record(sample)
+            if diagnosticsVisibility.isVisible {
                 await refreshEnergyReport()
             }
         }
+    }
+
+    private static func residentMemoryMB() -> Double? {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return Double(info.resident_size) / 1_048_576
     }
 }

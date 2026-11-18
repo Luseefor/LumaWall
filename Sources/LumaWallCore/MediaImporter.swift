@@ -121,6 +121,8 @@ public actor MediaImporter {
             return ImportOutcome(asset: asset, inspection: inspection, removedAudio: inspection.containsAudio)
         } catch {
             try? FileManager.default.removeItem(at: folder)
+            // A poll during the import may have cached the partial folder's size.
+            await store.invalidateDiskUsage()
             throw error
         }
     }

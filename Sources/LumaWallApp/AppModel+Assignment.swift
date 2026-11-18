@@ -149,6 +149,8 @@ extension AppModel {
         Task {
             do {
                 let removed = try await CacheCleaner.clearDisk(preservingLibraryRoot: store.rootURL)
+                // Scratch files live under the measured library root.
+                await store.invalidateDiskUsage()
                 refreshStats()
                 present("Cache", removed == 0 ? "No cache files to remove." : "Cleared \(removed) cache items.")
             } catch {

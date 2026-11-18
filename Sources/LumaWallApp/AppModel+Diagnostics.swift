@@ -81,6 +81,17 @@ extension AppModel {
         ) { [weak self] _ in
             Task { @MainActor in self?.shutdown() }
         }
+        // Quit waits for this (see AppDelegate.applicationShouldTerminate).
+        AppDelegate.flushBeforeTermination = { [weak self] in
+            await self?.flushEnergyLogBeforeQuit()
+        }
+    }
+
+    /// Writes the energy samples not yet on disk, waiting at most two seconds
+    /// so a slow disk can't hold up quitting.
+    func flushEnergyLogBeforeQuit() async {
+        let store = energyLogStore
+        await awaitWithDeadline(.seconds(2)) { try? await store.flush() }
     }
 
     /// Invalidate timers, cancel pending work, and remove observers.
@@ -89,10 +100,12 @@ extension AppModel {
     func shutdown() {
         playlistTimer?.invalidate()
         statsTimer?.invalidate()
+        energyTimer?.invalidate()
         dayNightTimer?.invalidate()
         coverageTimer?.invalidate()
         playlistTimer = nil
         statsTimer = nil
+        energyTimer = nil
         dayNightTimer = nil
         coverageTimer = nil
         coverageDebouncer?.cancel()
