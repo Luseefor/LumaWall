@@ -103,6 +103,9 @@ final class AppModel {
     var playlistCursor = 0
     var playlistNextAdvanceAt: Date?
     var statsTimer: Timer?
+    var energyTimer: Timer?
+    /// Which diagnostics views are on screen; the live stats timer runs only then.
+    @ObservationIgnored var diagnosticsVisibility = DiagnosticsVisibility()
     var dayNightTimer: Timer?
     var lastAutomationWallpaperID: WallpaperID?
     var appearanceObserver: NSObjectProtocol?
@@ -150,8 +153,10 @@ final class AppModel {
     var sessionLocked = false
     var displaysAsleep = false
     var cpuSampler = CPUSampler()
+    /// Separate from `cpuSampler`: energy samples cover the full interval
+    /// between them even while the live stats timer also samples.
+    var energyCPUSampler = CPUSampler()
     var playlistIDs: [WallpaperID] = []
-    var statsTick = 0
     let gameModeMonitor = GameModeMonitor()
     var didAdvancePlaylistOnLogin = false
     var lastPlaylistWakeAdvance: Date?
@@ -270,7 +275,7 @@ final class AppModel {
             self.launchAtLogin = LaunchAtLogin.isEnabled
             startCrashReporting()
             Task { await bootstrap() }
-            startStatsPolling()
+            startEnergyLogging()
             observeAppearanceChanges()
             observeAutomationClockChanges()
             observeFirstLocationFix()

@@ -50,7 +50,7 @@ struct MenuBarPopover: View {
         .padding(14)
         .frame(width: 320)
         .fixedSize(horizontal: false, vertical: true)
-        .onAppear { model.refreshStats() }
+        .reportsDiagnosticsVisibility(to: model)
         .onChange(of: slides.count) { _, count in
             selectedIndex = min(selectedIndex, max(0, count - 1))
         }

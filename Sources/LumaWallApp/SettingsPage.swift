@@ -287,7 +287,7 @@ struct SettingsPage: View {
             }
             .padding(28)
         }
-        .onAppear { model.refreshStats() }
+        .reportsDiagnosticsVisibility(to: model)
     }
 
     private var automationStatus: String {

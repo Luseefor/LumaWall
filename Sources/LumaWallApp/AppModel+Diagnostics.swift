@@ -89,10 +89,12 @@ extension AppModel {
     func shutdown() {
         playlistTimer?.invalidate()
         statsTimer?.invalidate()
+        energyTimer?.invalidate()
         dayNightTimer?.invalidate()
         coverageTimer?.invalidate()
         playlistTimer = nil
         statsTimer = nil
+        energyTimer = nil
         dayNightTimer = nil
         coverageTimer = nil
         coverageDebouncer?.cancel()
