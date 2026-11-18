@@ -46,33 +46,89 @@ extension NativeWallpaperDeployment {
         stagingFolderURL.appendingPathComponent("\(job.entryID).\(job.contentHash).\(job.spec.filename)")
     }
 
+    /// A display showing a wallpaper, with the tier it plays at.
+    struct Surface: Sendable, Equatable {
+        var pixelSize: CGSize
+        var tier: PlaybackTier
+    }
+
+    private static let surfacesLock = NSLock()
+    nonisolated(unsafe) private static var surfacesByEntry: [String: [Surface]] = [:]
+
+    /// Records where a wallpaper plays and re-evaluates queued copies.
+    /// Callers report every deploy and tier evaluation, which also runs on
+    /// power and Low Power Mode changes, so a held 1440p copy starts once
+    /// AC returns and a running one stops when its display goes away.
+    static func playbackChanged(entryID: String, surfaces: [Surface]) {
+        surfacesLock.withLock { surfacesByEntry[entryID] = surfaces }
+        Task { await encodeQueue.wake() }
+    }
+
+    private static func surfaces(for entryID: String) -> [Surface] {
+        surfacesLock.withLock { surfacesByEntry[entryID] ?? [] }
+    }
+
+    /// When a copy may encode. The battery copy a surface plays now goes
+    /// first (rank 0), other battery copies next, then the 1440p copy, which
+    /// also needs AC power and a surface that would play it.
+    static func copyReadiness(
+        _ spec: VariantSpec, sourceSize: CGSize, sourceFPS: Double,
+        surfaces: [Surface], canMakeOptionalCopies: Bool
+    ) -> VariantEncodeQueue.Readiness {
+        if spec.forFullQuality {
+            let planned = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: surfaces.map(\.pixelSize))
+            guard planned.contains(spec) else { return .drop }
+            return canMakeOptionalCopies ? .ready(rank: 2) : .hold
+        }
+        let playing = surfaces.contains { surface in
+            switch surface.tier {
+            case .reduced: spec.filename == "Wallpaper.reduced.mov"
+            case .minimal: spec.filename == "Wallpaper.minimal.mov"
+            default: false
+            }
+        }
+        return .ready(rank: playing ? 0 : 1)
+    }
+
+    private static func readiness(of job: VariantEncodeQueue.Job) -> VariantEncodeQueue.Readiness {
+        // A wallpaper removed or redeployed while its jobs waited has
+        // nothing to encode for them.
+        guard let entry = try? entry(id: job.entryID), entry.contentHash == job.contentHash,
+              !isRecorded(job.spec, in: entry)
+        else { return .drop }
+        return copyReadiness(job.spec, sourceSize: entry.resolution, sourceFPS: entry.fps,
+                             surfaces: surfaces(for: job.entryID), canMakeOptionalCopies: canMakeFullQualityCopies)
+    }
+
     /// The one queue every copy encode goes through.
     private static let encodeQueue = VariantEncodeQueue(
-        canMakeOptionalCopies: { canMakeFullQualityCopies },
-        isDone: { job in
-            // A wallpaper removed or redeployed while its jobs waited has
-            // nothing to encode for them.
-            guard let entry = try? entry(id: job.entryID), entry.contentHash == job.contentHash else { return true }
-            return isRecorded(job.spec, in: entry)
-        },
+        readiness: { readiness(of: $0) },
         encode: { job in
             let fm = FileManager.default
             let staged = stagedURL(for: job)
             // A finished export whose publication failed is reused, not redone.
             if !fm.fileExists(atPath: staged.path) {
                 try? fm.createDirectory(at: stagingFolderURL, withIntermediateDirectories: true)
-                guard await transcode(sourceURL: job.sourceURL, to: staged, spec: job.spec) else { return false }
+                let result = await transcode(sourceURL: job.sourceURL, to: staged, spec: job.spec) {
+                    if case .ready = readiness(of: job) { return true }
+                    return false
+                }
+                switch result {
+                case .finished: break
+                case .failed: return .failed
+                case .skipped: return .notNow
+                }
             }
             guard let resolution = await videoSize(of: staged) else {
                 try? fm.removeItem(at: staged)
-                return false
+                return .failed
             }
             switch publish(staged, job: job, resolution: resolution) {
             case .published:
                 notifyLibraryChanged()
-                return true
-            case .stale: return true
-            case .failed: return false
+                return .done
+            case .stale: return .done
+            case .failed: return .failed
             }
         },
         prepare: { cleanUpAbandonedExports(videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL) }

@@ -129,7 +129,10 @@ extension AppModel {
             return
         }
         do {
-            let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, displayPixels: displays.map(\.pixelSize))
+            let entry = try await NativeWallpaperDeployment.ensureDeployed(
+                asset: asset,
+                surfaces: displays.map { .init(pixelSize: $0.pixelSize, tier: .full) }
+            )
             try NativeWallpaperAssignmentService.applyLockScreen(entry: entry)
         } catch {
             present("Lock Screen", error.localizedDescription)

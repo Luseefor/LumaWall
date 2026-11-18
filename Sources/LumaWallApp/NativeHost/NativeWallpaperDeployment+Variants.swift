@@ -122,22 +122,27 @@ extension NativeWallpaperDeployment {
         return current.filter { !replaced.contains($0.filename) } + added
     }
 
+    enum TranscodeResult { case finished, failed, skipped }
+
     /// Exports `spec` to `output`, writing a `.partial.mov` beside it first
     /// so an interrupted export never sits under the finished name.
-    static func transcode(sourceURL: URL, to output: URL, spec: VariantSpec) async -> Bool {
+    /// `proceed` is asked once more right before the export starts, after
+    /// the composition is set up; a no, or task cancellation, skips it.
+    static func transcode(sourceURL: URL, to output: URL, spec: VariantSpec, proceed: () -> Bool) async -> TranscodeResult {
         let source = AVURLAsset(url: sourceURL)
-        guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return false }
+        guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return .failed }
         let partial = output.deletingPathExtension().appendingPathExtension("\(UUID().uuidString).partial.mov")
         do {
-            guard let composition = try await scaledComposition(for: source, fitting: spec.fitting, fps: spec.fps) else { return false }
+            guard let composition = try await scaledComposition(for: source, fitting: spec.fitting, fps: spec.fps) else { return .failed }
             export.videoComposition = composition
+            guard !Task.isCancelled, proceed() else { return .skipped }
             try await export.export(to: partial, as: .mov)
             try? FileManager.default.removeItem(at: output)
             try FileManager.default.moveItem(at: partial, to: output)
-            return true
+            return .finished
         } catch {
             try? FileManager.default.removeItem(at: partial)
-            return false
+            return Task.isCancelled || error is CancellationError ? .skipped : .failed
         }
     }
 

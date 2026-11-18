@@ -167,10 +167,11 @@ enum NativeWallpaperDeployment {
             .appendingPathComponent(entry.filename)
     }
 
-    /// `displayPixels` are the connected displays' sizes in pixels; they
-    /// decide whether the optional 1440p copy is worth encoding.
+    /// `surfaces` are the displays the wallpaper is going on, with their
+    /// tiers; they decide whether the optional 1440p copy is worth encoding
+    /// and which battery copy to encode first.
     @MainActor
-    static func ensureDeployed(asset: WallpaperAsset, displayPixels: [CGSize]) async throws -> EntryInfo {
+    static func ensureDeployed(asset: WallpaperAsset, surfaces: [Surface]) async throws -> EntryInfo {
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
@@ -188,7 +189,7 @@ enum NativeWallpaperDeployment {
             return try await running.value
         }
         let task = Task<EntryInfo, Error> {
-            try await deploy(asset: asset, entryID: entryID, displayPixels: displayPixels)
+            try await deploy(asset: asset, entryID: entryID, surfaces: surfaces)
         }
         deploymentTasks[entryID] = task
         defer { deploymentTasks.removeValue(forKey: entryID) }
@@ -205,7 +206,9 @@ enum NativeWallpaperDeployment {
     private static var deploymentTasks: [String: Task<EntryInfo, Error>] = [:]
 
     @MainActor
-    private static func deploy(asset: WallpaperAsset, entryID: String, displayPixels: [CGSize]) async throws -> EntryInfo {
+    private static func deploy(asset: WallpaperAsset, entryID: String, surfaces: [Surface]) async throws -> EntryInfo {
+        let displayPixels = surfaces.map(\.pixelSize)
+        playbackChanged(entryID: entryID, surfaces: surfaces)
         let hash = try await hashStore.hash(for: asset.mediaURL)
         if let existing = try entry(id: entryID),
            FileManager.default.fileExists(atPath: videoURL(for: existing).path),

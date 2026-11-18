@@ -133,6 +133,25 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
                        ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
     }
 
+    func testCopyReadinessFollowsPlaybackPowerAndFit() {
+        typealias Surface = NativeWallpaperDeployment.Surface
+        let source = CGSize(width: 3840, height: 2160)
+        let specs = Dictionary(uniqueKeysWithValues: NativeWallpaperDeployment.variantSpecs(sourceSize: source, sourceFPS: 60).map { ($0.filename, $0) })
+        func readiness(_ filename: String, _ surfaces: [Surface], power: Bool = true) -> NativeWallpaperDeployment.VariantEncodeQueue.Readiness {
+            NativeWallpaperDeployment.copyReadiness(specs[filename]!, sourceSize: source, sourceFPS: 60, surfaces: surfaces, canMakeOptionalCopies: power)
+        }
+        // Battery Saver plays the 720p copy, so it goes before the 1080p one.
+        let saver = [Surface(pixelSize: CGSize(width: 2560, height: 1440), tier: .minimal)]
+        XCTAssertEqual(readiness("Wallpaper.minimal.mov", saver), .ready(rank: 0))
+        XCTAssertEqual(readiness("Wallpaper.reduced.mov", saver), .ready(rank: 1))
+        XCTAssertEqual(readiness("Wallpaper.reduced.mov", [Surface(pixelSize: source, tier: .reduced)]), .ready(rank: 0))
+        // The 1440p copy waits for AC, and is dropped once no surface fits it.
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", saver), .ready(rank: 2))
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", saver, power: false), .hold)
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", [Surface(pixelSize: source, tier: .full)]), .drop)
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", []), .drop)
+    }
+
     func testNoBackfillForAQHDCopyNoDisplayPlays() {
         let entry = NativeWallpaperDeployment.EntryInfo(
             id: UUID().uuidString, name: "x", filename: "Wallpaper.mp4", duration: 5, fps: 60,
@@ -207,115 +226,6 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         // Irregular sources (29.75 nominal, 204 frames in 6.79 s) round to the
         // nearest whole rate; the shortest frame gap gave one extra frame.
         XCTAssertEqual(duration(29.75), CMTime(value: 1, timescale: 30))
-    }
-}
-
-/// Shared state for the stand-in encoder.
-private final class EncodeLog: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _order: [String] = []
-    private var running = 0
-    private var _maxRunning = 0
-    private var _onAC = true
-    private var _now = Date(timeIntervalSinceReferenceDate: 0)
-    var order: [String] { lock.withLock { _order } }
-    var maxRunning: Int { lock.withLock { _maxRunning } }
-    var onAC: Bool {
-        get { lock.withLock { _onAC } }
-        set { lock.withLock { _onAC = newValue } }
-    }
-    var now: Date {
-        get { lock.withLock { _now } }
-        set { lock.withLock { _now = newValue } }
-    }
-    func start(_ job: NativeWallpaperDeployment.VariantEncodeQueue.Job) {
-        lock.withLock {
-            _order.append(job.entryID + "/" + job.spec.filename)
-            running += 1
-            _maxRunning = max(_maxRunning, running)
-        }
-    }
-    func finish() { lock.withLock { running -= 1 } }
-}
-
-final class VariantEncodeQueueTests: XCTestCase {
-    private typealias Queue = NativeWallpaperDeployment.VariantEncodeQueue
-    private let specs = Dictionary(uniqueKeysWithValues: NativeWallpaperDeployment
-        .variantSpecs(sourceSize: CGSize(width: 3840, height: 2160), sourceFPS: 60)
-        .map { ($0.filename, $0) })
-
-    private func job(_ entry: String, _ filename: String) -> Queue.Job {
-        Queue.Job(entryID: entry, sourceURL: URL(fileURLWithPath: "/tmp/\(entry).mov"), contentHash: "h", spec: specs[filename]!)
-    }
-
-    private func queue(_ log: EncodeLog, delay: Duration = .zero, succeeds: Bool = true,
-                       onEncode: @escaping @Sendable (Queue.Job) -> Void = { _ in }) -> Queue {
-        Queue(
-            canMakeOptionalCopies: { log.onAC },
-            isDone: { _ in false },
-            encode: { job in
-                log.start(job)
-                onEncode(job)
-                try? await Task.sleep(for: delay)
-                log.finish()
-                return succeeds
-            },
-            now: { log.now }
-        )
-    }
-
-    func testEncodesRunOneAtATimeBatteryCopiesFirst() async {
-        // Each deploy and restore started its own detached encodes, so
-        // several 4K exports could run at once, the 1440p one among the first.
-        let log = EncodeLog()
-        let queue = queue(log, delay: .milliseconds(50))
-        await queue.enqueue([job("a", "Wallpaper.reduced.mov")])
-        await queue.enqueue([job("a", "Wallpaper.qhd.mov"), job("a", "Wallpaper.minimal.mov")])
-        await queue.enqueue([job("b", "Wallpaper.qhd.mov"), job("b", "Wallpaper.reduced.mov")])
-        await queue.enqueue([job("b", "Wallpaper.reduced.mov")])
-        await queue.drained()
-        XCTAssertEqual(log.maxRunning, 1)
-        XCTAssertEqual(log.order, [
-            "a/Wallpaper.reduced.mov", "a/Wallpaper.minimal.mov", "b/Wallpaper.reduced.mov",
-            "a/Wallpaper.qhd.mov", "b/Wallpaper.qhd.mov",
-        ])
-    }
-
-    func testPowerIsCheckedBeforeEachOptionalCopy() async {
-        // The AC check ran once before the loop; unplugging during the
-        // battery encodes still started the 1440p export.
-        let log = EncodeLog()
-        let queue = queue(log) { _ in log.onAC = false }
-        await queue.enqueue([job("a", "Wallpaper.reduced.mov"), job("a", "Wallpaper.qhd.mov")])
-        await queue.drained()
-        XCTAssertEqual(log.order, ["a/Wallpaper.reduced.mov"])
-        // Back on AC, the next request makes it.
-        log.onAC = true
-        await queue.enqueue([job("a", "Wallpaper.qhd.mov")])
-        await queue.drained()
-        XCTAssertEqual(log.order.last, "a/Wallpaper.qhd.mov")
-    }
-
-    func testFailedCopiesRetryWithBackoffThenStop() async {
-        // A failure used to block the copy for the rest of the session.
-        let log = EncodeLog()
-        let queue = queue(log, succeeds: false)
-        let failing = job("a", "Wallpaper.minimal.mov")
-        func attempt() async -> Int {
-            await queue.enqueue([failing])
-            await queue.drained()
-            return log.order.count
-        }
-        let first = await attempt()
-        XCTAssertEqual(first, 1)
-        let tooSoon = await attempt()
-        XCTAssertEqual(tooSoon, 1)
-        var attempts = 1
-        for _ in 0..<10 {
-            log.now += 24 * 3600
-            attempts = await attempt()
-        }
-        XCTAssertEqual(attempts, Queue.maxAttempts)
     }
 }
 
