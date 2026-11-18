@@ -87,32 +87,53 @@ public struct EnergyLogSnapshot: Codable, Equatable, Sendable {
 /// Energy samples for the 24 h soak report.
 ///
 /// `EnergyLog.json` holds a snapshot (samples plus the soak start). New samples
-/// are appended as one JSON line each to `EnergyLog.samples.jsonl` instead of
-/// rewriting the snapshot every minute. The snapshot is rewritten, and the
-/// line file emptied, on launch, when the soak window changes, and about once
-/// a day while samples age out.
+/// are appended as one JSON line each to a journal, `EnergyLog.samples.<n>.jsonl`,
+/// instead of rewriting the snapshot every minute. The snapshot records which
+/// journal generation `<n>` belongs to it. Compaction writes a snapshot naming
+/// generation `<n+1>` before deleting journal `<n>`, so a crash or failed delete
+/// leaves a journal the snapshot no longer names, and it is never replayed.
 public actor EnergyLogStore {
     public static let retention: TimeInterval = 24 * 60 * 60
-    /// Appended lines tolerated before an in-session compaction drops the
-    /// aged-out ones (one day of minute samples).
-    private static let compactionLineThreshold = 1_440
+    /// Journal lines (one day of minute samples) before the next append compacts.
+    public static let defaultCompactionThreshold = 1_440
+    private static let journalPrefix = "EnergyLog.samples."
 
+    private struct PersistedLog: Codable {
+        var samples: [EnergySample]
+        var soakStartedAt: Date?
+        /// Absent in files written before the journal existed.
+        var journalGeneration: Int?
+    }
+
+    private let base: URL
     private let fileURL: URL
-    private let appendURL: URL
+    private let compactionThreshold: Int
+    private var generation = 0
     private var snapshot = EnergyLogSnapshot()
     private var appendedLines = 0
 
-    public init(rootURL: URL? = nil) throws {
+    public init(rootURL: URL? = nil, compactionThreshold: Int = EnergyLogStore.defaultCompactionThreshold) throws {
         let base = try StorePaths.appSupportBase(rootURL: rootURL)
+        self.base = base
         self.fileURL = base.appendingPathComponent("EnergyLog.json")
-        self.appendURL = base.appendingPathComponent("EnergyLog.samples.jsonl")
-        var loaded = StoreIO.readJSON(from: fileURL, as: EnergyLogSnapshot.self) ?? EnergyLogSnapshot()
-        let appended = Self.readAppended(from: appendURL)
-        loaded.samples.append(contentsOf: appended)
+        self.compactionThreshold = max(1, compactionThreshold)
+        let persisted = StoreIO.readJSON(from: fileURL, as: PersistedLog.self)
+        let generation = persisted?.journalGeneration ?? 0
+        var loaded = EnergyLogSnapshot(samples: persisted?.samples ?? [], soakStartedAt: persisted?.soakStartedAt)
+        let journalURL = Self.journalURL(in: base, generation: generation)
+        let hasJournal = FileManager.default.fileExists(atPath: journalURL.path)
+        loaded.samples.append(contentsOf: Self.readJournal(at: journalURL))
         let pruned = Self.pruned(loaded, now: .now)
-        snapshot = pruned
-        if !appended.isEmpty || pruned.samples.count != loaded.samples.count {
-            try? Self.writeSnapshot(pruned, to: fileURL, removingAppendFile: appendURL)
+        self.generation = generation
+        self.snapshot = pruned
+        // Any journal, even one holding only a torn line, is folded into the
+        // snapshot so appends always start on a clean file.
+        if hasJournal || pruned.samples.count != loaded.samples.count {
+            if (try? Self.writeCompacted(pruned, generation: generation + 1, base: base, fileURL: fileURL)) != nil {
+                self.generation = generation + 1
+            }
+        } else {
+            Self.removeJournals(in: base, keeping: generation)
         }
     }
 
@@ -120,23 +141,20 @@ public actor EnergyLogStore {
 
     public func startSoak(at date: Date = .now) throws {
         snapshot.soakStartedAt = date
-        try persist()
+        try compactNow()
     }
 
     public func clearSoak() throws {
         snapshot.soakStartedAt = nil
-        try persist()
+        try compactNow()
     }
 
     public func record(_ sample: EnergySample, now: Date = .now) throws {
         snapshot.samples.append(sample)
-        let before = snapshot.samples.count
         snapshot = Self.pruned(snapshot, now: now)
-        let droppedAny = snapshot.samples.count < before
-        if droppedAny && appendedLines >= Self.compactionLineThreshold {
-            try persist()
-        } else {
-            try append(sample)
+        try append(sample)
+        if appendedLines >= compactionThreshold {
+            try compactNow()
         }
     }
 
@@ -186,29 +204,63 @@ public actor EnergyLogStore {
         )
     }
 
-    /// Rewrites the snapshot and empties the line file.
-    private func persist() throws {
-        try Self.writeSnapshot(snapshot, to: fileURL, removingAppendFile: appendURL)
+    /// Writes the snapshot under the next journal generation, then deletes the
+    /// older journals.
+    private func compactNow() throws {
+        try Self.writeCompacted(snapshot, generation: generation + 1, base: base, fileURL: fileURL)
+        generation += 1
         appendedLines = 0
     }
 
-    private static func writeSnapshot(_ snapshot: EnergyLogSnapshot, to url: URL, removingAppendFile appendURL: URL) throws {
-        try StoreIO.writeJSON(snapshot, to: url)
-        try? FileManager.default.removeItem(at: appendURL)
+    private static func writeCompacted(
+        _ snapshot: EnergyLogSnapshot, generation: Int, base: URL, fileURL: URL
+    ) throws {
+        let persisted = PersistedLog(
+            samples: snapshot.samples,
+            soakStartedAt: snapshot.soakStartedAt,
+            journalGeneration: generation
+        )
+        try StoreIO.writeJSON(persisted, to: fileURL)
+        removeJournals(in: base, keeping: generation)
     }
 
     private func append(_ sample: EnergySample) throws {
         var line = try Self.lineEncoder.encode(sample)
         line.append(0x0A)
-        if FileManager.default.fileExists(atPath: appendURL.path) {
-            let handle = try FileHandle(forWritingTo: appendURL)
+        let url = Self.journalURL(in: base, generation: generation)
+        if FileManager.default.fileExists(atPath: url.path) {
+            let handle = try FileHandle(forUpdating: url)
             defer { try? handle.close() }
+            let end = try handle.seekToEnd()
+            if end > 0 {
+                // A write cut short earlier leaves an unterminated line; end it
+                // so this record isn't glued onto it.
+                try handle.seek(toOffset: end - 1)
+                if try handle.read(upToCount: 1)?.first != 0x0A {
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: Data([0x0A]))
+                }
+            }
             try handle.seekToEnd()
             try handle.write(contentsOf: line)
         } else {
-            try line.write(to: appendURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+            try line.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
         }
         appendedLines += 1
+    }
+
+    private static func journalURL(in base: URL, generation: Int) -> URL {
+        base.appendingPathComponent("\(journalPrefix)\(generation).jsonl")
+    }
+
+    /// Deletes every journal except the one for `generation`, including
+    /// stale ones and the unnumbered name an earlier build used.
+    private static func removeJournals(in base: URL, keeping generation: Int) {
+        let keep = journalURL(in: base, generation: generation).lastPathComponent
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
+        for name in names where name.hasPrefix(journalPrefix) && name != keep {
+            try? FileManager.default.removeItem(at: base.appendingPathComponent(name))
+        }
     }
 
     private static var lineEncoder: JSONEncoder {
@@ -218,7 +270,7 @@ public actor EnergyLogStore {
     }
 
     /// Skips lines that don't decode, such as one cut short by a crash.
-    private static func readAppended(from url: URL) -> [EnergySample] {
+    private static func readJournal(at url: URL) -> [EnergySample] {
         guard let data = try? Data(contentsOf: url) else { return [] }
         let decoder = JSONDecoder.lumaWall
         return data.split(separator: 0x0A).compactMap { try? decoder.decode(EnergySample.self, from: Data($0)) }

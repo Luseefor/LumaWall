@@ -177,3 +177,83 @@ extension EnergyLogStoreTests {
         #expect(await store.current().samples.map(\.processCPUPercent) == [7])
     }
 }
+
+extension EnergyLogStoreTests {
+    private func journalFiles(in root: URL) -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.lastPathComponent.hasPrefix("EnergyLog.samples.") }
+    }
+
+    private func journalLineCount(in root: URL) -> Int {
+        journalFiles(in: root).reduce(0) { total, url in
+            total + ((try? Data(contentsOf: url)) ?? Data()).split(separator: 0x0A).count
+        }
+    }
+
+    @Test func journalLeftBehindByACrashedCompactionIsNotReplayed() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root)
+        for index in 0..<3 {
+            try await first.record(sample(at: now.addingTimeInterval(Double(index - 5) * 60), cpu: Double(index)), now: now)
+        }
+        // Keep the journal's bytes, let the next launch compact it into the
+        // snapshot, then put the journal back: a crash after the snapshot was
+        // replaced but before the journal was deleted looks exactly like this.
+        let journal = try #require(journalFiles(in: root).first)
+        let bytes = try Data(contentsOf: journal)
+        _ = try EnergyLogStore(rootURL: root)
+        try bytes.write(to: journal)
+
+        let relaunched = try EnergyLogStore(rootURL: root)
+        #expect(await relaunched.current().samples.map(\.processCPUPercent) == [0, 1, 2])
+    }
+
+    @Test func tornJournalLineDoesNotSwallowTheNextSample() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root)
+        try await first.record(sample(at: now.addingTimeInterval(-180), cpu: 1), now: now)
+        // A write cut short in this session leaves an unterminated tail.
+        let journal = try #require(journalFiles(in: root).first)
+        let handle = try FileHandle(forWritingTo: journal)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{\"date\":\"2026-".utf8))
+        try handle.close()
+        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 2), now: now)
+
+        let relaunched = try EnergyLogStore(rootURL: root)
+        #expect(await relaunched.current().samples.map(\.processCPUPercent) == [1, 2])
+    }
+
+    @Test func journalThatOnlyHoldsATornLineIsDiscardedAtLaunch() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root)
+        try await first.record(sample(at: now.addingTimeInterval(-180), cpu: 1), now: now)
+        let journal = try #require(journalFiles(in: root).first)
+        try Data("{\"date\":\"2026-".utf8).write(to: journal)
+
+        let second = try EnergyLogStore(rootURL: root)
+        try await second.record(sample(at: now.addingTimeInterval(-60), cpu: 5), now: now)
+        let third = try EnergyLogStore(rootURL: root)
+        #expect(await third.current().samples.map(\.processCPUPercent) == [5])
+    }
+
+    @Test func journalLengthStaysBoundedWithoutAnySamplesAgingOut() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try EnergyLogStore(rootURL: root, compactionThreshold: 5)
+        let now = Date()
+        for index in 0..<23 {
+            try await store.record(sample(at: now.addingTimeInterval(Double(index - 30) * 60), cpu: Double(index)), now: now)
+            #expect(journalLineCount(in: root) <= 5)
+        }
+        #expect(await store.current().samples.count == 23)
+        let relaunched = try EnergyLogStore(rootURL: root)
+        #expect(await relaunched.current().samples.count == 23)
+    }
+}
