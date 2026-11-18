@@ -146,8 +146,10 @@ enum NativeWallpaperDeployment {
             .appendingPathComponent(entry.filename)
     }
 
+    /// `displayPixels` are the connected displays' sizes in pixels; they
+    /// decide whether the optional 1440p copy is worth encoding.
     @MainActor
-    static func ensureDeployed(asset: WallpaperAsset) async throws -> EntryInfo {
+    static func ensureDeployed(asset: WallpaperAsset, displayPixels: [CGSize]) async throws -> EntryInfo {
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
@@ -161,7 +163,7 @@ enum NativeWallpaperDeployment {
             return try await running.value
         }
         let task = Task<EntryInfo, Error> {
-            try await deploy(asset: asset, entryID: entryID)
+            try await deploy(asset: asset, entryID: entryID, displayPixels: displayPixels)
         }
         deploymentTasks[entryID] = task
         defer { deploymentTasks.removeValue(forKey: entryID) }
@@ -173,20 +175,21 @@ enum NativeWallpaperDeployment {
     private static var deploymentTasks: [String: Task<EntryInfo, Error>] = [:]
 
     @MainActor
-    private static func deploy(asset: WallpaperAsset, entryID: String) async throws -> EntryInfo {
+    private static func deploy(asset: WallpaperAsset, entryID: String, displayPixels: [CGSize]) async throws -> EntryInfo {
         let hash = try await hashStore.hash(for: asset.mediaURL)
         if let existing = try entry(id: entryID),
            FileManager.default.fileExists(atPath: videoURL(for: existing).path),
            existing.contentHash == hash {
             // Libraries missing any planned copy (pre-variant ones, or ones
             // made before the 1440p copy existed) backfill in the background.
-            if needsVariants(existing) {
+            if needsVariants(existing, displayPixels: displayPixels) {
                 Task.detached {
                     await ensureVariants(
                         for: entryID,
                         sourceURL: asset.mediaURL,
                         sourceFPS: existing.fps,
-                        sourceSize: existing.resolution
+                        sourceSize: existing.resolution,
+                        displayPixels: displayPixels
                     )
                 }
             }
@@ -232,7 +235,8 @@ enum NativeWallpaperDeployment {
                 for: entryID,
                 sourceURL: staged.dest,
                 sourceFPS: probe.fps,
-                sourceSize: probe.resolution
+                sourceSize: probe.resolution,
+                displayPixels: displayPixels
             )
         }
         return entry

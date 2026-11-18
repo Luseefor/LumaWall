@@ -52,8 +52,48 @@ extension NativeWallpaperDeployment {
     /// The copies a source should have. The 1080p and 720p copies serve the
     /// battery tiers, capped at 30 fps. The 1440p copy keeps the source rate
     /// so Full Quality on a 1440p monitor can skip decoding 4K. Copies at or
-    /// above the source size are never made.
-    static func variantSpecs(sourceSize: CGSize, sourceFPS: Double) -> [VariantSpec] {
+    /// above the source size are never made. With `displayPixels` (connected
+    /// displays, in pixels) the 1440p copy is planned only when one of them
+    /// would play it.
+    static func variantSpecs(sourceSize: CGSize, sourceFPS: Double, displayPixels: [CGSize]? = nil) -> [VariantSpec] {
+        let specs = allVariantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS)
+        guard let displayPixels else { return specs }
+        return specs.filter { spec in
+            !spec.forFullQuality || displayPixels.contains { display in
+                fullQualityPick(among: specs, sourceSize: sourceSize, sourceFPS: sourceFPS, display: display) == spec
+            }
+        }
+    }
+
+    /// The copy the extension's Full Quality selection would play on
+    /// `display`: the smallest one at the source rate that aspect-fills it
+    /// without upscaling. Mirrors `VariantSelection.smallestFilling`.
+    private static func fullQualityPick(among specs: [VariantSpec], sourceSize: CGSize, sourceFPS: Double, display: CGSize) -> VariantSpec? {
+        guard display.width > 0, display.height > 0 else { return nil }
+        let sourceRate = Int(sourceFPS.rounded())
+        func area(_ spec: VariantSpec) -> CGFloat {
+            let size = copySize(source: sourceSize, fitting: spec.fitting)
+            return size.width * size.height
+        }
+        return specs
+            .filter { $0.recordedFPS >= sourceRate }
+            .filter { spec in
+                let size = copySize(source: sourceSize, fitting: spec.fitting)
+                return size.width > 0 && size.height > 0
+                    && max(display.width / size.width, display.height / size.height) <= 1
+            }
+            .min { area($0) < area($1) }
+    }
+
+    /// The frame size `scaledComposition` renders: the source scaled into
+    /// `box` with its aspect kept, rounded to even dimensions.
+    static func copySize(source: CGSize, fitting box: CGSize) -> CGSize {
+        guard source.width > 0, source.height > 0 else { return .zero }
+        let scale = min(box.width / source.width, box.height / source.height, 1)
+        return CGSize(width: (source.width * scale / 2).rounded() * 2, height: (source.height * scale / 2).rounded() * 2)
+    }
+
+    private static func allVariantSpecs(sourceSize: CGSize, sourceFPS: Double) -> [VariantSpec] {
         let longSide = max(sourceSize.width, sourceSize.height)
         let portrait = sourceSize.height > sourceSize.width
         func box(_ long: CGFloat, _ short: CGFloat) -> CGSize {
@@ -78,14 +118,14 @@ extension NativeWallpaperDeployment {
 
     /// True when the entry lacks a copy it should have: one added in a later
     /// version, one deleted from disk, or one made at a different frame rate.
-    static func needsVariants(_ entry: EntryInfo, fileExists: ((String) -> Bool)? = nil) -> Bool {
+    static func needsVariants(_ entry: EntryInfo, displayPixels: [CGSize], fileExists: ((String) -> Bool)? = nil) -> Bool {
         let exists = fileExists ?? { filename in
             FileManager.default.fileExists(atPath: videosFolderURL
                 .appendingPathComponent(entry.id, isDirectory: true)
                 .appendingPathComponent(filename).path)
         }
         let have = entry.variants ?? []
-        return variantSpecs(sourceSize: entry.resolution, sourceFPS: entry.fps).contains { spec in
+        return variantSpecs(sourceSize: entry.resolution, sourceFPS: entry.fps, displayPixels: displayPixels).contains { spec in
             !have.contains { $0.filename == spec.filename && $0.fps == spec.recordedFPS && exists($0.filename) }
         }
     }
@@ -115,13 +155,13 @@ extension NativeWallpaperDeployment {
     /// Without these files the extension's variant selector always falls back
     /// to the full file, so Automatic-on-battery and Battery Saver resolve a
     /// cheaper tier and then play the exact same bytes ("does nothing").
-    static func ensureVariants(for entryID: String, sourceURL: URL, sourceFPS: Double, sourceSize: CGSize) async {
+    static func ensureVariants(for entryID: String, sourceURL: URL, sourceFPS: Double, sourceSize: CGSize, displayPixels: [CGSize]) async {
         guard PathSafety.isValidEntryID(entryID) else { return }
         let fm = FileManager.default
         let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
         guard fm.fileExists(atPath: dir.path) else { return }
         let fullQualityAllowed = canMakeFullQualityCopies
-        let specs = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS).filter { !$0.forFullQuality || fullQualityAllowed }
+        let specs = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: displayPixels).filter { !$0.forFullQuality || fullQualityAllowed }
         guard !specs.isEmpty else { return }
         var changed = false
         for spec in specs {
@@ -237,7 +277,7 @@ extension NativeWallpaperDeployment {
         instruction.layerInstructions = [layer]
         let composition = AVMutableVideoComposition()
         composition.instructions = [instruction]
-        composition.renderSize = CGSize(width: (width * scale / 2).rounded() * 2, height: (height * scale / 2).rounded() * 2)
+        composition.renderSize = copySize(source: CGSize(width: width, height: height), fitting: box)
         composition.frameDuration = copyFrameDuration(nominalFPS: fps)
         return composition
     }

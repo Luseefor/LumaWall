@@ -52,7 +52,7 @@ final class NativeWallpaperEngine {
         }
         let entry: NativeWallpaperDeployment.EntryInfo
         do {
-            entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset)
+            entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, displayPixels: displays.displays.map(\.pixelSize))
             nativeHostLog.info("apply: deployment ready id=\(entry.id, privacy: .public)")
             try NativeWallpaperAssignmentService.apply(entry: entry, to: [connected.cgDisplayID])
         } catch {
@@ -75,7 +75,7 @@ final class NativeWallpaperEngine {
     func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
         let connected = displays.refresh()
         guard !connected.isEmpty else { throw OverlayWallpaperEngine.EngineError.missingDisplay }
-        let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset)
+        let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, displayPixels: connected.map(\.pixelSize))
         try NativeWallpaperAssignmentService.apply(
             entry: entry,
             to: Set(connected.map(\.cgDisplayID))
@@ -162,7 +162,7 @@ final class NativeWallpaperEngine {
                 continue
             }
             do {
-                let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset)
+                let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, displayPixels: connected.map(\.pixelSize))
                 map[display.cgDisplayID] = entry
                 active[assignment.displayID] = (asset.id, assignment.composition)
             } catch {
