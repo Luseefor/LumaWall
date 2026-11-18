@@ -111,6 +111,8 @@ final class AppModel {
     var screenObserver: NSObjectProtocol?
     var coverageObservers: [NSObjectProtocol] = []
     var coverageTimer: Timer?
+    var coverageDebouncer: CoverageDebouncer?
+    var powerTracker = PowerSampleTracker()
     var lockObservers: [NSObjectProtocol] = []
     var powerObservers: [NSObjectProtocol] = []
     /// Owns the IOKit power-source runloop source. A lock-guarded box rather

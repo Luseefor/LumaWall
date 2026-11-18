@@ -29,6 +29,14 @@ final class WallpaperEngine {
         }
     }
 
+    /// True when any wallpaper plays, native or overlay. Spanning wallpapers
+    /// use overlay sessions even in native mode, so `activeDisplayIDs` alone
+    /// would miss them.
+    var hasActivePlayback: Bool {
+        if !overlay.activeDisplayIDs.isEmpty { return true }
+        return mode == .native && !(native?.activeDisplayIDs.isEmpty ?? true)
+    }
+
     func wallpaperID(on displayID: DisplayID) -> WallpaperID? {
         switch mode {
         case .native: native?.wallpaperID(on: displayID)

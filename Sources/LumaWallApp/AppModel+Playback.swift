@@ -116,14 +116,7 @@ extension AppModel {
         let callback: IOPowerSourceCallbackType = { context in
             guard let context else { return }
             let model = Unmanaged<AppModel>.fromOpaque(context).takeUnretainedValue()
-            Task { @MainActor in
-                model.applyPlaybackPolicy()
-                // Power-source rules gate automations: re-evaluate so unplug /
-                // replug applies (or lifts) the rule instead of waiting for
-                // the next timer. Dedup inside evaluate keeps this a no-op
-                // when the target is unchanged.
-                model.evaluateAutomations(force: false)
-            }
+            Task { @MainActor in model.handlePowerSourceCallback() }
         }
         guard let source = IOPSNotificationCreateRunLoopSource(
             callback,
@@ -133,7 +126,33 @@ extension AppModel {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
     }
 
+    /// Reads power once per callback. Only an AC/battery switch changes what
+    /// the window scan and the automation rules depend on; a charge-level tick
+    /// just refreshes the battery tiers from the cached coverage.
+    func handlePowerSourceCallback() {
+        let power = PowerStatus.current()
+        switch powerTracker.observe(power) {
+        case .none:
+            return
+        case .percentOnly:
+            applyPlaybackPolicy(refreshCoverage: false, power: power)
+        case .sourceSwitched:
+            applyPlaybackPolicy(power: power)
+            // Power-source rules gate automations: apply or lift them now.
+            evaluateAutomations(force: false, power: power)
+        }
+    }
+
+    private var userPausedEverywhere: Bool {
+        userPaused || (!displays.isEmpty && displays.allSatisfy { pausedDisplayIDs.contains($0.displayID) })
+    }
+
     func observeDesktopCoverage() {
+        // Merges a burst of workspace notifications into one scan. Created here
+        // so a notification queued before shutdown() finds it gone and does nothing.
+        coverageDebouncer = CoverageDebouncer(delay: .seconds(CoverageScanPolicy.debounce)) { [weak self] in
+            self?.applyPlaybackPolicy()
+        }
         let center = NSWorkspace.shared.notificationCenter
         let names: [NSNotification.Name] = [
             NSWorkspace.didActivateApplicationNotification,
@@ -143,14 +162,25 @@ extension AppModel {
         for name in names {
             coverageObservers.append(
                 center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    Task { @MainActor in self?.applyPlaybackPolicy() }
+                    Task { @MainActor in self?.coverageDebouncer?.signal() }
                 }
             )
         }
         // Workspace/Space notifications handle normal transitions. This slow fallback
         // catches apps that resize opaque windows without publishing a workspace event.
+        // Resume, unlock, wake and unpause call applyPlaybackPolicy() directly, so
+        // skipping the scan here never leaves coverage stale when playback restarts.
         let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.applyPlaybackPolicy() }
+            Task { @MainActor in
+                guard let self else { return }
+                let scan = CoverageScanPolicy.fallbackScanNeeded(
+                    userPausedEverywhere: self.userPausedEverywhere,
+                    displaysAsleep: self.displaysAsleep,
+                    sessionLocked: self.sessionLocked,
+                    hasAssignedWallpaper: self.engine.hasActivePlayback
+                )
+                if scan { self.applyPlaybackPolicy() }
+            }
         }
         timer.tolerance = 8
         RunLoop.main.add(timer, forMode: .common)
@@ -158,29 +188,35 @@ extension AppModel {
         applyPlaybackPolicy()
     }
 
-    func applyPlaybackPolicy() {
-        let power = PowerStatus.current()
+    /// `refreshCoverage: false` reuses the latched coverage instead of fetching
+    /// the window list again.
+    func applyPlaybackPolicy(refreshCoverage: Bool = true, power sampled: PowerStatus? = nil) {
+        let power = sampled ?? PowerStatus.current()
         batteryPercent = power.percent
         isOnBattery = power.isOnBattery
-        // On battery, a window filling everything below the menu bar counts as
-        // covering the display: the compositor shows none of the wallpaper's
-        // frames then, so decoding them only drains the battery.
-        let coverage = DisplayOcclusion.analyze(
-            windows: OnscreenWindow.current(),
-            displays: displays,
-            ignoringMenuBar: power.isOnBattery
-        )
-        // Hysteresis: hold the paused verdict until coverage falls back past
-        // the release thresholds, so a window sitting at the enter boundary
-        // can't strobe pause/resume on every evaluation.
-        occlusionLatch.prune(to: Set(displays.map(\.displayID)))
-        for display in displays {
-            occlusionLatch.update(
-                displayID: display.displayID,
-                ratio: coverage.coverage[display.displayID] ?? 0,
-                rawCovered: coverage.covered.contains(display.displayID),
-                rawFullscreen: coverage.fullscreen.contains(display.displayID)
+        if refreshCoverage {
+            powerTracker.noteCoverageScan(onBattery: power.isOnBattery)
+            // On battery, a window filling everything below the menu bar counts as
+            // covering the display: the compositor shows none of the wallpaper's
+            // frames then, so decoding them only drains the battery.
+            let coverage = DisplayOcclusion.analyze(
+                windows: OnscreenWindow.current(),
+                displays: displays,
+                ignoringMenuBar: power.isOnBattery
             )
+            // Hysteresis: hold the paused verdict until coverage falls back past
+            // the release thresholds, so a window sitting at the enter boundary
+            // can't strobe pause/resume on every evaluation.
+            occlusionLatch.beginScan(onBattery: power.isOnBattery)
+            occlusionLatch.prune(to: Set(displays.map(\.displayID)))
+            for display in displays {
+                occlusionLatch.update(
+                    displayID: display.displayID,
+                    ratio: coverage.coverage[display.displayID] ?? 0,
+                    rawCovered: coverage.covered.contains(display.displayID),
+                    rawFullscreen: coverage.fullscreen.contains(display.displayID)
+                )
+            }
         }
         let coveredDisplays = occlusionLatch.covered
         let fullscreenDisplays = occlusionLatch.fullscreen
