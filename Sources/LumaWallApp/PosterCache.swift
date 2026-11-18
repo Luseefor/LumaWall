@@ -51,13 +51,7 @@ actor PosterCache {
             return entry.image
         }
         guard let cgImage = Self.decode(url, maxPixelWidth: maxPixelWidth) else { return nil }
-        let bytes = cgImage.width * cgImage.height * 4
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        entries[key] = Entry(image: image, bytes: bytes)
-        order.append(key)
-        totalBytes += bytes
-        evict(keeping: key)
-        return image
+        return store(cgImage, for: key)
     }
 
     func contains(_ url: URL, maxPixelWidth: CGFloat) -> Bool {
@@ -75,6 +69,24 @@ actor PosterCache {
         totalBytes = 0
     }
 
+    /// Caches `cgImage` unless it alone is over the byte budget, in which case
+    /// the caller still gets the image but the cache holds nothing for it.
+    private func store(_ cgImage: CGImage, for key: Key) -> NSImage {
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        let bytes = Self.decodedBytes(of: cgImage)
+        guard bytes <= maxBytes else { return image }
+        entries[key] = Entry(image: image, bytes: bytes)
+        order.append(key)
+        totalBytes += bytes
+        evict()
+        return image
+    }
+
+    /// Real memory of the decoded bitmap, including any row padding.
+    nonisolated static func decodedBytes(of image: CGImage) -> Int {
+        image.bytesPerRow * image.height
+    }
+
     private func touch(_ key: Key) {
         if let index = order.firstIndex(of: key) { order.remove(at: index) }
         order.append(key)
@@ -85,10 +97,9 @@ actor PosterCache {
         order.removeAll { $0 == key }
     }
 
-    /// Evicts least recently used posters until under both limits. The poster
-    /// just loaded stays even if it alone exceeds the byte limit.
-    private func evict(keeping newest: Key) {
-        while (totalBytes > maxBytes || entries.count > maxCount), let oldest = order.first, oldest != newest {
+    /// Evicts least recently used posters until under both limits.
+    private func evict() {
+        while totalBytes > maxBytes || entries.count > maxCount, let oldest = order.first {
             drop(oldest)
         }
     }

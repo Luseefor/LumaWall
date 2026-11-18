@@ -75,7 +75,36 @@ final class PosterCacheTests: XCTestCase {
         XCTAssertFalse(hasA)
         XCTAssertTrue(hasB)
         XCTAssertTrue(hasC)
-        XCTAssertEqual(bytes, 8_000_000)
+        let keptImage = await cache.image(for: b, maxPixelWidth: 1000)
+        let kept = try XCTUnwrap(cgImage(of: keptImage))
+        XCTAssertEqual(bytes, 2 * PosterCache.decodedBytes(of: kept))
+    }
+
+    func testDecodedCostCountsPaddedRows() throws {
+        // Rows can be padded past width * 4; the budget must count real memory.
+        let context = CGContext(
+            data: nil, width: 1000, height: 10, bitsPerComponent: 8, bytesPerRow: 4096,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )!
+        let image = try XCTUnwrap(context.makeImage())
+        XCTAssertEqual(PosterCache.decodedBytes(of: image), image.bytesPerRow * 10)
+        XCTAssertGreaterThanOrEqual(PosterCache.decodedBytes(of: image), 40_000)
+    }
+
+    func testPosterLargerThanTheBudgetIsReturnedButNotCached() async throws {
+        let url = try writePoster("big.jpg", width: 1000, height: 1000)
+        let cache = PosterCache(maxBytes: 1_000_000, maxCount: 200)
+        let image = await cache.image(for: url, maxPixelWidth: 1000)
+        let cached = await cache.contains(url, maxPixelWidth: 1000)
+        let bytes = await cache.totalBytes
+        XCTAssertNotNil(image)
+        XCTAssertFalse(cached)
+        XCTAssertEqual(bytes, 0)
+    }
+
+    private func cgImage(of image: NSImage?) -> CGImage? {
+        var rect = CGRect(origin: .zero, size: image?.size ?? .zero)
+        return image?.cgImage(forProposedRect: &rect, context: nil, hints: nil)
     }
 
     func testRemoveDropsEverySizeOfAPoster() async throws {
