@@ -5,28 +5,8 @@ import LumaWallCore
 /// Smaller copies of deployed wallpapers: the battery tiers play them, and
 /// Full Quality plays one when it still fills the display.
 extension NativeWallpaperDeployment {
-    /// Transcoded-sibling work currently running, keyed "entryID/filename".
-    /// Restores fan out one `ensureVariants` per display and tier switches can
-    /// overlap them; without this two workers transcode the same multi-GB
-    /// source at once and race the move into place. Lock-guarded: this runs on
-    /// detached tasks, not MainActor.
-    private static let variantWorkLock = NSLock()
-    nonisolated(unsafe) private static var variantWorkInFlight = Set<String>()
-
-    private static func claimVariantWork(_ key: String) -> Bool {
-        variantWorkLock.lock()
-        defer { variantWorkLock.unlock() }
-        return variantWorkInFlight.insert(key).inserted
-    }
-
-    private static func finishVariantWork(_ key: String) {
-        variantWorkLock.lock()
-        defer { variantWorkLock.unlock() }
-        variantWorkInFlight.remove(key)
-    }
-
     /// One smaller copy to keep next to a deployed wallpaper.
-    struct VariantSpec: Equatable {
+    struct VariantSpec: Equatable, Sendable {
         let filename: String
         let preset: String
         /// Scaled into this box, keeping the source aspect.
@@ -130,11 +110,6 @@ extension NativeWallpaperDeployment {
         }
     }
 
-    /// Copies that failed this session, keyed "entryID/filename". A failure
-    /// that keeps happening (disk full, unreadable source) would otherwise
-    /// re-run most of an encode on every apply and restore.
-    nonisolated(unsafe) private static var failedVariantWork = Set<String>()
-
     /// The 1440p copy only helps Full Quality on AC power, so it waits for AC
     /// instead of spending battery on an encode.
     private static var canMakeFullQualityCopies: Bool {
@@ -147,41 +122,125 @@ extension NativeWallpaperDeployment {
         return current.filter { !replaced.contains($0.filename) } + added
     }
 
-    /// Transcode the copies `variantSpecs` plans and record them in
-    /// metadata.json. Idempotent: skips copies already listed with a file on
-    /// disk and regenerates missing ones. Runs detached in the background. A
-    /// multi-GB 4K transcode must never block applying the wallpaper.
+    /// Queue the copies `variantSpecs` plans for encoding. Copies already
+    /// listed with a file on disk are skipped and missing ones regenerated.
+    /// A multi-GB 4K transcode must never block applying the wallpaper, so
+    /// this returns once the jobs are queued.
     ///
     /// Without these files the extension's variant selector always falls back
     /// to the full file, so Automatic-on-battery and Battery Saver resolve a
     /// cheaper tier and then play the exact same bytes ("does nothing").
     static func ensureVariants(for entryID: String, sourceURL: URL, sourceFPS: Double, sourceSize: CGSize, displayPixels: [CGSize]) async {
-        guard PathSafety.isValidEntryID(entryID) else { return }
-        let fm = FileManager.default
-        let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
-        guard fm.fileExists(atPath: dir.path) else { return }
-        let fullQualityAllowed = canMakeFullQualityCopies
-        let specs = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: displayPixels).filter { !$0.forFullQuality || fullQualityAllowed }
-        guard !specs.isEmpty else { return }
-        var changed = false
-        for spec in specs {
-            let workKey = entryID + "/" + spec.filename
-            guard claimVariantWork(workKey) else { continue }
-            defer { finishVariantWork(workKey) }
-            // Recheck under the claim: another worker may have finished this
-            // copy after the caller decided it was missing.
-            if isRecorded(spec, entryID: entryID, in: dir) { continue }
-            if variantWorkLock.withLock({ failedVariantWork.contains(workKey) }) { continue }
-            guard let variant = await transcode(sourceURL: sourceURL, dir: dir, spec: spec) else {
-                variantWorkLock.withLock { _ = failedVariantWork.insert(workKey) }
-                continue
-            }
-            // Record before releasing the claim, so no worker sees the file
-            // without its metadata entry and encodes it again.
-            record([variant], for: entryID, in: dir)
-            changed = true
+        guard PathSafety.isValidEntryID(entryID),
+              FileManager.default.fileExists(atPath: entryDirectory(entryID).path)
+        else { return }
+        let specs = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: displayPixels)
+        await encodeQueue.enqueue(specs.map { VariantEncodeQueue.Job(entryID: entryID, sourceURL: sourceURL, spec: $0) })
+    }
+
+    private static func entryDirectory(_ entryID: String) -> URL {
+        videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
+    }
+
+    /// The one queue every copy encode goes through.
+    private static let encodeQueue = VariantEncodeQueue(
+        canMakeOptionalCopies: { canMakeFullQualityCopies },
+        isDone: { job in
+            let dir = entryDirectory(job.entryID)
+            // A wallpaper removed while its jobs waited has nothing to encode.
+            return !FileManager.default.fileExists(atPath: dir.path) || isRecorded(job.spec, entryID: job.entryID, in: dir)
+        },
+        encode: { job in
+            let dir = entryDirectory(job.entryID)
+            guard let variant = await transcode(sourceURL: job.sourceURL, dir: dir, spec: job.spec) else { return false }
+            record([variant], for: job.entryID, in: dir)
+            notifyLibraryChanged()
+            return true
         }
-        if changed { notifyLibraryChanged() }
+    )
+
+    /// Runs copy encodes one at a time at utility priority. Battery copies go
+    /// ahead of queued 1440p copies, since a battery tier may be waiting to
+    /// play them. Before each 1440p export it checks power again, and a copy
+    /// that fails waits `firstRetryDelay`, doubling, and stops after
+    /// `maxAttempts` tries for the session. Retries happen on the next request
+    /// (apply, restore, tier switch); nothing is scheduled.
+    actor VariantEncodeQueue {
+        struct Job: Sendable, Equatable {
+            let entryID: String
+            let sourceURL: URL
+            let spec: VariantSpec
+            var key: String { entryID + "/" + spec.filename }
+        }
+
+        static let maxAttempts = 4
+        static let firstRetryDelay: TimeInterval = 5 * 60
+
+        private let canMakeOptionalCopies: @Sendable () -> Bool
+        private let isDone: @Sendable (Job) -> Bool
+        private let encode: @Sendable (Job) async -> Bool
+        private let now: @Sendable () -> Date
+        private var pending: [Job] = []
+        private var runningKey: String?
+        private var worker: Task<Void, Never>?
+        private var failures: [String: (count: Int, retryAfter: Date)] = [:]
+
+        init(
+            canMakeOptionalCopies: @escaping @Sendable () -> Bool,
+            isDone: @escaping @Sendable (Job) -> Bool,
+            encode: @escaping @Sendable (Job) async -> Bool,
+            now: @escaping @Sendable () -> Date = { Date() }
+        ) {
+            self.canMakeOptionalCopies = canMakeOptionalCopies
+            self.isDone = isDone
+            self.encode = encode
+            self.now = now
+        }
+
+        func enqueue(_ jobs: [Job]) {
+            let ordered = jobs.filter { !$0.spec.forFullQuality } + jobs.filter(\.spec.forFullQuality)
+            for job in ordered where job.key != runningKey && !pending.contains(where: { $0.key == job.key }) {
+                if job.spec.forFullQuality {
+                    pending.append(job)
+                } else {
+                    pending.insert(job, at: pending.firstIndex { $0.spec.forFullQuality } ?? pending.endIndex)
+                }
+            }
+            if worker == nil, !pending.isEmpty {
+                worker = Task(priority: .utility) { await drain() }
+            }
+        }
+
+        /// Returns once the queue is empty. For tests.
+        func drained() async {
+            while let worker { await worker.value }
+        }
+
+        private func drain() async {
+            while !pending.isEmpty {
+                let job = pending.removeFirst()
+                guard shouldRun(job) else { continue }
+                runningKey = job.key
+                let succeeded = await encode(job)
+                runningKey = nil
+                if succeeded {
+                    failures[job.key] = nil
+                } else {
+                    let count = (failures[job.key]?.count ?? 0) + 1
+                    let delay = Self.firstRetryDelay * pow(2, Double(count - 1))
+                    failures[job.key] = (count, now().addingTimeInterval(delay))
+                }
+            }
+            worker = nil
+        }
+
+        private func shouldRun(_ job: Job) -> Bool {
+            if job.spec.forFullQuality, !canMakeOptionalCopies() { return false }
+            if let failure = failures[job.key], failure.count >= Self.maxAttempts || now() < failure.retryAfter {
+                return false
+            }
+            return !isDone(job)
+        }
     }
 
     private static func isRecorded(_ spec: VariantSpec, entryID: String, in dir: URL) -> Bool {
