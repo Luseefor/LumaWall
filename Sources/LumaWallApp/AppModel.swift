@@ -51,10 +51,11 @@ final class AppModel {
     var playbackStopped = false
     var pausedDisplayIDs: Set<DisplayID> = []
     var launchAtLogin = false
-    /// Hot diagnostics: excluded from observation so the 15s stats tick doesn't
-    /// re-evaluate every `@Bindable` library view. Read directly where needed.
-    @ObservationIgnored var processCPUPercent: Double = 0
-    @ObservationIgnored var systemCPUPercent: Double = 0
+    /// Live diagnostics. Observed, so the diagnostics views redraw when a poll
+    /// lands; only those views read them, and the poll runs only while one is
+    /// visible. Assign only on change to avoid redundant invalidations.
+    var processCPUPercent: Double = 0
+    var systemCPUPercent: Double = 0
     var batteryPercent = 100
     var isOnBattery = false
     var playlistEditor: PlaylistEditorState?
@@ -71,9 +72,9 @@ final class AppModel {
     var activeAlert: AppAlert?
     var alertQueue: [AppAlert] = []
     var activePlaylistID: PlaylistID?
-    @ObservationIgnored var processMemoryMB: Double = 0
-    @ObservationIgnored var libraryDiskMB: Double = 0
-    @ObservationIgnored var activeDecoderCount = 0
+    var processMemoryMB: Double = 0
+    var libraryDiskMB: Double = 0
+    var activeDecoderCount = 0
     var reduceMotionActive = false
     var energySoakReport: EnergySoakReport?
     var automations = WallpaperAutomations()

@@ -109,7 +109,8 @@ extension AppModel {
     func refreshStats() {
         guard diagnosticsVisibility.isVisible else { return }
         processMemoryMB = Self.residentMemoryMB() ?? processMemoryMB
-        activeDecoderCount = engine.activeDecoderCount
+        let decoders = engine.activeDecoderCount
+        if decoders != activeDecoderCount { activeDecoderCount = decoders }
         reduceMotionActive = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let cpu = cpuSampler.sample()
         processCPUPercent = cpu.process
@@ -126,7 +127,8 @@ extension AppModel {
         // Cached in the store: walks the library only after it changed.
         Task { @MainActor in
             let bytes = await store.diskUsageBytes()
-            libraryDiskMB = Double(bytes) / 1_048_576
+            let megabytes = Double(bytes) / 1_048_576
+            if megabytes != libraryDiskMB { libraryDiskMB = megabytes }
         }
     }
 
