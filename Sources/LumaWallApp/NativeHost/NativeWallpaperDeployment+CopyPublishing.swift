@@ -68,26 +68,28 @@ extension NativeWallpaperDeployment {
         surfacesLock.withLock { surfacesByEntry[entryID] ?? [] }
     }
 
-    /// When a copy may encode. The battery copy a surface plays now goes
-    /// first (rank 0), other battery copies next, then the 1440p copy, which
-    /// also needs AC power and a surface that would play it.
+    /// When a copy may encode. A copy some surface's tier would play now
+    /// goes first (rank 0), other battery copies next (rank 1). The 1440p
+    /// copy is made only for a surface playing it now on AC power; it is
+    /// held while a tier or power keeps it unplayed, and dropped once no
+    /// surface fits it.
     static func copyReadiness(
         _ spec: VariantSpec, sourceSize: CGSize, sourceFPS: Double,
         surfaces: [Surface], canMakeOptionalCopies: Bool
     ) -> VariantEncodeQueue.Readiness {
-        if spec.forFullQuality {
-            let planned = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: surfaces.map(\.pixelSize))
-            guard planned.contains(spec) else { return .drop }
-            return canMakeOptionalCopies ? .ready(rank: 2) : .hold
-        }
+        let all = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS)
         let playing = surfaces.contains { surface in
             switch surface.tier {
+            case .full: fullQualityPick(among: all, sourceSize: sourceSize, sourceFPS: sourceFPS, display: surface.pixelSize) == spec
             case .reduced: spec.filename == "Wallpaper.reduced.mov"
             case .minimal: spec.filename == "Wallpaper.minimal.mov"
-            default: false
+            case .staticFrame, .paused: false
             }
         }
-        return .ready(rank: playing ? 0 : 1)
+        guard spec.forFullQuality else { return .ready(rank: playing ? 0 : 1) }
+        let planned = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: surfaces.map(\.pixelSize))
+        guard planned.contains(spec) else { return .drop }
+        return playing && canMakeOptionalCopies ? .ready(rank: 0) : .hold
     }
 
     private static func readiness(of job: VariantEncodeQueue.Job) -> VariantEncodeQueue.Readiness {

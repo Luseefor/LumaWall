@@ -48,7 +48,7 @@ extension NativeWallpaperDeployment {
     /// The copy the extension's Full Quality selection would play on
     /// `display`: the smallest one at the source rate that aspect-fills it
     /// without upscaling. Mirrors `VariantSelection.smallestFilling`.
-    private static func fullQualityPick(among specs: [VariantSpec], sourceSize: CGSize, sourceFPS: Double, display: CGSize) -> VariantSpec? {
+    static func fullQualityPick(among specs: [VariantSpec], sourceSize: CGSize, sourceFPS: Double, display: CGSize) -> VariantSpec? {
         guard display.width > 0, display.height > 0 else { return nil }
         let sourceRate = Int(sourceFPS.rounded())
         func area(_ spec: VariantSpec) -> CGFloat {

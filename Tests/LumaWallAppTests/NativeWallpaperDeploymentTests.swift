@@ -151,22 +151,31 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertEqual(size(wide, CGSize(width: 1280, height: 720)), CGSize(width: 1280, height: 536))
     }
 
-    func testCopyReadinessFollowsPlaybackPowerAndFit() {
+    func testCopyReadinessFollowsWhatEachSurfacePlays() {
         typealias Surface = NativeWallpaperDeployment.Surface
-        let source = CGSize(width: 3840, height: 2160)
-        let specs = Dictionary(uniqueKeysWithValues: NativeWallpaperDeployment.variantSpecs(sourceSize: source, sourceFPS: 60).map { ($0.filename, $0) })
-        func readiness(_ filename: String, _ surfaces: [Surface], power: Bool = true) -> NativeWallpaperDeployment.VariantEncodeQueue.Readiness {
-            NativeWallpaperDeployment.copyReadiness(specs[filename]!, sourceSize: source, sourceFPS: 60, surfaces: surfaces, canMakeOptionalCopies: power)
+        let uhd = CGSize(width: 3840, height: 2160)
+        let qhd = CGSize(width: 2560, height: 1440)
+        func readiness(_ filename: String, _ surfaces: [Surface], fps: Double = 60, power: Bool = true) -> NativeWallpaperDeployment.VariantEncodeQueue.Readiness {
+            let spec = NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: fps).first { $0.filename == filename }!
+            return NativeWallpaperDeployment.copyReadiness(spec, sourceSize: uhd, sourceFPS: fps, surfaces: surfaces, canMakeOptionalCopies: power)
         }
         // Battery Saver plays the 720p copy, so it goes before the 1080p one.
-        let saver = [Surface(pixelSize: CGSize(width: 2560, height: 1440), tier: .minimal)]
+        let saver = [Surface(pixelSize: qhd, tier: .minimal)]
         XCTAssertEqual(readiness("Wallpaper.minimal.mov", saver), .ready(rank: 0))
         XCTAssertEqual(readiness("Wallpaper.reduced.mov", saver), .ready(rank: 1))
-        XCTAssertEqual(readiness("Wallpaper.reduced.mov", [Surface(pixelSize: source, tier: .reduced)]), .ready(rank: 0))
-        // The 1440p copy waits for AC, and is dropped once no surface fits it.
-        XCTAssertEqual(readiness("Wallpaper.qhd.mov", saver), .ready(rank: 2))
-        XCTAssertEqual(readiness("Wallpaper.qhd.mov", saver, power: false), .hold)
-        XCTAssertEqual(readiness("Wallpaper.qhd.mov", [Surface(pixelSize: source, tier: .full)]), .drop)
+        XCTAssertEqual(readiness("Wallpaper.reduced.mov", [Surface(pixelSize: uhd, tier: .reduced)]), .ready(rank: 0))
+        // Full Quality on a 1440p display plays the 1440p copy: it went
+        // after both battery copies nobody was playing.
+        let full = [Surface(pixelSize: qhd, tier: .full)]
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", full), .ready(rank: 0))
+        XCTAssertEqual(readiness("Wallpaper.minimal.mov", full), .ready(rank: 1))
+        // A 30 fps source on a 1080p display at Full Quality plays the 1080p copy.
+        XCTAssertEqual(readiness("Wallpaper.reduced.mov", [Surface(pixelSize: CGSize(width: 1920, height: 1080), tier: .full)], fps: 30), .ready(rank: 0))
+        // The 1440p copy is held while power or the tier keeps it unplayed,
+        // and dropped once no surface fits it.
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", full, power: false), .hold)
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", saver), .hold)
+        XCTAssertEqual(readiness("Wallpaper.qhd.mov", [Surface(pixelSize: uhd, tier: .full)]), .drop)
         XCTAssertEqual(readiness("Wallpaper.qhd.mov", []), .drop)
     }
 

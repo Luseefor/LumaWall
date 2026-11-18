@@ -6,8 +6,8 @@ extension NativeWallpaperDeployment {
     /// Each time it picks a job it asks `readiness`: the ready job with the
     /// lowest rank runs next, held jobs wait for `wake()`, and dropped jobs
     /// are forgotten. A running 1440p export is cancelled and queued again
-    /// when a battery copy becomes ready or the 1440p copy stops being
-    /// wanted, since playback may be waiting on the battery copy.
+    /// when a better-ranked job is waiting or the 1440p copy stops being
+    /// ready, since playback may be waiting on the other copy.
     ///
     /// A copy that fails waits `firstRetryDelay`, doubling each time, and
     /// stops after `maxAttempts` tries for the session. Retries happen on the
@@ -92,22 +92,33 @@ extension NativeWallpaperDeployment {
             }
         }
 
+        /// Whether the running job has been cancelled for another. For tests.
+        var runningJobWasPreempted: Bool { running?.preempted ?? false }
+
         /// Returns once nothing is running. For tests.
         func drained() async {
             while let worker { await worker.value }
         }
 
+        /// Cancels a running 1440p export that is no longer ready, or that a
+        /// waiting job outranks. Battery encodes always finish: they are short
+        /// next to a 4K export and redoing one wastes more than it saves.
         private func preemptIfNeeded() {
             guard let current = running, current.job.spec.forFullQuality, !current.preempted else { return }
-            let stillWanted = if case .ready = readiness(current.job) { true } else { false }
-            let batteryWaiting = pending.contains { job in
-                guard !job.spec.forFullQuality, !isBackingOff(job) else { return false }
-                if case .ready = readiness(job) { return true }
-                return false
+            guard case .ready(let rank) = readiness(current.job) else {
+                cancelRunning()
+                return
             }
-            guard !stillWanted || batteryWaiting else { return }
+            let outranked = pending.contains { job in
+                guard !isBackingOff(job), case .ready(let other) = readiness(job) else { return false }
+                return other < rank
+            }
+            if outranked { cancelRunning() }
+        }
+
+        private func cancelRunning() {
             running?.preempted = true
-            current.task.cancel()
+            running?.task.cancel()
         }
 
         private func isBackingOff(_ job: Job) -> Bool {

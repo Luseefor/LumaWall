@@ -108,6 +108,20 @@ final class VariantEncodeQueueTests: XCTestCase {
         XCTAssertEqual(log.completed, ["a/Wallpaper.minimal.mov", "a/Wallpaper.qhd.mov"])
     }
 
+    func testAQHDExportPlaybackNeedsIsNotPreemptedByAnUnusedBatteryCopy() async {
+        let log = EncodeLog()
+        log.set("a/Wallpaper.qhd.mov", .ready(rank: 0))
+        let queue = queue(log)
+        await queue.enqueue([job("a", "Wallpaper.qhd.mov")])
+        await log.waitUntilStarted("a/Wallpaper.qhd.mov")
+        await queue.enqueue([job("a", "Wallpaper.minimal.mov")])
+        let preempted = await queue.runningJobWasPreempted
+        XCTAssertFalse(preempted)
+        log.openAll()
+        await queue.drained()
+        XCTAssertEqual(log.order, ["a/Wallpaper.qhd.mov", "a/Wallpaper.minimal.mov"])
+    }
+
     func testHeldCopyWaitsForWake() async {
         // A power-blocked 1440p job was discarded, so plugging in did not
         // make it until the next apply or restore.
