@@ -143,21 +143,16 @@ extension AppModel {
         }
     }
 
-    /// Merges a burst of workspace notifications into one scan.
-    private func scheduleCoverageScan() {
-        if coverageDebouncer == nil {
-            coverageDebouncer = CoverageDebouncer(delay: .seconds(CoverageScanPolicy.debounce)) { [weak self] in
-                self?.applyPlaybackPolicy()
-            }
-        }
-        coverageDebouncer?.signal()
-    }
-
     private var userPausedEverywhere: Bool {
         userPaused || (!displays.isEmpty && displays.allSatisfy { pausedDisplayIDs.contains($0.displayID) })
     }
 
     func observeDesktopCoverage() {
+        // Merges a burst of workspace notifications into one scan. Created here
+        // so a notification queued before shutdown() finds it gone and does nothing.
+        coverageDebouncer = CoverageDebouncer(delay: .seconds(CoverageScanPolicy.debounce)) { [weak self] in
+            self?.applyPlaybackPolicy()
+        }
         let center = NSWorkspace.shared.notificationCenter
         let names: [NSNotification.Name] = [
             NSWorkspace.didActivateApplicationNotification,
@@ -167,7 +162,7 @@ extension AppModel {
         for name in names {
             coverageObservers.append(
                 center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    Task { @MainActor in self?.scheduleCoverageScan() }
+                    Task { @MainActor in self?.coverageDebouncer?.signal() }
                 }
             )
         }
@@ -212,6 +207,7 @@ extension AppModel {
             // Hysteresis: hold the paused verdict until coverage falls back past
             // the release thresholds, so a window sitting at the enter boundary
             // can't strobe pause/resume on every evaluation.
+            occlusionLatch.beginScan(onBattery: power.isOnBattery)
             occlusionLatch.prune(to: Set(displays.map(\.displayID)))
             for display in displays {
                 occlusionLatch.update(

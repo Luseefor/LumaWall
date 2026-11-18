@@ -33,7 +33,8 @@ final class WallpaperEngine {
     /// use overlay sessions even in native mode, so `activeDisplayIDs` alone
     /// would miss them.
     var hasActivePlayback: Bool {
-        !overlay.activeDisplayIDs.isEmpty || !(native?.activeDisplayIDs.isEmpty ?? true)
+        if !overlay.activeDisplayIDs.isEmpty { return true }
+        return mode == .native && !(native?.activeDisplayIDs.isEmpty ?? true)
     }
 
     func wallpaperID(on displayID: DisplayID) -> WallpaperID? {

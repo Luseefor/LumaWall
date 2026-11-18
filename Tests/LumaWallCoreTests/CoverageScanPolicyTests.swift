@@ -1,3 +1,4 @@
+import Foundation
 import LumaWallCore
 import Testing
 
@@ -67,5 +68,51 @@ struct CoverageDebouncerTests {
         debouncer.cancel()
         try await Task.sleep(for: .milliseconds(150))
         #expect(runs == 0)
+    }
+}
+
+struct OcclusionLatchPowerSourceTests {
+    private let id = DisplayID(rawValue: "test-display")
+
+    private func tier(_ latch: OcclusionLatch, onBattery: Bool) -> PlaybackTier {
+        PlaybackPolicy.resolve(.init(isOnBattery: onBattery, displayIsObscured: latch.covered.contains(id)))
+    }
+
+    /// 1,440-pt display with a 28-pt menu bar: a maximized window measures
+    /// 100% ignoring the menu bar (battery) and about 98.1% counting it (AC).
+    @Test func acBatteryScanAcPausesOnlyOnBattery() {
+        var latch = OcclusionLatch()
+        // AC: below the 98.5% enter threshold, so playing.
+        latch.beginScan(onBattery: false)
+        latch.update(displayID: id, ratio: 0.981, rawCovered: false, rawFullscreen: false)
+        #expect(tier(latch, onBattery: false) == .full)
+        // Battery scan: the menu bar is ignored, so covered.
+        latch.beginScan(onBattery: true)
+        latch.update(displayID: id, ratio: 1.0, rawCovered: true, rawFullscreen: false)
+        #expect(tier(latch, onBattery: true) == .paused)
+        // AC again, repeated scans: 98.1% sits between release and enter, but
+        // the covered verdict came from the battery measurement and must drop.
+        for _ in 0..<3 {
+            latch.beginScan(onBattery: false)
+            latch.update(displayID: id, ratio: 0.981, rawCovered: false, rawFullscreen: false)
+            #expect(tier(latch, onBattery: false) == .full)
+        }
+    }
+
+    @Test func sourceChangeKeepsFullscreenHysteresis() {
+        var latch = OcclusionLatch()
+        latch.beginScan(onBattery: false)
+        latch.update(displayID: id, ratio: 1.0, rawCovered: true, rawFullscreen: true)
+        latch.beginScan(onBattery: true)
+        #expect(latch.fullscreen == [id])
+        #expect(latch.covered.isEmpty)
+    }
+
+    @Test func sameSourceKeepsCoveredHysteresis() {
+        var latch = OcclusionLatch()
+        latch.beginScan(onBattery: false)
+        latch.update(displayID: id, ratio: 1.0, rawCovered: true, rawFullscreen: false)
+        latch.beginScan(onBattery: false)
+        #expect(latch.covered == [id])
     }
 }

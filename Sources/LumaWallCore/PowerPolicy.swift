@@ -162,7 +162,20 @@ public struct OcclusionLatch: Sendable {
     public private(set) var covered: Set<DisplayID> = []
     public private(set) var fullscreen: Set<DisplayID> = []
 
+    /// Power source the covered verdicts were measured under. Analysis ignores
+    /// the menu bar only on battery, so a ratio from one source says nothing
+    /// about the other.
+    private var scanOnBattery: Bool?
+
     public init() {}
+
+    /// Call before feeding a scan's results. A source change drops the
+    /// covered verdicts (the new ratios use a different geometry) but keeps
+    /// the fullscreen ones and their own release hysteresis.
+    public mutating func beginScan(onBattery: Bool) {
+        if let scanOnBattery, scanOnBattery != onBattery { covered.removeAll() }
+        scanOnBattery = onBattery
+    }
 
     public mutating func update(displayID: DisplayID, ratio: CGFloat, rawCovered: Bool, rawFullscreen: Bool) {
         if rawCovered {
