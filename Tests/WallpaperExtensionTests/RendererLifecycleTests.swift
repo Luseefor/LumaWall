@@ -1,14 +1,16 @@
 import XCTest
 
 /// Orderings on the renderer queue that kept a surface decoding with the
-/// displays off, or overlapped two decoder flushes (#10).
+/// displays off, overlapped two decoder flushes, or stranded it frozen (#10).
 final class RendererLifecycleTests: XCTestCase {
-    private typealias Effect = RendererLifecycle.Effect
+    private let b = URL(fileURLWithPath: "/b.mov")
 
-    /// A renderer that has started and is playing on an awake display.
+    /// A renderer that has started and is playing on an awake display, fed by
+    /// registration 1.
     private func playing() -> RendererLifecycle {
         var life = RendererLifecycle()
-        XCTAssertEqual(life.handle(.started(displayAsleep: false)), [.setRate(1), .startFeeding(generation: 0)])
+        XCTAssertEqual(life.handle(.started(displayAsleep: false)), [])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 1)])
         return life
     }
 
@@ -34,7 +36,7 @@ final class RendererLifecycleTests: XCTestCase {
         // event still lands after it on the same queue and stops playback.
         var life = playing()
         _ = life.handle(.policy(.paused, animated: false))
-        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.ramp(to: 1), .startFeeding(generation: 0), .disarmDeepPause])
+        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.ramp(to: 1), .startFeeding(token: 2), .disarmDeepPause])
         XCTAssertEqual(life.handle(.displaySleep), [.setRate(0), .stopFeeding, .armDeepPause])
         assertStoppedAndIdle(life)
     }
@@ -43,7 +45,7 @@ final class RendererLifecycleTests: XCTestCase {
         // Previews get no policy recompute on wake; their tier never changed.
         var life = playing()
         _ = life.handle(.displaySleep)
-        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.setRate(1), .startFeeding(generation: 0), .disarmDeepPause])
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
     }
 
     func testWakeIntoAPausedTierStaysPaused() {
@@ -68,53 +70,65 @@ final class RendererLifecycleTests: XCTestCase {
         var life = playing()
         XCTAssertEqual(life.handle(.policy(.paused, animated: true)), [.ramp(to: 0)])
         XCTAssertEqual(life.handle(.rampFinished), [.stopFeeding, .armDeepPause])
-        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.ramp(to: 1), .startFeeding(generation: 0), .disarmDeepPause])
+        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.ramp(to: 1), .startFeeding(token: 2), .disarmDeepPause])
         XCTAssertEqual(life.handle(.rampFinished), [])
         XCTAssertEqual(life.clock, .playing)
+    }
+
+    func testAnimatedResumeThatSwitchesCopiesStillRamps() {
+        // Lock screen with "always pause desktop" on battery: the resume also
+        // switches to the tier's copy, so the ramp waits for the rebuild.
+        var life = playing()
+        _ = life.handle(.policy(.paused, animated: true))
+        _ = life.handle(.rampFinished)
+        XCTAssertEqual(life.handle(.assetChanged), [.disarmDeepPause, .beginReset(.restart, generation: 1)])
+        XCTAssertEqual(life.handle(.policy(.minimal, animated: true)), [])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
     }
 
     // MARK: Start
 
     func testStartDuringSleepHoldsTheClock() {
         var life = RendererLifecycle()
-        XCTAssertEqual(life.handle(.started(displayAsleep: true)), [.armDeepPause])
+        _ = life.handle(.started(displayAsleep: true))
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
         assertStoppedAndIdle(life)
     }
 
     func testSwitchBeforeStartIsLeftToStart() {
         var life = RendererLifecycle()
         XCTAssertEqual(life.handle(.assetChanged), [])
-        XCTAssertEqual(life.handle(.started(displayAsleep: false)), [.setRate(1), .startFeeding(generation: 0)])
+        _ = life.handle(.started(displayAsleep: false))
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 1)])
     }
 
-    // MARK: Feed, loop, and deep pause
+    // MARK: Feed registrations
 
-    func testLoopBoundaryQueuedBeforeSleepWaitsForWake() {
+    func testCallbackFromACancelledRegistrationIsRejected() {
+        // A readiness callback submitted before sleep runs after it: it must
+        // not feed, and its end-of-clip event must not swap readers.
         var life = playing()
         _ = life.handle(.displaySleep)
-        XCTAssertEqual(life.handle(.readerExhausted(generation: 0)), [])
-        XCTAssertTrue(life.loopPending)
-        XCTAssertEqual(
-            life.handle(.displayWake(assetChanged: false)),
-            [.setRate(1), .swapToNextReader, .startFeeding(generation: 0), .disarmDeepPause],
-        )
+        XCTAssertFalse(life.acceptsFeed(token: 1))
+        XCTAssertEqual(life.handle(.readerExhausted(token: 1)), [])
+        XCTAssertEqual(life.handle(.decoderFailed(token: 1)), [])
+        XCTAssertEqual(life.readers, .live)
+        // Wake registers a new feed; the old token stays retired. An exhausted
+        // reader reports again from the new registration.
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
+        XCTAssertFalse(life.acceptsFeed(token: 1))
+        XCTAssertTrue(life.acceptsFeed(token: 2))
+        XCTAssertEqual(life.handle(.readerExhausted(token: 2)), [.swapToNextReader, .startFeeding(token: 3)])
     }
 
     func testDeepPausedRendererRebuildsOnWake() {
         var life = playing()
         _ = life.handle(.displaySleep)
         XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
-        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.beginReset(.resume, generation: 2)])
-        XCTAssertEqual(life.handle(.resetFlushed(generation: 2)), [.buildPipeline(.resume), .setRate(1), .startFeeding(generation: 2)])
-    }
-
-    func testFeedCallbackFromAFreedPipelineIsDropped() {
-        var life = playing()
-        _ = life.handle(.displaySleep)
-        _ = life.handle(.deepPauseFired)
-        XCTAssertEqual(life.handle(.readerExhausted(generation: 0)), [])
-        XCTAssertEqual(life.handle(.decoderFailed(generation: 0)), [])
-        XCTAssertFalse(life.loopPending)
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.beginReset(.resume, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.resume)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 2)])
     }
 
     // MARK: Switches and resets
@@ -122,12 +136,13 @@ final class RendererLifecycleTests: XCTestCase {
     func testSwitchDuringSleepWaitsForWake() {
         var life = playing()
         _ = life.handle(.displaySleep)
-        XCTAssertEqual(life.handle(.switchDeferred(URL(fileURLWithPath: "/b.mov"))), [])
+        XCTAssertEqual(life.handle(.switchDeferred(b)), [])
         XCTAssertEqual(life.handle(.switchDeferred(URL(fileURLWithPath: "/a.mov"))), [])
         XCTAssertEqual(life.deferredSwitch, URL(fileURLWithPath: "/a.mov"))
         XCTAssertEqual(life.handle(.displayWake(assetChanged: true)), [.disarmDeepPause, .beginReset(.restart, generation: 1)])
         XCTAssertNil(life.deferredSwitch)
-        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart), .setRate(1), .startFeeding(generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 2)])
     }
 
     func testDeferredSwitchIntoAPausedDesktopShowsTheFrameAndRearmsDeepPause() {
@@ -135,9 +150,10 @@ final class RendererLifecycleTests: XCTestCase {
         _ = life.handle(.policy(.paused, animated: false))
         _ = life.handle(.displaySleep)
         XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
-        _ = life.handle(.switchDeferred(URL(fileURLWithPath: "/b.mov")))
-        XCTAssertEqual(life.handle(.displayWake(assetChanged: true)), [.beginReset(.restart, generation: 2)])
-        XCTAssertEqual(life.handle(.resetFlushed(generation: 2)), [.buildPipeline(.restart), .armDeepPause])
+        _ = life.handle(.switchDeferred(b))
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: true)), [.beginReset(.restart, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
         assertStoppedAndIdle(life)
     }
 
@@ -146,20 +162,31 @@ final class RendererLifecycleTests: XCTestCase {
         // behind the wake switch. Only the switch's reset may flush.
         var life = playing()
         _ = life.handle(.displaySleep)
-        _ = life.handle(.switchDeferred(URL(fileURLWithPath: "/b.mov")))
+        _ = life.handle(.switchDeferred(b))
         var effects = life.handle(.displayWake(assetChanged: true))
-        effects += life.handle(.decoderFailed(generation: 0))
+        effects += life.handle(.decoderFailed(token: 1))
         effects += life.handle(.resetFlushed(generation: 1))
+        effects += life.handle(.pipelineBuilt(true))
         XCTAssertEqual(effects.filter(\.isReset), [.beginReset(.restart, generation: 1)])
         XCTAssertEqual(life.clock, .playing)
     }
 
+    func testDiscontinuityThenSwitchFlushesOnce() {
+        // requiresFlushToResumeDecoding goes through the same reset, resumes
+        // from a keyframe, and a switch during its flush merges into it.
+        var life = playing()
+        XCTAssertEqual(life.handle(.decoderInterrupted(token: 1)), [.beginReset(.resume, generation: 1)])
+        XCTAssertEqual(life.handle(.assetChanged), [])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 2)])
+    }
+
     func testRequestsDuringAFlushMergeIntoIt() {
         var life = playing()
-        XCTAssertEqual(life.handle(.decoderFailed(generation: 0)), [.beginReset(.recover, generation: 1)])
+        XCTAssertEqual(life.handle(.decoderFailed(token: 1)), [.beginReset(.recover, generation: 1)])
         XCTAssertEqual(life.handle(.assetChanged), [])
         XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [])
-        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.recover), .setRate(1), .startFeeding(generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.recover)])
     }
 
     func testFlushCompletingDuringSleepBuildsOnWake() {
@@ -168,16 +195,62 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.displaySleep), [])
         XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [])
         XCTAssertEqual(life.readers, .awaitingBuild(.restart))
-        // A second switch while asleep keeps the build a restart.
-        XCTAssertEqual(life.handle(.displayWake(assetChanged: true)), [.buildPipeline(.restart), .setRate(1), .startFeeding(generation: 1)])
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: true)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 2)])
     }
 
-    func testDecoderFailureDuringSleepRecoversOnWake() {
+    // MARK: Failed builds
+
+    func testFailedBuildRetriesThenShowsTheFallback() {
         var life = playing()
-        _ = life.handle(.displaySleep)
-        XCTAssertEqual(life.handle(.decoderFailed(generation: 0)), [.freeReaders, .disarmDeepPause])
-        XCTAssertEqual(life.readers, .broken)
-        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.beginReset(.recover, generation: 2)])
+        var effects = life.handle(.assetChanged)
+        var generation = 1
+        for _ in 0 ..< RendererLifecycle.maxFailures {
+            XCTAssertEqual(effects, [.beginReset(.restart, generation: generation)])
+            XCTAssertEqual(life.handle(.resetFlushed(generation: generation)), [.buildPipeline(.restart)])
+            // Nothing starts the clock or feed before the build reports back.
+            assertStoppedAndIdle(life)
+            effects = life.handle(.pipelineBuilt(false))
+            generation += 1
+        }
+        XCTAssertEqual(effects, [.beginReset(.restart, generation: generation)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: generation)), [.showFallback])
+        XCTAssertEqual(life.readers, .failed)
+        // Policy and wake leave the fallback alone; a new asset tries again.
+        XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [])
+        XCTAssertEqual(life.handle(.assetChanged), [.beginReset(.restart, generation: generation + 1)])
+    }
+
+    func testFailedStartRetriesWithoutClearingTheStill() {
+        var life = RendererLifecycle()
+        _ = life.handle(.started(displayAsleep: false))
+        XCTAssertEqual(life.handle(.pipelineBuilt(false)), [.beginReset(.restart, generation: 1)])
+    }
+
+    func testRepeatedDecoderFailureStopsRetrying() {
+        var life = playing()
+        var token = 1
+        for attempt in 1 ... RendererLifecycle.maxFailures {
+            XCTAssertEqual(life.handle(.decoderFailed(token: token)), [.beginReset(.recover, generation: attempt)])
+            if attempt == RendererLifecycle.maxFailures {
+                XCTAssertEqual(life.handle(.resetFlushed(generation: attempt)), [.showFallback])
+            } else {
+                _ = life.handle(.resetFlushed(generation: attempt))
+                _ = life.handle(.pipelineBuilt(true))
+                token += 1
+            }
+        }
+        assertStoppedAndIdle(life)
+    }
+
+    func testACompletedLoopClearsTheFailureCount() {
+        var life = playing()
+        _ = life.handle(.decoderFailed(token: 1))
+        _ = life.handle(.resetFlushed(generation: 1))
+        _ = life.handle(.pipelineBuilt(true))
+        XCTAssertEqual(life.failures, 1)
+        _ = life.handle(.readerExhausted(token: 2))
+        XCTAssertEqual(life.failures, 0)
     }
 }
 

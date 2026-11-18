@@ -69,6 +69,8 @@ final class VideoRenderer: @unchecked Sendable {
         set { selector.withLock { $0 = newValue } }
     }
     private let selector = OSAllocatedUnfairLock<(@Sendable (CGSize, PlaybackPolicy) -> URL)?>(initialState: nil)
+    /// The creation still, shown again when the video can't be rebuilt.
+    private let fallbackStill: CGImage?
 
     static func create(
         rootLayer: CALayer,
@@ -127,6 +129,7 @@ final class VideoRenderer: @unchecked Sendable {
         self.renderer = LWSampleBufferRenderer(displayLayer)
         self.asset = asset
         self.videoTrack = videoTrack
+        self.fallbackStill = stillImage
         if nominalFrameRate.isFinite, nominalFrameRate > 0 {
             self.nominalFrameRate = nominalFrameRate
         }
@@ -204,45 +207,57 @@ final class VideoRenderer: @unchecked Sendable {
             guard let self else { onFirstFrameReady?(); return }
             traceLog("  [start #\(debugID)] asset=\(asset.url.lastPathComponent)")
             guard isRunning else { traceLog("  [start #\(debugID)] aborted, already stopped"); onFirstFrameReady?(); return }
-            guard let reader = try? AVAssetReader(asset: asset) else { onFirstFrameReady?(); return }
-            let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
-            output.alwaysCopiesSampleData = false
-            reader.add(output)
-            reader.startReading()
-
-            // Reset timebase BEFORE first enqueue so the frame isn't seen as late.
-            CMTimebaseSetTime(timebase, time: .zero)
-
-            // Enqueue the first frame and flush it to the render server inside an
-            // action-free transaction, so the context is genuinely displaying video
-            // before onFirstFrameReady fires (the deferred acquire reply gates on this).
-            // Tagged to show at once: on a sleeping display the clock stays at 0.
-            if let firstSample = output.copyNextSampleBuffer() {
-                Self.setDisplayImmediately(firstSample)
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                renderer.enqueue(firstSample)
-                CATransaction.commit()
-                CATransaction.flush()
-            }
-
-            currentReader = reader
-            currentOutput = output
-            ptsOffset = .zero
-            lastEnqueuedEnd = .zero
-
-            // Starts the clock and the feed unless the displays sleep or a pause
-            // was applied before this ran. The global flag is read here, on the
-            // queue: sleep sets it before sending `displayDidSleep` to the
-            // renderers it knows, so a renderer it missed still sees it.
+            // Starts the clock and the feed once the pipeline reports built,
+            // unless the displays sleep or a pause was applied before this ran.
+            // The global flag is read here, on the queue: sleep sets it before
+            // sending `displayDidSleep` to the renderers it knows, so a renderer
+            // it missed still sees it.
             send(.started(displayAsleep: WallpaperState.shared.isDisplayAsleep))
+            let built = buildFirstPipeline()
+            if !built {
+                extensionLog("  [start #\(debugID)] FAILED to start reading \(asset.url.lastPathComponent)")
+            }
+            send(.pipelineBuilt(built))
 
-            // The context now holds a live, composited video frame. Release the gate so
-            // the acquire can reply and the agent can swap to us.
+            // The context now holds a live, composited video frame (or, on failure,
+            // the seeded still). Release the gate so the acquire can reply and the
+            // agent can swap to us.
             onFirstFrameReady?()
-
-            prepareNextReader()
         }
+    }
+
+    /// `start()`'s first pipeline: like `buildPipeline(.restart)`, but the
+    /// first frame is flushed to the render server so the context really shows
+    /// video before the acquire reply. Queue-only.
+    private func buildFirstPipeline() -> Bool {
+        guard let reader = try? AVAssetReader(asset: asset) else { return false }
+        let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
+        output.alwaysCopiesSampleData = false
+        reader.add(output)
+        guard reader.startReading() else { return false }
+
+        // Reset timebase BEFORE first enqueue so the frame isn't seen as late.
+        CMTimebaseSetTime(timebase, time: .zero)
+
+        // Enqueue the first frame and flush it to the render server inside an
+        // action-free transaction, so the context is genuinely displaying video
+        // before onFirstFrameReady fires (the deferred acquire reply gates on this).
+        // Tagged to show at once: on a sleeping display the clock stays at 0.
+        if let firstSample = output.copyNextSampleBuffer() {
+            Self.setDisplayImmediately(firstSample)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            renderer.enqueue(firstSample)
+            CATransaction.commit()
+            CATransaction.flush()
+        }
+
+        currentReader = reader
+        currentOutput = output
+        ptsOffset = .zero
+        lastEnqueuedEnd = .zero
+        prepareNextReader()
+        return true
     }
 
     /// Re-frame the video + still layers to a new destination geometry (points) and
@@ -439,8 +454,8 @@ final class VideoRenderer: @unchecked Sendable {
             ramp(to: target, over: target > 0 ? Self.rampUpDuration : Self.rampDownDuration) { [weak self] in
                 self?.send(.rampFinished)
             }
-        case let .startFeeding(generation):
-            feedFromCurrentReader(generation: generation)
+        case let .startFeeding(token):
+            feedFromCurrentReader(token: token)
         case .stopFeeding:
             renderer.stopRequestingMediaData()
         case .armDeepPause:
@@ -454,10 +469,23 @@ final class VideoRenderer: @unchecked Sendable {
         case let .beginReset(kind, generation):
             beginReset(kind, generation: generation)
         case let .buildPipeline(kind):
-            buildPipeline(kind)
+            let built = buildPipeline(kind)
+            send(.pipelineBuilt(built))
+        case .showFallback:
+            showFallbackStill()
         case .swapToNextReader:
             swapToNextReader()
         }
+    }
+
+    /// Rebuilding kept failing: show the creation still rather than a frozen
+    /// or cleared frame. The reset before this flushed the renderer, so it
+    /// accepts the buffer.
+    private func showFallbackStill() {
+        extensionLog("  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing the still")
+        guard let fallbackStill, let buffer = makeStillSampleBuffer(from: fallbackStill) else { return }
+        Self.setDisplayImmediately(buffer)
+        renderer.enqueue(buffer)
     }
 
     private func dropReaders() {
@@ -498,12 +526,12 @@ final class VideoRenderer: @unchecked Sendable {
     /// first frame at once. `.resume` continues from the paused position (a
     /// display-sleep or screen-lock wake resumes the same video instead of
     /// restarting it); the other kinds start from 0.
-    private func buildPipeline(_ kind: RendererLifecycle.ResetKind) {
+    private func buildPipeline(_ kind: RendererLifecycle.ResetKind) -> Bool {
         let resumeTime = CMTimebaseGetTime(timebase)
         let continuing = kind == .resume && resumeTime.isNumeric && resumeTime > .zero
         guard let reader = try? AVAssetReader(asset: asset) else {
             extensionLog("  [reset #\(debugID)] FAILED to create AVAssetReader for \(asset.url.lastPathComponent)")
-            return
+            return false
         }
         if continuing {
             // AVAssetReader seeks to the enclosing keyframe and emits from here.
@@ -512,7 +540,10 @@ final class VideoRenderer: @unchecked Sendable {
         let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
         output.alwaysCopiesSampleData = false
         reader.add(output)
-        reader.startReading()
+        guard reader.startReading() else {
+            extensionLog("  [reset #\(debugID)] FAILED to start reading \(asset.url.lastPathComponent): \(reader.error?.localizedDescription ?? "unknown")")
+            return false
+        }
         currentReader = reader
         currentOutput = output
 
@@ -536,6 +567,7 @@ final class VideoRenderer: @unchecked Sendable {
         traceLog("  [reset #\(debugID)] BUILT \(kind) continuing=\(continuing) asset=\(asset.url.lastPathComponent) rendererStatus=\(renderer.status.rawValue)")
         feedLogBudget = 4
         prepareNextReader()
+        return true
     }
 
     // MARK: - Ramp (Apple-like lock screen transition)
@@ -695,6 +727,9 @@ final class VideoRenderer: @unchecked Sendable {
             traceLog("  [Renderer] Next reader not ready, creating synchronously")
             guard let reader = try? AVAssetReader(asset: asset) else {
                 traceLog("  [Renderer] Failed to create fallback reader")
+                // The feed reports the missing reader as a failure.
+                currentReader = nil
+                currentOutput = nil
                 return
             }
             let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
@@ -711,32 +746,36 @@ final class VideoRenderer: @unchecked Sendable {
 
     // MARK: - Playback Loop
 
-    /// Feed the renderer from the current reader. `generation` ties this
-    /// request to one pipeline: once a reset or deep pause replaces it, the
-    /// callback stops and anything it queued is dropped by the lifecycle.
-    private func feedFromCurrentReader(generation: Int) {
+    /// Feed the renderer from the current reader under registration `token`.
+    /// Stopping the feed retires the token, so a readiness callback already
+    /// queued when the feed stopped (display sleep, a reset) returns without
+    /// touching AVFoundation, and the events it would raise are dropped.
+    private func feedFromCurrentReader(token: Int) {
         renderer.requestMediaDataWhenReady(on: queue) { [weak self] in
-            guard let self, isRunning, lifecycle.generation == generation, let currentOutput else {
-                // A reader that failed to build leaves the held frame on screen.
-                self?.renderer.stopRequestingMediaData()
-                return
+            guard let self, isRunning, lifecycle.acceptsFeed(token: token) else { return }
+            // Every way out below stops this registration before reporting.
+            // Dispatch async: requestMediaDataWhenReady is not reentrant.
+            func report(_ event: RendererLifecycle.Event) {
+                renderer.stopRequestingMediaData()
+                queue.async { [weak self] in self?.send(event) }
             }
 
-            // Unrecoverable failure, full reset.
-            // Dispatch async: requestMediaDataWhenReady is not reentrant.
+            // Unrecoverable failure: full reset. A discontinuity needs a flush
+            // and a keyframe, so it resets too, continuing from here.
             if renderer.status == .failed {
                 extensionLog("  [Renderer] Status failed: \(renderer.error?.localizedDescription ?? "unknown"), recovering")
-                renderer.stopRequestingMediaData()
-                queue.async { [weak self] in
-                    self?.send(.decoderFailed(generation: generation))
-                }
+                report(.decoderFailed(token: token))
                 return
             }
-
-            // Decoder hit a discontinuity or error. Flush and continue feeding.
             if renderer.requiresFlushToResumeDecoding {
-                traceLog("  [feed #\(debugID)] requiresFlushToResumeDecoding=YES → renderer.flush() (frames enqueued after may be discarded); status=\(renderer.status.rawValue)")
-                renderer.flush()
+                extensionLog("  [feed #\(debugID)] requiresFlushToResumeDecoding, resetting from a keyframe")
+                report(.decoderInterrupted(token: token))
+                return
+            }
+            // No reader: a loop swap couldn't build one.
+            guard let currentReader, let currentOutput else {
+                report(.decoderFailed(token: token))
+                return
             }
 
             var enqueuedThisTick = 0
@@ -759,14 +798,12 @@ final class VideoRenderer: @unchecked Sendable {
 
                     renderer.enqueue(adjusted)
                 } else {
-                    // Dispatch async: requestMediaDataWhenReady is not reentrant.
-                    if feedLogBudget > 0 {
-                        traceLog("  [feed #\(debugID)] reader exhausted after enqueuing this tick=\(enqueuedThisTick); status=\(renderer.status.rawValue) → swapToNextReader")
+                    // nil means end of clip only when the reader completed.
+                    let failed = currentReader.status != .completed
+                    if failed || feedLogBudget > 0 {
+                        traceLog("  [feed #\(debugID)] reader out of samples after \(enqueuedThisTick) this tick; readerStatus=\(currentReader.status.rawValue) err=\(currentReader.error?.localizedDescription ?? "-")")
                     }
-                    renderer.stopRequestingMediaData()
-                    queue.async { [weak self] in
-                        self?.send(.readerExhausted(generation: generation))
-                    }
+                    report(failed ? .decoderFailed(token: token) : .readerExhausted(token: token))
                     return
                 }
             }
