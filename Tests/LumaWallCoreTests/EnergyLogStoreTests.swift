@@ -257,3 +257,111 @@ extension EnergyLogStoreTests {
         #expect(await relaunched.current().samples.count == 23)
     }
 }
+
+extension EnergyLogStoreTests {
+    private func makeRoot() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    private func setPermissions(_ mode: Int, _ url: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
+    }
+
+    private func cleanUp(_ root: URL) {
+        setPermissions(0o755, root)
+        for url in (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+            setPermissions(0o644, url)
+        }
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    @Test func failedLaunchCompactionKeepsCountingTheRetainedJournal() async throws {
+        let root = makeRoot()
+        defer { cleanUp(root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root, compactionThreshold: 5)
+        for index in 0..<3 {
+            try await first.record(sample(at: now.addingTimeInterval(Double(index - 20) * 60), cpu: Double(index)), now: now)
+        }
+        // A read-only directory fails the snapshot write but still allows
+        // appending to the existing journal.
+        setPermissions(0o555, root)
+        let second = try EnergyLogStore(rootURL: root, compactionThreshold: 5)
+        #expect(journalLineCount(in: root) == 3)
+        try await second.record(sample(at: now.addingTimeInterval(-10 * 60), cpu: 3), now: now)
+        try await second.record(sample(at: now.addingTimeInterval(-9 * 60), cpu: 4), now: now)
+        #expect(journalLineCount(in: root) == 5)
+        setPermissions(0o755, root)
+        try await second.record(sample(at: now.addingTimeInterval(-8 * 60), cpu: 5), now: now)
+        #expect(journalLineCount(in: root) == 0)
+
+        let third = try EnergyLogStore(rootURL: root)
+        #expect(await third.current().samples.map(\.processCPUPercent) == [0, 1, 2, 3, 4, 5])
+    }
+
+    @Test func unreadableSnapshotLeavesTheLiveJournalAlone() async throws {
+        let root = makeRoot()
+        defer { cleanUp(root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root)
+        try await first.startSoak(at: now.addingTimeInterval(-3_600))
+        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 1), now: now)
+        try await first.record(sample(at: now.addingTimeInterval(-60), cpu: 2), now: now)
+        let journalBefore = journalFiles(in: root)
+        let snapshotURL = root.appendingPathComponent("EnergyLog.json")
+        setPermissions(0o000, snapshotURL)
+
+        let blind = try EnergyLogStore(rootURL: root)
+        // Nothing is written or deleted while the generation is unknown, and
+        // new samples stay in memory only.
+        try await blind.record(sample(at: now, cpu: 9), now: now)
+        #expect(journalFiles(in: root) == journalBefore)
+        #expect(journalLineCount(in: root) == 2)
+        await #expect(throws: (any Error).self) { try await blind.startSoak() }
+
+        setPermissions(0o644, snapshotURL)
+        let recovered = try EnergyLogStore(rootURL: root)
+        #expect(await recovered.current().samples.map(\.processCPUPercent) == [1, 2])
+        #expect(await recovered.current().soakStartedAt != nil)
+    }
+
+    @Test func unreadableJournalIsNotDeletedByLaunchCompaction() async throws {
+        let root = makeRoot()
+        defer { cleanUp(root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root)
+        try await first.startSoak(at: now.addingTimeInterval(-3_600))
+        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 1), now: now)
+        try await first.record(sample(at: now.addingTimeInterval(-60), cpu: 2), now: now)
+        let journal = try #require(journalFiles(in: root).first)
+        let snapshotBefore = try Data(contentsOf: root.appendingPathComponent("EnergyLog.json"))
+        setPermissions(0o000, journal)
+
+        let blind = try EnergyLogStore(rootURL: root)
+        #expect(FileManager.default.fileExists(atPath: journal.path))
+        #expect(try Data(contentsOf: root.appendingPathComponent("EnergyLog.json")) == snapshotBefore)
+        _ = blind
+
+        setPermissions(0o644, journal)
+        let recovered = try EnergyLogStore(rootURL: root)
+        #expect(await recovered.current().samples.map(\.processCPUPercent) == [1, 2])
+    }
+
+    @Test func corruptSnapshotIsQuarantinedAndJournalsAreRecovered() async throws {
+        let root = makeRoot()
+        defer { cleanUp(root) }
+        let now = Date()
+        let first = try EnergyLogStore(rootURL: root)
+        try await first.startSoak(at: now.addingTimeInterval(-3_600))
+        try await first.record(sample(at: now.addingTimeInterval(-120), cpu: 1), now: now)
+        try await first.record(sample(at: now.addingTimeInterval(-60), cpu: 2), now: now)
+        try Data("not json".utf8).write(to: root.appendingPathComponent("EnergyLog.json"))
+
+        let recovered = try EnergyLogStore(rootURL: root)
+        #expect(await recovered.current().samples.map(\.processCPUPercent) == [1, 2])
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        #expect(names.contains { $0.hasPrefix("EnergyLog.json.corrupt-") })
+        let relaunched = try EnergyLogStore(rootURL: root)
+        #expect(await relaunched.current().samples.map(\.processCPUPercent) == [1, 2])
+    }
+}
