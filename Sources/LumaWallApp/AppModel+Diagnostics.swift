@@ -79,24 +79,19 @@ extension AppModel {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            // The process may exit before a queued task runs, so write the
-            // pending energy samples now, then shut down asynchronously.
-            MainActor.assumeIsolated { self?.flushEnergyLogForTermination() }
             Task { @MainActor in self?.shutdown() }
+        }
+        // Quit waits for this (see AppDelegate.applicationShouldTerminate).
+        AppDelegate.flushBeforeTermination = { [weak self] in
+            await self?.flushEnergyLogBeforeQuit()
         }
     }
 
-    /// Blocks the main thread for up to two seconds while the energy log
-    /// writes its pending samples. The store is an actor, not main-isolated,
-    /// so this can't deadlock.
-    private func flushEnergyLogForTermination() {
+    /// Writes the energy samples not yet on disk, waiting at most two seconds
+    /// so a slow disk can't hold up quitting.
+    func flushEnergyLogBeforeQuit() async {
         let store = energyLogStore
-        let done = DispatchSemaphore(value: 0)
-        Task.detached {
-            try? await store.flush()
-            done.signal()
-        }
-        _ = done.wait(timeout: .now() + 2)
+        await awaitWithDeadline(.seconds(2)) { try? await store.flush() }
     }
 
     /// Invalidate timers, cancel pending work, and remove observers.
