@@ -170,6 +170,7 @@ extension AppModel {
                 if let posterURL = asset.posterURL {
                     await PosterCache.shared.remove(posterURL)
                 }
+                await PosterCache.shared.remove(asset.mediaURL)
                 await reload()
             } catch {
                 present("LumaWall", error.localizedDescription)

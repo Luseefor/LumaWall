@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 
 /// In-memory poster cache, limited by decoded bytes as well as count.
@@ -41,17 +42,28 @@ actor PosterCache {
         self.maxCount = maxCount
     }
 
-    /// Poster decoded to at most `maxPixelWidth` wide, or nil when `url` is
-    /// nil or unreadable.
-    func image(for url: URL?, maxPixelWidth: CGFloat = Width.card) -> NSImage? {
-        guard let url else { return nil }
-        let key = Key(url: url, width: Int(maxPixelWidth))
-        if let entry = entries[key] {
-            touch(key)
-            return entry.image
+    /// Poster decoded to at most `maxPixelWidth` wide. When the poster is nil,
+    /// missing or unreadable and `fallbackVideo` is given, a still frame from
+    /// that video at the same width stands in, cached under the video's URL.
+    /// Returns nil when neither yields an image. Frame generation runs off the
+    /// actor, so other loads proceed meanwhile.
+    func image(for url: URL?, fallbackVideo: URL? = nil, maxPixelWidth: CGFloat = Width.card) async -> NSImage? {
+        let width = Int(maxPixelWidth)
+        let keys = [url, fallbackVideo].compactMap { $0 }.map { Key(url: $0, width: width) }
+        for key in keys {
+            if let entry = entries[key] {
+                touch(key)
+                return entry.image
+            }
         }
-        guard let cgImage = Self.decode(url, maxPixelWidth: maxPixelWidth) else { return nil }
-        return store(cgImage, for: key)
+        if let url, let cgImage = Self.decode(url, maxPixelWidth: maxPixelWidth) {
+            return store(cgImage, for: Key(url: url, width: width))
+        }
+        guard let fallbackVideo, let frame = await Self.videoFrame(fallbackVideo, maxPixelWidth: maxPixelWidth) else { return nil }
+        let key = Key(url: fallbackVideo, width: width)
+        // Another caller may have stored this frame while we awaited.
+        if let entry = entries[key] { return entry.image }
+        return store(frame, for: key)
     }
 
     func contains(_ url: URL, maxPixelWidth: CGFloat) -> Bool {
@@ -114,6 +126,19 @@ actor PosterCache {
         return (longEdge * scale).rounded()
     }
 
+    /// A frame from near the start of `url`, at most `maxPixelWidth` wide.
+    nonisolated private static func videoFrame(_ url: URL, maxPixelWidth: CGFloat) async -> CGImage? {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        // Fits inside the box, so a portrait video still gets its width.
+        generator.maximumSize = CGSize(width: maxPixelWidth, height: maxPixelWidth * 4)
+        let duration = (try? await asset.load(.duration).seconds) ?? 0
+        let seconds = duration.isFinite && duration > 0 ? min(1, duration / 2) : 0
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        return try? await generator.image(at: time).image
+    }
+
     nonisolated private static func decode(_ url: URL, maxPixelWidth: CGFloat) -> CGImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -137,6 +162,9 @@ actor PosterCache {
 struct PosterImage: View {
     let url: URL?
     var contentMode: SwiftUI.ContentMode = .fill
+    /// Original video to take a still from when the poster is missing or
+    /// unreadable, so the card isn't blank for a wallpaper that plays fine.
+    var fallbackVideo: URL?
     /// Decode width in pixels; see `PosterCache.Width`.
     var maxPixelWidth: CGFloat = PosterCache.Width.card
 
@@ -152,9 +180,9 @@ struct PosterImage: View {
                 Theme.panelStrong
             }
         }
-        .task(id: PosterRequest(url: url, width: maxPixelWidth)) {
-            if let url {
-                image = await PosterCache.shared.image(for: url, maxPixelWidth: maxPixelWidth)
+        .task(id: PosterRequest(url: url, fallbackVideo: fallbackVideo, width: maxPixelWidth)) {
+            if url != nil || fallbackVideo != nil {
+                image = await PosterCache.shared.image(for: url, fallbackVideo: fallbackVideo, maxPixelWidth: maxPixelWidth)
             } else {
                 image = nil
             }
@@ -164,5 +192,6 @@ struct PosterImage: View {
 
 private struct PosterRequest: Equatable {
     let url: URL?
+    let fallbackVideo: URL?
     let width: CGFloat
 }

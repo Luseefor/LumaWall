@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import ImageIO
 import UniformTypeIdentifiers
@@ -102,9 +103,50 @@ final class PosterCacheTests: XCTestCase {
         XCTAssertEqual(bytes, 0)
     }
 
+    func testMissingPosterFallsBackToAStillFromTheVideo() async throws {
+        // A poster that is gone or unreadable left the card blank even though
+        // the original plays.
+        let video = folder.appendingPathComponent("clip.mov")
+        try await writeVideo(to: video)
+        let cache = PosterCache()
+        let missing = folder.appendingPathComponent("missing.jpg")
+        let fromMissing = await cache.image(for: missing, fallbackVideo: video, maxPixelWidth: 640)
+        let fromNil = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        XCTAssertNotNil(fromMissing)
+        XCTAssertNotNil(fromNil)
+        XCTAssertLessThanOrEqual(pixelSize(fromMissing).width, 640)
+        let cachedStill = await cache.contains(video, maxPixelWidth: 640)
+        XCTAssertTrue(cachedStill)
+        let noFallback = await cache.image(for: missing, fallbackVideo: nil, maxPixelWidth: 640)
+        XCTAssertNil(noFallback)
+    }
+
     private func cgImage(of image: NSImage?) -> CGImage? {
         var rect = CGRect(origin: .zero, size: image?.size ?? .zero)
         return image?.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+    }
+
+    private func writeVideo(to url: URL) async throws {
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+            kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64
+        ])
+        writer.add(input)
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+        for frame in 0..<10 {
+            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+            var pixelBuffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &pixelBuffer)
+            XCTAssertTrue(adaptor.append(try XCTUnwrap(pixelBuffer), withPresentationTime: CMTime(value: Int64(frame), timescale: 30)))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        XCTAssertEqual(writer.status, .completed)
     }
 
     func testRemoveDropsEverySizeOfAPoster() async throws {

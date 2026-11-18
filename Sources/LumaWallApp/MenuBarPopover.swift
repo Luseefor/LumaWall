@@ -77,7 +77,7 @@ struct MenuBarPopover: View {
                     LoopingVideoView(url: url, isSuspended: model.screenIsHidden)
                         .id(slide.id)
                 } else {
-                    PosterImage(url: slide.asset.posterURL)
+                    PosterImage(url: slide.asset.posterURL, fallbackVideo: slide.asset.mediaURL)
                         .id(slide.id)
                 }
             }
