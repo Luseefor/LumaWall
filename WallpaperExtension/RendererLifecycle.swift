@@ -42,7 +42,8 @@ struct RendererLifecycle: Equatable {
         /// A reset's flush completed while the displays slept; build on wake.
         case awaitingBuild(ResetKind)
         /// Rebuilding failed `maxFailures` times in a row; the fallback still
-        /// shows until the asset changes.
+        /// shows. A retry runs after a growing delay while playback is
+        /// wanted, and at once when the asset changes.
         case failed
     }
 
@@ -68,6 +69,9 @@ struct RendererLifecycle: Equatable {
         case buildPipeline(ResetKind)
         /// Show the creation still in place of video that won't build.
         case showFallback
+        /// Report `.retryFired` after `after` seconds.
+        case armRetry(after: TimeInterval)
+        case disarmRetry
         /// Move to the preloaded reader at a loop boundary.
         case swapToNextReader
     }
@@ -86,12 +90,15 @@ struct RendererLifecycle: Equatable {
         case resetFlushed(generation: Int)
         /// The reader reached the end of the clip.
         case readerExhausted(token: Int)
-        /// The renderer or the reader failed.
+        /// The renderer failed.
         case decoderFailed(token: Int)
+        /// The reader failed, or a loop swap couldn't build one.
+        case readerFailed(token: Int)
         /// The renderer needs a flush to resume decoding.
         case decoderInterrupted(token: Int)
         case rampFinished
         case deepPauseFired
+        case retryFired
     }
 
     /// Consecutive failed builds or decodes before the fallback still shows.
@@ -110,8 +117,12 @@ struct RendererLifecycle: Equatable {
     /// An animated resume arrived while the pipeline was being rebuilt; ramp
     /// once it is ready instead of jumping to full speed.
     private(set) var rampWhenReady = false
-    /// Failed builds and decodes since the last completed loop or new asset.
+    /// Failed builds and decodes since the last completed loop, new asset, or
+    /// retry.
     private(set) var failures = 0
+    /// Times this video fell back to the still; sets the retry delay.
+    private(set) var failedRounds = 0
+    private(set) var retryArmed = false
     /// The latest switch requested while the displays slept.
     private(set) var deferredSwitch: URL?
     /// Bumped whenever a reset starts, so a stale flush completion is dropped.
@@ -156,6 +167,7 @@ struct RendererLifecycle: Equatable {
             rampWhenReady = animated && rebuilding && wantsPlayback
         case .assetChanged:
             failures = 0
+            failedRounds = 0
             requestReset(.restart, &effects)
         case let .switchDeferred(url):
             deferredSwitch = url
@@ -185,6 +197,8 @@ struct RendererLifecycle: Equatable {
             resetInFlight = nil
             if failures >= Self.maxFailures {
                 readers = .failed
+                failedRounds += 1
+                rampWhenReady = false
                 effects.append(.showFallback)
             } else if displayAsleep {
                 // Building decodes the first frame; nobody can see it now.
@@ -198,6 +212,7 @@ struct RendererLifecycle: Equatable {
             // A whole clip played: the pipeline works. The feed callback has
             // already stopped requesting; reconcile registers the next feed.
             failures = 0
+            failedRounds = 0
             feeding = false
             effects.append(.swapToNextReader)
         case let .decoderFailed(token):
@@ -205,6 +220,12 @@ struct RendererLifecycle: Equatable {
             feeding = false
             failures += 1
             requestReset(.recover, &effects)
+        case let .readerFailed(token):
+            // The renderer is fine, so the frame it shows stays up.
+            guard acceptsFeed(token: token), readers == .live, resetInFlight == nil else { return [] }
+            feeding = false
+            failures += 1
+            requestReset(.restart, &effects)
         case let .decoderInterrupted(token):
             guard acceptsFeed(token: token), readers == .live, resetInFlight == nil else { return [] }
             feeding = false
@@ -216,6 +237,12 @@ struct RendererLifecycle: Equatable {
             case .rampingDown: clock = .stopped
             case .playing, .stopped: return []
             }
+        case .retryFired:
+            guard retryArmed else { return [] }
+            retryArmed = false
+            guard readers == .failed, resetInFlight == nil, wantsPlayback else { break }
+            failures = 0
+            requestReset(.restart, &effects)
         case .deepPauseFired:
             guard deepPauseArmed else { return [] }
             deepPauseArmed = false
@@ -225,6 +252,29 @@ struct RendererLifecycle: Equatable {
         }
         reconcile(animated: animated, &effects)
         return effects
+    }
+
+    /// Seconds before retrying a video that fell back to the still for the
+    /// `round`th time: soon after a transient failure, then rarely.
+    static func retryDelay(round: Int) -> TimeInterval {
+        let delays: [TimeInterval] = [2, 10, 60]
+        return delays[min(max(round, 1), delays.count) - 1]
+    }
+
+    /// What a readiness callback reports before reading samples, or nil to
+    /// feed. The flush flag comes first: Apple sets it alongside `.failed`, and
+    /// that case only needs a flush and a keyframe, not a cleared frame.
+    static func feedFault(requiresFlush: Bool, rendererFailed: Bool, hasReader: Bool, token: Int) -> Event? {
+        if requiresFlush { return .decoderInterrupted(token: token) }
+        if rendererFailed { return .decoderFailed(token: token) }
+        if !hasReader { return .readerFailed(token: token) }
+        return nil
+    }
+
+    /// What a callback reports when the reader returns no sample: the end of
+    /// the clip only if the reader completed.
+    static func outOfSamples(readerCompleted: Bool, token: Int) -> Event {
+        readerCompleted ? .readerExhausted(token: token) : .readerFailed(token: token)
     }
 
     private mutating func requestReset(_ kind: ResetKind, _ effects: inout [Effect]) {
@@ -245,6 +295,10 @@ struct RendererLifecycle: Equatable {
         if deepPauseArmed {
             deepPauseArmed = false
             effects.append(.disarmDeepPause)
+        }
+        if retryArmed {
+            retryArmed = false
+            effects.append(.disarmRetry)
         }
         generation += 1
         resetInFlight = kind
@@ -293,6 +347,12 @@ struct RendererLifecycle: Equatable {
         if wantDeepPause != deepPauseArmed {
             deepPauseArmed = wantDeepPause
             effects.append(wantDeepPause ? .armDeepPause : .disarmDeepPause)
+        }
+
+        let wantRetry = readers == .failed && resetInFlight == nil && wantsPlayback
+        if wantRetry != retryArmed {
+            retryArmed = wantRetry
+            effects.append(wantRetry ? .armRetry(after: Self.retryDelay(round: failedRounds)) : .disarmRetry)
         }
     }
 }

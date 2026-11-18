@@ -44,6 +44,7 @@ final class VideoRenderer: @unchecked Sendable {
     private var isDispatching = false
     private var rampTimer: (any DispatchSourceTimer)?
     private var deepPauseTimer: (any DispatchSourceTimer)?
+    private var retryTimer: (any DispatchSourceTimer)?
 
     private var currentReader: AVAssetReader?
     private var currentOutput: AVAssetReaderTrackOutput?
@@ -374,6 +375,7 @@ final class VideoRenderer: @unchecked Sendable {
             extensionLog("  [stop #\(debugID)] stopping renderer for \(asset.url.lastPathComponent)")
             cancelRamp()
             cancelDeepPauseTimer()
+            cancelRetryTimer()
             isRunning = false
             renderer.stopRequestingMediaData()
             dropReaders()
@@ -473,19 +475,49 @@ final class VideoRenderer: @unchecked Sendable {
             send(.pipelineBuilt(built))
         case .showFallback:
             showFallbackStill()
+        case let .armRetry(delay):
+            armRetry(after: delay)
+        case .disarmRetry:
+            cancelRetryTimer()
         case .swapToNextReader:
             swapToNextReader()
         }
     }
 
-    /// Rebuilding kept failing: show the creation still rather than a frozen
-    /// or cleared frame. The reset before this flushed the renderer, so it
-    /// accepts the buffer.
+    /// Rebuilding kept failing: show the creation still, or the no-video
+    /// gradient when there is none, rather than a frozen or cleared frame. The
+    /// reset before this flushed the renderer, so it accepts the buffer.
     private func showFallbackStill() {
-        extensionLog("  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing the still")
-        guard let fallbackStill, let buffer = makeStillSampleBuffer(from: fallbackStill) else { return }
+        extensionLog("  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing \(fallbackStill == nil ? "the gradient" : "the still")")
+        guard let image = fallbackStill ?? Self.makeGradientStill(),
+              let buffer = makeStillSampleBuffer(from: image) else { return }
         Self.setDisplayImmediately(buffer)
         renderer.enqueue(buffer)
+    }
+
+    /// The acquire path's no-video gradient as an image; the display layer
+    /// scales it to fill.
+    private static func makeGradientStill() -> CGImage? {
+        let side = 64
+        guard let context = CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue,
+        ), let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [
+                CGColor(red: 0.2, green: 0.0, blue: 0.5, alpha: 1.0),
+                CGColor(red: 0.0, green: 0.3, blue: 0.7, alpha: 1.0),
+                CGColor(red: 0.0, green: 0.6, blue: 0.4, alpha: 1.0),
+            ] as CFArray,
+            locations: nil,
+        ) else { return nil }
+        // Same start and end points as the CAGradientLayer, in the same
+        // bottom-left-origin space.
+        context.drawLinearGradient(
+            gradient, start: .zero, end: CGPoint(x: side, y: side), options: [],
+        )
+        return context.makeImage()
     }
 
     private func dropReaders() {
@@ -662,6 +694,25 @@ final class VideoRenderer: @unchecked Sendable {
         deepPauseTimer = nil
     }
 
+    /// Queue-confined like the deep-pause timer.
+    private func armRetry(after delay: TimeInterval) {
+        cancelRetryTimer()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + delay)
+        timer.setEventHandler { [weak self] in
+            guard let self, isRunning else { return }
+            retryTimer = nil
+            send(.retryFired)
+        }
+        retryTimer = timer
+        timer.resume()
+    }
+
+    private func cancelRetryTimer() {
+        retryTimer?.cancel()
+        retryTimer = nil
+    }
+
     // MARK: - Preloaded Loop Reader
 
     private func prepareNextReader() {
@@ -760,23 +811,19 @@ final class VideoRenderer: @unchecked Sendable {
                 queue.async { [weak self] in self?.send(event) }
             }
 
-            // Unrecoverable failure: full reset. A discontinuity needs a flush
-            // and a keyframe, so it resets too, continuing from here.
-            if renderer.status == .failed {
-                extensionLog("  [Renderer] Status failed: \(renderer.error?.localizedDescription ?? "unknown"), recovering")
-                report(.decoderFailed(token: token))
+            // A discontinuity, a failed renderer, or no reader (a loop swap
+            // couldn't build one) all go through the lifecycle's reset.
+            if let fault = RendererLifecycle.feedFault(
+                requiresFlush: renderer.requiresFlushToResumeDecoding,
+                rendererFailed: renderer.status == .failed,
+                hasReader: currentReader != nil && currentOutput != nil,
+                token: token,
+            ) {
+                extensionLog("  [feed #\(debugID)] \(fault) status=\(renderer.status.rawValue) err=\(renderer.error?.localizedDescription ?? "-")")
+                report(fault)
                 return
             }
-            if renderer.requiresFlushToResumeDecoding {
-                extensionLog("  [feed #\(debugID)] requiresFlushToResumeDecoding, resetting from a keyframe")
-                report(.decoderInterrupted(token: token))
-                return
-            }
-            // No reader: a loop swap couldn't build one.
-            guard let currentReader, let currentOutput else {
-                report(.decoderFailed(token: token))
-                return
-            }
+            guard let currentReader, let currentOutput else { return }
 
             var enqueuedThisTick = 0
             while renderer.isReadyForMoreMediaData {
@@ -798,12 +845,11 @@ final class VideoRenderer: @unchecked Sendable {
 
                     renderer.enqueue(adjusted)
                 } else {
-                    // nil means end of clip only when the reader completed.
-                    let failed = currentReader.status != .completed
-                    if failed || feedLogBudget > 0 {
+                    let event = RendererLifecycle.outOfSamples(readerCompleted: currentReader.status == .completed, token: token)
+                    if event != .readerExhausted(token: token) || feedLogBudget > 0 {
                         traceLog("  [feed #\(debugID)] reader out of samples after \(enqueuedThisTick) this tick; readerStatus=\(currentReader.status.rawValue) err=\(currentReader.error?.localizedDescription ?? "-")")
                     }
-                    report(failed ? .decoderFailed(token: token) : .readerExhausted(token: token))
+                    report(event)
                     return
                 }
             }

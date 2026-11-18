@@ -214,11 +214,11 @@ final class RendererLifecycleTests: XCTestCase {
             generation += 1
         }
         XCTAssertEqual(effects, [.beginReset(.restart, generation: generation)])
-        XCTAssertEqual(life.handle(.resetFlushed(generation: generation)), [.showFallback])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: generation)), [.showFallback, .armRetry(after: 2)])
         XCTAssertEqual(life.readers, .failed)
-        // Policy and wake leave the fallback alone; a new asset tries again.
+        // A tier change keeps the pending retry; a new asset tries at once.
         XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [])
-        XCTAssertEqual(life.handle(.assetChanged), [.beginReset(.restart, generation: generation + 1)])
+        XCTAssertEqual(life.handle(.assetChanged), [.disarmRetry, .beginReset(.restart, generation: generation + 1)])
     }
 
     func testFailedStartRetriesWithoutClearingTheStill() {
@@ -233,7 +233,7 @@ final class RendererLifecycleTests: XCTestCase {
         for attempt in 1 ... RendererLifecycle.maxFailures {
             XCTAssertEqual(life.handle(.decoderFailed(token: token)), [.beginReset(.recover, generation: attempt)])
             if attempt == RendererLifecycle.maxFailures {
-                XCTAssertEqual(life.handle(.resetFlushed(generation: attempt)), [.showFallback])
+                XCTAssertEqual(life.handle(.resetFlushed(generation: attempt)), [.showFallback, .armRetry(after: 2)])
             } else {
                 _ = life.handle(.resetFlushed(generation: attempt))
                 _ = life.handle(.pipelineBuilt(true))
@@ -253,6 +253,62 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.failures, 0)
     }
 
+    // MARK: Round 3: retries, reader errors, fault classification
+
+    /// Drive a playing renderer through `maxFailures` failed builds of the
+    /// current video. Returns the effects of the flush that gives up.
+    private func failUntilFallback(_ life: inout RendererLifecycle) -> [RendererLifecycle.Effect] {
+        var effects = life.handle(.assetChanged)
+        for _ in 0 ..< RendererLifecycle.maxFailures {
+            guard case let .beginReset(_, generation)? = effects.last else { XCTFail("no reset: \(effects)"); return [] }
+            _ = life.handle(.resetFlushed(generation: generation))
+            effects = life.handle(.pipelineBuilt(false))
+        }
+        guard case let .beginReset(_, generation)? = effects.last else { XCTFail("no reset: \(effects)"); return [] }
+        return life.handle(.resetFlushed(generation: generation))
+    }
+
+    func testReaderErrorKeepsTheDisplayedFrame() {
+        // Only a failed renderer clears the frame; a reader error restarts the
+        // clip behind the frame that is showing.
+        var life = playing()
+        XCTAssertEqual(life.handle(.readerFailed(token: 1)), [.beginReset(.restart, generation: 1)])
+    }
+
+    func testFailedVideoRetriesWithBackoffWhilePlaybackIsWanted() {
+        var life = playing()
+        XCTAssertEqual(failUntilFallback(&life), [.showFallback, .armRetry(after: RendererLifecycle.retryDelay(round: 1))])
+        XCTAssertEqual(life.readers, .failed)
+        guard case let .beginReset(.restart, generation)? = life.handle(.retryFired).last else {
+            return XCTFail("retry did not reset")
+        }
+        // The retry gets a full set of attempts, then waits longer.
+        var effects = life.handle(.resetFlushed(generation: generation))
+        XCTAssertEqual(effects, [.buildPipeline(.restart)])
+        for attempt in 1 ... RendererLifecycle.maxFailures {
+            effects = life.handle(.pipelineBuilt(false))
+            guard case let .beginReset(_, next)? = effects.last else { return XCTFail("no reset") }
+            effects = life.handle(.resetFlushed(generation: next))
+            if attempt < RendererLifecycle.maxFailures {
+                XCTAssertEqual(effects, [.buildPipeline(.restart)])
+            }
+        }
+        XCTAssertEqual(effects, [.showFallback, .armRetry(after: RendererLifecycle.retryDelay(round: 2))])
+        XCTAssertGreaterThan(RendererLifecycle.retryDelay(round: 2), RendererLifecycle.retryDelay(round: 1))
+    }
+
+    func testFailedVideoRetriesOnlyWhilePlaybackIsWanted() {
+        var life = playing()
+        _ = failUntilFallback(&life)
+        XCTAssertEqual(life.handle(.displaySleep), [.disarmRetry])
+        XCTAssertEqual(life.handle(.retryFired), [], "a timer that fired before the disarm ran")
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.armRetry(after: RendererLifecycle.retryDelay(round: 1))])
+        XCTAssertEqual(life.handle(.policy(.paused, animated: false)), [.disarmRetry])
+        XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [.armRetry(after: RendererLifecycle.retryDelay(round: 1))])
+        // A new video retries at once and drops the pending timer.
+        XCTAssertEqual(life.handle(.assetChanged).first, .disarmRetry)
+    }
+
     func testRampSurvivesAFailedFirstBuild() {
         var life = playing()
         _ = life.handle(.policy(.paused, animated: true))
@@ -263,6 +319,19 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.pipelineBuilt(false)), [.beginReset(.restart, generation: 2)])
         XCTAssertEqual(life.handle(.resetFlushed(generation: 2)), [.buildPipeline(.restart)])
         XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
+    }
+
+    func testFeedFaultClassification() {
+        // Apple sets requiresFlushToResumeDecoding alongside .failed; that case
+        // resumes behind the frame instead of clearing it.
+        typealias L = RendererLifecycle
+        XCTAssertEqual(L.feedFault(requiresFlush: true, rendererFailed: true, hasReader: true, token: 4), .decoderInterrupted(token: 4))
+        XCTAssertEqual(L.feedFault(requiresFlush: true, rendererFailed: false, hasReader: true, token: 4), .decoderInterrupted(token: 4))
+        XCTAssertEqual(L.feedFault(requiresFlush: false, rendererFailed: true, hasReader: true, token: 4), .decoderFailed(token: 4))
+        XCTAssertEqual(L.feedFault(requiresFlush: false, rendererFailed: false, hasReader: false, token: 4), .readerFailed(token: 4))
+        XCTAssertNil(L.feedFault(requiresFlush: false, rendererFailed: false, hasReader: true, token: 4))
+        XCTAssertEqual(L.outOfSamples(readerCompleted: true, token: 4), .readerExhausted(token: 4))
+        XCTAssertEqual(L.outOfSamples(readerCompleted: false, token: 4), .readerFailed(token: 4))
     }
 }
 
