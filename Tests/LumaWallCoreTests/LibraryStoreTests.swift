@@ -182,6 +182,17 @@ struct LibraryStoreTests {
         #expect(await store.diskUsageBytes() >= first + 8192)
     }
 
+    @Test func diskUsageSeesIndexRewritesFromRenameAndApply() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        let asset = sampleAsset(hash: "renamed")
+        try await store.install(asset)
+        let before = await store.diskUsageBytes()
+        try await store.rename(id: asset.id, to: String(repeating: "n", count: 20_000))
+        #expect(await store.diskUsageBytes() >= before + 19_000)
+    }
+
     @Test func removeRefusesPathsOutsideEntryFolder() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

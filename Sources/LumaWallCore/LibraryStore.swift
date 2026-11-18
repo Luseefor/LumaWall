@@ -65,14 +65,12 @@ public actor LibraryStore {
             throw StoreError.duplicate(duplicate)
         }
         assetsByID[asset.id] = asset
-        cachedDiskUsage = nil
         try persist()
     }
 
     public func update(_ asset: WallpaperAsset) throws {
         guard assetsByID[asset.id] != nil else { throw StoreError.missingAsset }
         assetsByID[asset.id] = asset
-        cachedDiskUsage = nil
         try persist()
     }
 
@@ -100,7 +98,6 @@ public actor LibraryStore {
 
     public func remove(id: WallpaperID) throws {
         guard let asset = assetsByID.removeValue(forKey: id) else { throw StoreError.missingAsset }
-        cachedDiskUsage = nil
         try persist()
         // The media folder must be exactly this entry's own folder. A corrupt
         // or hand-edited Library.json could otherwise point mediaURL at an
@@ -113,6 +110,7 @@ public actor LibraryStore {
             throw StoreError.invalidLocation
         }
         try? FileManager.default.removeItem(at: folder)
+        cachedDiskUsage = nil
     }
 
     public func folder(for id: WallpaperID) -> URL {
@@ -120,7 +118,7 @@ public actor LibraryStore {
     }
 
     /// Bytes under the library root. Walks the folder only when the library
-    /// changed since the last call (install, update, remove); call
+    /// changed since the last call (any index write or remove); call
     /// `invalidateDiskUsage()` after changing files outside those paths.
     public func diskUsageBytes() -> Int64 {
         if let cachedDiskUsage { return cachedDiskUsage }
@@ -141,6 +139,9 @@ public actor LibraryStore {
     }
 
     private func persist() throws {
+        // Every index write changes the measured size, and install, update and
+        // remove change the library folders around it.
+        cachedDiskUsage = nil
         let values = assetsByID.values.sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
         try StoreIO.writeJSON(values, to: indexURL)
     }
