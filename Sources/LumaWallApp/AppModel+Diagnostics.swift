@@ -95,6 +95,8 @@ extension AppModel {
         statsTimer = nil
         dayNightTimer = nil
         coverageTimer = nil
+        coverageDebounceWorkItem?.cancel()
+        coverageDebounceWorkItem = nil
         displayRefreshWorkItem?.cancel()
         displayRefreshWorkItem = nil
         nativeRestoreWorkItem?.cancel()

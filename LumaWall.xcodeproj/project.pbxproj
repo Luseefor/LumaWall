@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0279E1BBE0C86016A9C41E20 /* CoverageScanPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C611E6A02CB155E093E2F177 /* CoverageScanPolicy.swift */; };
 		033938F81E75221F64B02D23 /* AppModel+Automations.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21D3442AA3DECB7DF57EFC3 /* AppModel+Automations.swift */; };
 		086560A43649AE5E11D7A8E2 /* WallpaperState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A893BCA71F19994859B59CA /* WallpaperState.swift */; };
 		08A777396CAAA76CF7B85815 /* LumaWallCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5D2D700161F54D7AE38C0A54 /* LumaWallCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -264,6 +265,7 @@
 		C41EA988E2A80522A9F94B5F /* CPUSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPUSampler.swift; sourceTree = "<group>"; };
 		C503067C2365EA7BD861B962 /* AppModel+Diagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Diagnostics.swift"; sourceTree = "<group>"; };
 		C57A9D6606EEA6772A5C4AED /* NativeWallpaperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperEngine.swift; sourceTree = "<group>"; };
+		C611E6A02CB155E093E2F177 /* CoverageScanPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverageScanPolicy.swift; sourceTree = "<group>"; };
 		C890D0ECF91CB2C2FEA38A16 /* NativeWallpaperDeployment+Preview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NativeWallpaperDeployment+Preview.swift"; sourceTree = "<group>"; };
 		C8DEB9D119449BFF32A668D1 /* CallerValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallerValidation.swift; sourceTree = "<group>"; };
 		C96DE55EDE615F840EF93CC7 /* AppModel+Library.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Library.swift"; sourceTree = "<group>"; };
@@ -380,6 +382,7 @@
 				2ECDCAA211A4E80FA3F84F59 /* AssignmentStore.swift */,
 				AB67E20FE99BF95F6C7B5362 /* AutomationStore.swift */,
 				1FB998F5FA3CED4AD4C9CA8E /* CodableSupport.swift */,
+				C611E6A02CB155E093E2F177 /* CoverageScanPolicy.swift */,
 				C41EA988E2A80522A9F94B5F /* CPUSampler.swift */,
 				9DB6A6048FB6D08B20B40515 /* CrashReportStore.swift */,
 				580BF5B18E21C3C2F1E7A962 /* DisplayCoordinator.swift */,
@@ -733,6 +736,7 @@
 				0ED8B62E42030A5CD5B6FC2E /* AutomationStore.swift in Sources */,
 				52A281AAE0669A4D9CB3D118 /* CPUSampler.swift in Sources */,
 				F773182235EEBFC864716901 /* CodableSupport.swift in Sources */,
+				0279E1BBE0C86016A9C41E20 /* CoverageScanPolicy.swift in Sources */,
 				B949C9764113925CD7C98719 /* CrashReportStore.swift in Sources */,
 				A2C0AF588475CFAED60E1E09 /* DisplayCoordinator.swift in Sources */,
 				B0C3C26B2C3C7EE160D6223E /* DisplayOcclusion.swift in Sources */,
