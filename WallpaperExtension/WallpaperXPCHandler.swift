@@ -358,8 +358,12 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         let key = DisplayKey(displayID: displayID0, surfaceUUID: surfaceUUID)
         WallpaperState.shared.registerWallpaperID(surfaceUUID, key: key)
         // A re-acquire of THIS surface (display woke / preview refresh / switch) cancels its
-        // pending teardown so a brief invalidate→re-acquire flicker doesn't drop it.
+        // pending teardown so a brief invalidate→re-acquire flicker doesn't drop it,
+        // and resumes the playback the invalidate stopped.
         cancelTeardown(for: key)
+        if WallpaperState.shared.setSurfaceOpen(true, for: key) {
+            extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
+        }
         let videoURL = findVideoURL(forChoice: renderChoice)
         let cachedStill = loadCachedSnapshotImage(forChoice: choiceConfiguration)
 
@@ -744,8 +748,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             reply(nil); return
         }
         WallpaperState.shared.forgetWallpaperID(uuid)
+        // Nobody hosts the surface now: stop decoding at once, but keep the
+        // context and its frame so a re-acquire within the grace is seamless.
+        WallpaperState.shared.setSurfaceOpen(false, for: key)
         scheduleTeardown(for: key)
-        extensionLog("=== INVALIDATE === UUID \(uuid) → tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
+        extensionLog("=== INVALIDATE === UUID \(uuid) → stopped playback, tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
         reply(nil)
     }
 

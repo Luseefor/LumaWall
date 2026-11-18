@@ -31,6 +31,10 @@ struct ActiveWallpaper: @unchecked Sendable {
     /// same rootLayer while the first acquire's async create hasn't populated
     /// `renderer` yet. Cleared when the renderer is set or the create fails.
     var rendererPending: Bool = false
+    /// False from an invalidate until the next acquire of this surface, or
+    /// once a preview's lease runs out. The renderer stops decoding but the
+    /// context and its frame stay for a re-acquire.
+    var surfaceOpen: Bool = true
 }
 
 /// Identifies one hosted wallpaper SURFACE, a distinct `CAContext`/layer tree that
@@ -150,6 +154,9 @@ final class WallpaperState: Sendable {
             guard var context = state.contexts[key] else { return nil }
             let previous = context.renderer
             context.renderer = renderer
+            // Told under the lock so it can't land after a reopen that
+            // `setSurfaceOpen` sends for the same surface.
+            if !context.surfaceOpen { renderer?.setSurfaceOpen(false) }
             context.videoID = videoID
             context.rendererPending = false
             state.contexts[key] = context
@@ -157,6 +164,20 @@ final class WallpaperState: Sendable {
         }
         traceLog("  [setRenderer] display=\(key.displayID) new=\(renderer.map { "#\($0.debugID)" } ?? "nil") replacing=\(previous.map { "#\($0.debugID)" } ?? "nil") videoID=\(videoID ?? "nil")")
         return previous
+    }
+
+    /// Open or close a surface's playback and tell its renderer. Sent under
+    /// the lock, so the renderer sees opens and closes in the order they were
+    /// recorded even when `setRenderer` races them. Returns whether it changed.
+    @discardableResult
+    func setSurfaceOpen(_ open: Bool, for key: DisplayKey) -> Bool {
+        lock.withLock { state in
+            guard var context = state.contexts[key], context.surfaceOpen != open else { return false }
+            context.surfaceOpen = open
+            state.contexts[key] = context
+            context.renderer?.setSurfaceOpen(open)
+            return true
+        }
     }
 
     /// Record the destination geometry for a slot, returning the slot (with its live

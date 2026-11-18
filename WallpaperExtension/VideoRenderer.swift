@@ -469,6 +469,16 @@ final class VideoRenderer: @unchecked Sendable {
         }
     }
 
+    /// The agent invalidated this surface (false) or acquired it again
+    /// (true). Closed stops the clock and feed but keeps the frame and the
+    /// readers, so a reopen within the teardown grace resumes in place.
+    func setSurfaceOpen(_ open: Bool) {
+        queue.async { [weak self] in
+            guard let self, isRunning else { return }
+            send(.surfaceOpen(open))
+        }
+    }
+
     /// The displays woke: open the latest held switch, or the copy for a tier
     /// that changed during sleep, for the tier current now, and resume
     /// whatever the latest policy asks for.
