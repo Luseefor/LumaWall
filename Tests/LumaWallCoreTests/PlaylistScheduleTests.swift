@@ -59,4 +59,10 @@ struct PlaylistScheduleTests {
         #expect(step.cursor == 0)
         #expect(step.needsApply)
     }
+
+    @Test func stepAppliesWhenAConnectedDisplayHasNoWallpaper() {
+        let a = WallpaperID()
+        let step = PlaylistSchedule.step(ids: [a], cursor: 0, delta: 1, shownOnDisplays: [a, nil])
+        #expect(step.needsApply)
+    }
 }

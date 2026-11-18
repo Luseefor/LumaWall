@@ -126,7 +126,7 @@ extension AppModel {
             ids: playlistIDs,
             cursor: playlistCursor,
             delta: delta,
-            shownOnDisplays: displays.compactMap { activeByDisplay[$0.displayID] }
+            shownOnDisplays: displays.map { activeByDisplay[$0.displayID] }
         )
         playlistCursor = step.cursor
         if persist { persistPlaylistPlaybackState() }
