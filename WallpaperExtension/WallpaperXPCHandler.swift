@@ -9,8 +9,8 @@ import QuartzCore
 /// Reading the per-context `choice` (not the process-wide `currentVideoID`) keeps
 /// each display on its own selection. Otherwise every renderer would converge on
 /// whichever choice was set most recently (multi-monitor bug).
-func makeVariantSelector(choice: String?, fallback: URL) -> @Sendable () -> URL {
-    {
+func makeVariantSelector(choice: String?, fallback: URL) -> @Sendable (CGSize) -> URL {
+    { displayPixels in
         guard let videoID = choice else { return fallback }
         let state = WallpaperState.shared
         let prefs = WallpaperPrefs.shared
@@ -25,7 +25,7 @@ func makeVariantSelector(choice: String?, fallback: URL) -> @Sendable () -> URL 
             powerState: PowerMonitor.shared.currentState,
             powerProfile: prefs.powerProfile,
         )
-        return VideoLibrary.shared.bestVariantURL(for: videoID, policy: policy) ?? fallback
+        return VideoLibrary.shared.bestVariantURL(for: videoID, policy: policy, displayPixels: displayPixels) ?? fallback
     }
 }
 

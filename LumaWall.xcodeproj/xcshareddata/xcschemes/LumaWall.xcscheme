@@ -50,6 +50,17 @@
                ReferencedContainer = "container:LumaWall.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "9EFCF8CFD5C4A9BA250999AB"
+               BuildableName = "WallpaperExtensionTests.xctest"
+               BlueprintName = "WallpaperExtensionTests"
+               ReferencedContainer = "container:LumaWall.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

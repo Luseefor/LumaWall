@@ -1,0 +1,244 @@
+import AVFoundation
+import Foundation
+import LumaWallCore
+
+/// Smaller copies of deployed wallpapers: the battery tiers play them, and
+/// Full Quality plays one when it still fills the display.
+extension NativeWallpaperDeployment {
+    /// Transcoded-sibling work currently running, keyed "entryID/filename".
+    /// Restores fan out one `ensureVariants` per display and tier switches can
+    /// overlap them; without this two workers transcode the same multi-GB
+    /// source at once and race the move into place. Lock-guarded: this runs on
+    /// detached tasks, not MainActor.
+    private static let variantWorkLock = NSLock()
+    nonisolated(unsafe) private static var variantWorkInFlight = Set<String>()
+
+    private static func claimVariantWork(_ key: String) -> Bool {
+        variantWorkLock.lock()
+        defer { variantWorkLock.unlock() }
+        return variantWorkInFlight.insert(key).inserted
+    }
+
+    private static func finishVariantWork(_ key: String) {
+        variantWorkLock.lock()
+        defer { variantWorkLock.unlock() }
+        variantWorkInFlight.remove(key)
+    }
+
+    /// One smaller copy to keep next to a deployed wallpaper.
+    struct VariantSpec: Equatable {
+        let filename: String
+        let preset: String
+        /// Scaled into this box, keeping the source aspect.
+        let fitting: CGSize
+        /// Target frame rate.
+        let fps: Double
+        /// Only Full Quality plays it, so it is made on AC power only.
+        let forFullQuality: Bool
+
+        /// The frame rate recorded in metadata.json for this copy.
+        var recordedFPS: Int { Int(fps.rounded()) }
+    }
+
+    /// Battery copies above 30 fps drop to a whole divisor of the source rate
+    /// (60 to 30, 59.94 to 29.97, 120 to 30, 50 to 25), keeping frames evenly
+    /// spaced. Decoding and redrawing 60 frames a second at 720p on battery
+    /// cost twice what 30 does, for motion nobody studies on a wallpaper.
+    static func batteryFPS(source fps: Double) -> Double {
+        guard fps > 30.01 else { return fps }
+        return fps / (fps / 30 - 0.001).rounded(.up)
+    }
+
+    /// The copies a source should have. The 1080p and 720p copies serve the
+    /// battery tiers, capped at 30 fps. The 1440p copy keeps the source rate
+    /// so Full Quality on a 1440p monitor can skip decoding 4K. Copies at or
+    /// above the source size are never made.
+    static func variantSpecs(sourceSize: CGSize, sourceFPS: Double) -> [VariantSpec] {
+        let longSide = max(sourceSize.width, sourceSize.height)
+        let portrait = sourceSize.height > sourceSize.width
+        func box(_ long: CGFloat, _ short: CGFloat) -> CGSize {
+            portrait ? CGSize(width: short, height: long) : CGSize(width: long, height: short)
+        }
+        let battery = batteryFPS(source: sourceFPS)
+        var specs: [VariantSpec] = []
+        if longSide > 1920 {
+            specs.append(VariantSpec(filename: "Wallpaper.reduced.mov", preset: AVAssetExportPresetHighestQuality,
+                                     fitting: box(1920, 1080), fps: battery, forFullQuality: false))
+        }
+        if longSide > 1280 {
+            specs.append(VariantSpec(filename: "Wallpaper.minimal.mov", preset: AVAssetExportPresetHighestQuality,
+                                     fitting: box(1280, 720), fps: battery, forFullQuality: false))
+        }
+        if longSide > 2560 {
+            specs.append(VariantSpec(filename: "Wallpaper.qhd.mov", preset: AVAssetExportPresetHEVCHighestQuality,
+                                     fitting: box(2560, 1440), fps: sourceFPS, forFullQuality: true))
+        }
+        return specs
+    }
+
+    /// True when the entry lacks a copy it should have: one added in a later
+    /// version, one deleted from disk, or one made at a different frame rate.
+    static func needsVariants(_ entry: EntryInfo, fileExists: ((String) -> Bool)? = nil) -> Bool {
+        let exists = fileExists ?? { filename in
+            FileManager.default.fileExists(atPath: videosFolderURL
+                .appendingPathComponent(entry.id, isDirectory: true)
+                .appendingPathComponent(filename).path)
+        }
+        let have = entry.variants ?? []
+        return variantSpecs(sourceSize: entry.resolution, sourceFPS: entry.fps).contains { spec in
+            !have.contains { $0.filename == spec.filename && $0.fps == spec.recordedFPS && exists($0.filename) }
+        }
+    }
+
+    /// Copies that failed this session, keyed "entryID/filename". A failure
+    /// that keeps happening (disk full, unreadable source) would otherwise
+    /// re-run most of an encode on every apply and restore.
+    nonisolated(unsafe) private static var failedVariantWork = Set<String>()
+
+    /// The 1440p copy only helps Full Quality on AC power, so it waits for AC
+    /// instead of spending battery on an encode.
+    private static var canMakeFullQualityCopies: Bool {
+        !PowerStatus.current().isOnBattery && !ProcessInfo.processInfo.isLowPowerModeEnabled
+    }
+
+    /// `current` with `added` applied, replacing same-named copies.
+    static func merging(_ current: [NativeVideoVariant], with added: [NativeVideoVariant]) -> [NativeVideoVariant] {
+        let replaced = Set(added.map(\.filename))
+        return current.filter { !replaced.contains($0.filename) } + added
+    }
+
+    /// Transcode the copies `variantSpecs` plans and record them in
+    /// metadata.json. Idempotent: skips copies already listed with a file on
+    /// disk and regenerates missing ones. Runs detached in the background. A
+    /// multi-GB 4K transcode must never block applying the wallpaper.
+    ///
+    /// Without these files the extension's variant selector always falls back
+    /// to the full file, so Automatic-on-battery and Battery Saver resolve a
+    /// cheaper tier and then play the exact same bytes ("does nothing").
+    static func ensureVariants(for entryID: String, sourceURL: URL, sourceFPS: Double, sourceSize: CGSize) async {
+        guard PathSafety.isValidEntryID(entryID) else { return }
+        let fm = FileManager.default
+        let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
+        guard fm.fileExists(atPath: dir.path) else { return }
+        let fullQualityAllowed = canMakeFullQualityCopies
+        let specs = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS).filter { !$0.forFullQuality || fullQualityAllowed }
+        guard !specs.isEmpty else { return }
+        var changed = false
+        for spec in specs {
+            let workKey = entryID + "/" + spec.filename
+            guard claimVariantWork(workKey) else { continue }
+            defer { finishVariantWork(workKey) }
+            // Recheck under the claim: another worker may have finished this
+            // copy after the caller decided it was missing.
+            if isRecorded(spec, entryID: entryID, in: dir) { continue }
+            if variantWorkLock.withLock({ failedVariantWork.contains(workKey) }) { continue }
+            guard let variant = await transcode(sourceURL: sourceURL, dir: dir, spec: spec) else {
+                variantWorkLock.withLock { _ = failedVariantWork.insert(workKey) }
+                continue
+            }
+            // Record before releasing the claim, so no worker sees the file
+            // without its metadata entry and encodes it again.
+            record([variant], for: entryID, in: dir)
+            changed = true
+        }
+        if changed { notifyLibraryChanged() }
+    }
+
+    private static func isRecorded(_ spec: VariantSpec, entryID: String, in dir: URL) -> Bool {
+        guard let entry = try? entry(id: entryID),
+              (entry.variants ?? []).contains(where: { $0.filename == spec.filename && $0.fps == spec.recordedFPS })
+        else { return false }
+        return FileManager.default.fileExists(atPath: dir.appendingPathComponent(spec.filename).path)
+    }
+
+    /// Re-reads metadata.json and merges `produced` into it. Another worker
+    /// may have recorded its own copy since this one started; writing the
+    /// list read before transcoding dropped that copy.
+    private static func record(_ produced: [NativeVideoVariant], for entryID: String, in dir: URL) {
+        variantMetadataLock.withLock {
+            guard var latest = try? entry(id: entryID) else { return }
+            let fm = FileManager.default
+            let current = (latest.variants ?? []).filter { fm.fileExists(atPath: dir.appendingPathComponent($0.filename).path) }
+            latest.variants = merging(current, with: produced)
+            if let data = try? JSONEncoder().encode(latest) {
+                try? data.write(to: dir.appendingPathComponent("metadata.json"), options: .atomic)
+            }
+        }
+    }
+
+    /// Serializes the read-merge-write of metadata.json across workers.
+    private static let variantMetadataLock = NSLock()
+
+    private static func transcode(sourceURL: URL, dir: URL, spec: VariantSpec) async -> NativeVideoVariant? {
+        let source = AVURLAsset(url: sourceURL)
+        guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return nil }
+        let temp = dir.appendingPathComponent("\(spec.filename).\(UUID().uuidString).tmp.mov")
+        do {
+            guard let composition = try await scaledComposition(for: source, fitting: spec.fitting, fps: spec.fps) else { return nil }
+            export.videoComposition = composition
+            try await export.export(to: temp, as: .mov)
+            let probed = AVURLAsset(url: temp)
+            var resolution = CGSize.zero
+            if let track = try? await probed.loadTracks(withMediaType: .video).first,
+               let natural = try? await track.load(.naturalSize),
+               let transform = try? await track.load(.preferredTransform) {
+                let transformed = natural.applying(transform)
+                resolution = CGSize(width: abs(transformed.width), height: abs(transformed.height))
+            }
+            guard resolution.width > 0, resolution.height > 0 else {
+                try? FileManager.default.removeItem(at: temp)
+                return nil
+            }
+            let dest = dir.appendingPathComponent(spec.filename)
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try? FileManager.default.removeItem(at: dest)
+            }
+            try FileManager.default.moveItem(at: temp, to: dest)
+            return NativeVideoVariant(filename: spec.filename, fps: spec.recordedFPS, resolution: resolution)
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            return nil
+        }
+    }
+
+    /// Frame duration for a copy that keeps the source cadence. NTSC rates
+    /// (23.976, 29.97, 59.94...) use their exact 1001-based duration; rounding
+    /// them repeats a frame every few seconds. Other rates, including
+    /// irregular ones, round to the nearest whole rate, which matches their
+    /// average frame count better than the shortest frame gap does.
+    static func copyFrameDuration(nominalFPS fps: Double) -> CMTime {
+        for base in [24, 30, 48, 60, 120] {
+            let ntsc = Double(base) * 1000 / 1001
+            if abs(fps - ntsc) < 0.01 { return CMTime(value: 1001, timescale: CMTimeScale(base * 1000)) }
+        }
+        return CMTime(value: 1, timescale: CMTimeScale(max(1, fps.rounded())))
+    }
+
+    /// Scales the source into `box` (aspect kept, even dimensions) at the
+    /// source frame rate. The fixed-size presets only offer 1080p and 4K.
+    private static func scaledComposition(for asset: AVURLAsset, fitting box: CGSize, fps: Double) async throws -> AVVideoComposition? {
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else { return nil }
+        let natural = try await track.load(.naturalSize)
+        let transform = try await track.load(.preferredTransform)
+        let duration = try await asset.load(.duration)
+        // Where the oriented frame lands; a rotation can carry an offset that
+        // would otherwise leave a black strip and clip the opposite edge.
+        let oriented = CGRect(origin: .zero, size: natural).applying(transform)
+        let width = oriented.width, height = oriented.height
+        guard width > 0, height > 0 else { return nil }
+        let scale = min(box.width / width, box.height / height, 1)
+        let placed = transform
+            .concatenating(CGAffineTransform(translationX: -oriented.minX, y: -oriented.minY))
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        layer.setTransform(placed, at: .zero)
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
+        instruction.layerInstructions = [layer]
+        let composition = AVMutableVideoComposition()
+        composition.instructions = [instruction]
+        composition.renderSize = CGSize(width: (width * scale / 2).rounded() * 2, height: (height * scale / 2).rounded() * 2)
+        composition.frameDuration = copyFrameDuration(nominalFPS: fps)
+        return composition
+    }
+}

@@ -9,7 +9,28 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
+#import <AVFoundation/AVFoundation.h>
 #import <bsm/libbsm.h>
+
+// MARK: - Display layer setup off the main thread
+//
+// The macOS 26 SDK marks these AVSampleBufferDisplayLayer properties as
+// main-actor isolated for Swift. The extension has no UI: it builds and feeds
+// its layers on its own serial lifecycle queue inside a remote CAContext, and
+// moving that work to the main thread would add a hop to every renderer
+// create. These helpers keep the existing threading explicit in one place.
+
+static inline AVSampleBufferVideoRenderer * _Nonnull LWSampleBufferRenderer(AVSampleBufferDisplayLayer * _Nonnull layer) {
+    return layer.sampleBufferRenderer;
+}
+
+static inline void LWSetVideoGravity(AVSampleBufferDisplayLayer * _Nonnull layer, AVLayerVideoGravity _Nonnull gravity) {
+    layer.videoGravity = gravity;
+}
+
+static inline void LWSetControlTimebase(AVSampleBufferDisplayLayer * _Nonnull layer, CMTimebaseRef _Nullable timebase) {
+    layer.controlTimebase = timebase;
+}
 
 // MARK: - Private NSXPCConnection caller identity
 //
