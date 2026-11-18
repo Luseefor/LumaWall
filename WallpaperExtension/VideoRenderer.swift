@@ -76,6 +76,8 @@ final class VideoRenderer: @unchecked Sendable {
         }
     }
     private var rampTimer: (any DispatchSourceTimer)?
+    /// A switch requested while the displays slept. Touched only on `queue`.
+    private var deferredSwitchURL: URL?
     private var deepPauseTimer: (any DispatchSourceTimer)?
 
     private var currentReader: AVAssetReader?
@@ -324,21 +326,34 @@ final class VideoRenderer: @unchecked Sendable {
         traceLog("  [switchVideo #\(debugID)] REQUEST target=\(url.lastPathComponent)")
         queue.async { [weak self] in
             guard let self, isRunning else { return }
-            // Same file already playing → nothing to do (defuses repeated identical picks).
-            if asset.url == url {
-                traceLog("  [switchVideo #\(debugID)] DEDUP: already on \(url.lastPathComponent)")
-                return
-            }
-            let newAsset = AVURLAsset(url: url)
-            guard let track = Self.loadFirstVideoTrackBlocking(newAsset) else {
-                traceLog("  [switchVideo #\(debugID)] no video track in \(url.lastPathComponent)")
-                return
-            }
-            asset = newAsset
-            videoTrack = track
-            traceLog("  [switchVideo #\(debugID)] restarting from 0 → \(url.lastPathComponent)")
-            restartWithCurrentAsset()
+            performSwitch(to: url)
         }
+    }
+
+    /// Queue-confined body of `switchVideo`. While the displays sleep the switch
+    /// is held (latest wins) and `displayDidWake` runs it: a restart decodes the
+    /// new clip's first frames and keeps fresh readers alive past deep pause.
+    private func performSwitch(to url: URL) {
+        if WallpaperState.shared.isDisplayAsleep {
+            deferredSwitchURL = url
+            traceLog("  [switchVideo #\(debugID)] DEFERRED until wake: \(url.lastPathComponent)")
+            return
+        }
+        deferredSwitchURL = nil
+        // Same file already playing → nothing to do (defuses repeated identical picks).
+        if asset.url == url {
+            traceLog("  [switchVideo #\(debugID)] DEDUP: already on \(url.lastPathComponent)")
+            return
+        }
+        let newAsset = AVURLAsset(url: url)
+        guard let track = Self.loadFirstVideoTrackBlocking(newAsset) else {
+            traceLog("  [switchVideo #\(debugID)] no video track in \(url.lastPathComponent)")
+            return
+        }
+        asset = newAsset
+        videoTrack = track
+        traceLog("  [switchVideo #\(debugID)] restarting from 0 → \(url.lastPathComponent)")
+        restartWithCurrentAsset()
     }
 
     /// Tag a sample buffer so the renderer displays it immediately, replacing all
@@ -488,6 +503,17 @@ final class VideoRenderer: @unchecked Sendable {
             CMTimebaseSetRate(timebase, rate: 0.0)
             if newlyPaused || wasRamping { scheduleDeepPause() }
             traceLog("  [haltForDisplaySleep #\(debugID)] newlyPaused=\(newlyPaused) cancelledRamp=\(wasRamping)")
+        }
+    }
+
+    /// Displays woke: run the switch that `performSwitch` held back during sleep.
+    /// Call before the wake policy recompute so a battery tier's copy switch,
+    /// queued by that recompute, lands after this one and wins.
+    func displayDidWake() {
+        queue.async { [weak self] in
+            guard let self, isRunning, let url = deferredSwitchURL else { return }
+            deferredSwitchURL = nil
+            performSwitch(to: url)
         }
     }
 

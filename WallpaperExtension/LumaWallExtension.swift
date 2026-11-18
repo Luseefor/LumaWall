@@ -88,6 +88,9 @@ final class LumaWallExtension: NSObject, AppExtension {
             object: nil, queue: .main,
         ) { _ in
             WallpaperState.shared.isDisplayAsleep = false
+            WallpaperState.shared.forEachRenderer { renderer in
+                renderer.displayDidWake()
+            }
             Self.recomputeAndApplyPolicy()
             ShuffleController.shared.noteWake()
             extensionLog("[Extension] Displays awake, recomputed policy (locked: \(WallpaperState.shared.isScreenLocked))")
