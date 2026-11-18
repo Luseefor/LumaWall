@@ -136,6 +136,8 @@ extension AppModel {
     /// view is open. Each sample is appended to the log, not rewritten.
     func startEnergyLogging() {
         guard energyTimer == nil else { return }
+        // The first sample should cover the first minute, not start its baseline.
+        _ = energyCPUSampler.sample()
         let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.recordEnergySample() }
         }
