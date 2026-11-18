@@ -34,64 +34,21 @@ final class VideoRenderer: @unchecked Sendable {
     private var videoTrack: AVAssetTrack
     private let queue = DispatchQueue(label: "video-renderer", qos: .userInitiated)
     private var isRunning = true
-    /// Playback intent flags. `pause()`/`resume()`/`applyPolicy()` arrive from
-    /// any thread (Darwin-notify thread, Lifecycle queue, main), while the
-    /// feed loop and timers read them on `queue`, so they live behind a lock
-    /// instead of as plain vars (which raced). Timer creation/cancellation and
-    /// reader checks all happen on `queue`; the serial ordering there preserves
-    /// pause-then-resume semantics without needing synchronous flips.
-    private let stateLock = OSAllocatedUnfairLock(initialState: PlaybackState())
-    private struct PlaybackState {
-        var isPaused = false
-        var policy: PlaybackPolicy = .full
-        var variantSelector: (@Sendable (CGSize) -> URL)?
-    }
-    /// Read-only view of the pause flag; all writes go through
-    /// `takePaused()`/`takeResumed()` so claim races serialize.
-    private var isPaused: Bool {
-        stateLock.withLock { $0.isPaused }
-    }
-    private var currentPolicy: PlaybackPolicy {
-        get { stateLock.withLock { $0.policy } }
-        set { stateLock.withLock { $0.policy = newValue } }
-    }
-
-    /// Atomically claim the paused state (true = newly paused). Paired with
-    /// `takeResumed()` so concurrent pause/resume arrivals serialize to one
-    /// winner instead of interleaving check-then-set across threads.
-    private func takePaused() -> Bool {
-        stateLock.withLock { state in
-            guard !state.isPaused else { return false }
-            state.isPaused = true
-            return true
-        }
-    }
-
-    /// Atomically claim the playing state (true = newly resumed).
-    private func takeResumed() -> Bool {
-        stateLock.withLock { state in
-            guard state.isPaused else { return false }
-            state.isPaused = false
-            return true
-        }
-    }
+    /// Every playback decision for this renderer: clock, feed, deep pause,
+    /// resets, and the display-sleep gate. Touched only on `queue`; see
+    /// `RendererLifecycle`. Public entry points hop to `queue` and send events.
+    private var lifecycle = RendererLifecycle()
+    /// Events raised while effects run (an instant ramp completion) wait here
+    /// so each event's effects run against the state that produced them.
+    private var pendingEvents: [RendererLifecycle.Event] = []
+    private var isDispatching = false
     private var rampTimer: (any DispatchSourceTimer)?
-    /// A switch requested while the displays slept. Touched only on `queue`.
-    private var deferredSwitchURL: URL?
     private var deepPauseTimer: (any DispatchSourceTimer)?
 
     private var currentReader: AVAssetReader?
     private var currentOutput: AVAssetReaderTrackOutput?
     private var nextReader: AVAssetReader?
     private var nextOutput: AVAssetReaderTrackOutput?
-
-    /// A renderer `flush` (decoder reset) is the one async hop in the pipeline, and
-    /// TWO overlapping flushes corrupt the renderer (rapid-switch breakage). These two
-    /// flags, touched ONLY on `queue`, serialize all flushes. At most one is ever in
-    /// flight, and a switch arriving during a flush is coalesced, so when the flush
-    /// completes we restart once to whatever the latest selected asset is.
-    private var flushInFlight = false
-    private var restartPending = false
 
     /// Diagnostic: number of remaining feed-loop ticks to log after a restart.
     private var feedLogBudget = 0
@@ -103,13 +60,14 @@ final class VideoRenderer: @unchecked Sendable {
     private var lastEnqueuedEnd: CMTime = .zero
     private var nominalFrameRate: Double = 60
 
-    /// Called at each loop boundary to select the video URL for the next iteration.
-    /// Written from the Lifecycle queue, read on the renderer queue, lock-backed
-    /// for the same reason as the pause flags above. Same API as before.
+    /// Selects the copy to play for a display size: consulted at loop
+    /// boundaries, on tier changes, and on wake. Written from the Lifecycle
+    /// queue and read on the renderer queue, so lock-backed.
     var variantSelector: (@Sendable (CGSize) -> URL)? {
-        get { stateLock.withLock { $0.variantSelector } }
-        set { stateLock.withLock { $0.variantSelector = newValue } }
+        get { selector.withLock { $0 } }
+        set { selector.withLock { $0 = newValue } }
     }
+    private let selector = OSAllocatedUnfairLock<(@Sendable (CGSize) -> URL)?>(initialState: nil)
 
     static func create(
         rootLayer: CALayer,
@@ -242,9 +200,6 @@ final class VideoRenderer: @unchecked Sendable {
     /// including early exits, so a gated reply can never hang.
     func start(onFirstFrameReady: (@Sendable () -> Void)? = nil) {
         traceLog("  [start #\(debugID)] asset=\(asset.url.lastPathComponent)")
-        // Display sleep gates the start: the first frame is still enqueued (the
-        // acquire reply waits on it), but the clock stays at 0 until wake.
-        if WallpaperState.shared.isDisplayAsleep { haltForDisplaySleep() }
         queue.async { [weak self] in
             guard let self else { onFirstFrameReady?(); return }
             guard isRunning else { traceLog("  [start #\(debugID)] aborted, already stopped"); onFirstFrameReady?(); return }
@@ -260,9 +215,9 @@ final class VideoRenderer: @unchecked Sendable {
             // Enqueue the first frame and flush it to the render server inside an
             // action-free transaction, so the context is genuinely displaying video
             // before onFirstFrameReady fires (the deferred acquire reply gates on this).
+            // Tagged to show at once: on a sleeping display the clock stays at 0.
             if let firstSample = output.copyNextSampleBuffer() {
-                // With the clock held at 0 the frame must not wait on the timebase.
-                if isPaused { Self.setDisplayImmediately(firstSample) }
+                Self.setDisplayImmediately(firstSample)
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
                 renderer.enqueue(firstSample)
@@ -275,31 +230,20 @@ final class VideoRenderer: @unchecked Sendable {
             ptsOffset = .zero
             lastEnqueuedEnd = .zero
 
-            // Begin advancing the timebase unless paused before the first frame
-            // (display sleep, or a policy applied while the start was queued).
-            CMTimebaseSetRate(timebase, rate: isPaused ? 0.0 : 1.0)
+            // Starts the clock and the feed unless the displays sleep or a pause
+            // was applied before this ran. The global flag is read here, on the
+            // queue: sleep sets it before sending `displayDidSleep` to the
+            // renderers it knows, so a renderer it missed still sees it.
+            send(.started(displayAsleep: WallpaperState.shared.isDisplayAsleep))
 
             // The context now holds a live, composited video frame. Release the gate so
             // the acquire can reply and the agent can swap to us.
             onFirstFrameReady?()
 
             prepareNextReader()
-            feedFromCurrentReader()
         }
     }
 
-    /// Switch to a different video IN PLACE, reusing this renderer's existing
-    /// `displayLayer`. The layer is already attached to the display's CAContext and
-    /// hosted by WallpaperAgent, so feeding it frames from a new asset updates the
-    /// desktop, whereas building a fresh renderer (new `AVSampleBufferDisplayLayer`)
-    /// added to an already-hosted context does NOT composite (the switch-between-
-    /// videos bug). So we keep the one hosted layer and restart it on the new asset.
-    ///
-    /// Fully serialized on `queue`, no `Task`: the track load blocks the queue thread
-    /// (a real thread we own, which already blocks for decodes). Because every switch
-    /// runs to completion in FIFO order on one thread, rapid switching is naturally
-    /// last-*requested*-wins with no cancellation bookkeeping. The only async hop is
-    /// the renderer's `flush`, which is serialized and coalesces rapid switches.
     /// Re-frame the video + still layers to a new destination geometry (points) and
     /// backing scale, used when a display reconnects at, or switches to, a different
     /// resolution. Both layers fill the root and are `resizeAspectFill`, so re-framing
@@ -322,38 +266,51 @@ final class VideoRenderer: @unchecked Sendable {
         traceLog("  [resize #\(debugID)] → \(destSize) @\(scale)x")
     }
 
+    /// Switch to a different video IN PLACE, reusing this renderer's existing
+    /// `displayLayer`. The layer is already attached to the display's CAContext and
+    /// hosted by WallpaperAgent, so feeding it frames from a new asset updates the
+    /// desktop, whereas building a fresh renderer (new `AVSampleBufferDisplayLayer`)
+    /// added to an already-hosted context does NOT composite (the switch-between-
+    /// videos bug). So we keep the one hosted layer and restart it on the new asset.
+    ///
+    /// Fully serialized on `queue`, no `Task`: the track load blocks the queue thread
+    /// (a real thread we own, which already blocks for decodes). Because every switch
+    /// runs to completion in FIFO order on one thread, rapid switching is naturally
+    /// last-*requested*-wins with no cancellation bookkeeping. The only async hop is
+    /// the renderer's `flush`, which is serialized and coalesces rapid switches.
+    /// While the displays sleep the request is held (latest wins) and wake
+    /// resolves it; a restart would decode the new clip's first frames with
+    /// nothing on screen.
     func switchVideo(to url: URL) {
         traceLog("  [switchVideo #\(debugID)] REQUEST target=\(url.lastPathComponent)")
         queue.async { [weak self] in
             guard let self, isRunning else { return }
-            performSwitch(to: url)
+            if lifecycle.displayAsleep {
+                traceLog("  [switchVideo #\(debugID)] DEFERRED until wake: \(url.lastPathComponent)")
+                send(.switchDeferred(url))
+            } else if loadAsset(url) {
+                send(.assetChanged)
+            }
         }
     }
 
-    /// Queue-confined body of `switchVideo`. While the displays sleep the switch
-    /// is held (latest wins) and `displayDidWake` runs it: a restart decodes the
-    /// new clip's first frames and keeps fresh readers alive past deep pause.
-    private func performSwitch(to url: URL) {
-        if WallpaperState.shared.isDisplayAsleep {
-            deferredSwitchURL = url
-            traceLog("  [switchVideo #\(debugID)] DEFERRED until wake: \(url.lastPathComponent)")
-            return
-        }
-        deferredSwitchURL = nil
+    /// Make `url` the current asset. False when it already is, or when it has
+    /// no video track. Queue-only; blocks on the track load.
+    private func loadAsset(_ url: URL) -> Bool {
         // Same file already playing → nothing to do (defuses repeated identical picks).
         if asset.url == url {
             traceLog("  [switchVideo #\(debugID)] DEDUP: already on \(url.lastPathComponent)")
-            return
+            return false
         }
         let newAsset = AVURLAsset(url: url)
         guard let track = Self.loadFirstVideoTrackBlocking(newAsset) else {
             traceLog("  [switchVideo #\(debugID)] no video track in \(url.lastPathComponent)")
-            return
+            return false
         }
         asset = newAsset
         videoTrack = track
         traceLog("  [switchVideo #\(debugID)] restarting from 0 → \(url.lastPathComponent)")
-        restartWithCurrentAsset()
+        return true
     }
 
     /// Tag a sample buffer so the renderer displays it immediately, replacing all
@@ -394,7 +351,7 @@ final class VideoRenderer: @unchecked Sendable {
 
     /// Stop playback. Dispatches synchronously to the renderer queue to ensure
     /// no callback is mid-flight before canceling the reader. Timer teardown
-    /// joins the same hop so a pending pause/resume can't arm a timer after us.
+    /// joins the same hop so a pending event can't arm a timer after us.
     func stop() {
         extensionLog("  [stop #\(debugID)] stopping renderer for \(asset.url.lastPathComponent)")
         queue.sync { [weak self] in
@@ -403,12 +360,7 @@ final class VideoRenderer: @unchecked Sendable {
             cancelDeepPauseTimer()
             isRunning = false
             renderer.stopRequestingMediaData()
-            currentReader?.cancelReading()
-            nextReader?.cancelReading()
-            currentReader = nil
-            currentOutput = nil
-            nextReader = nil
-            nextOutput = nil
+            dropReaders()
         }
         CMTimebaseSetRate(timebase, rate: 0.0)
         variantSelector = nil
@@ -417,108 +369,172 @@ final class VideoRenderer: @unchecked Sendable {
         stillFrameLayer.removeFromSuperlayer()
     }
 
-    func pause() {
-        guard takePaused() else { return }
-        traceLog("  [pause #\(debugID)]")
-        // The serial queue preserves pause-then-resume ordering, so the flag
-        // (logical state) still flips synchronously while the rate follows on
-        // the queue. No caller can strand a mid-ramp rate anymore.
+    // MARK: - Playback control
+
+    func applyPolicy(_ policy: PlaybackPolicy, animated: Bool = false) {
         queue.async { [weak self] in
-            guard let self, isRunning else { return }
-            cancelRamp()
-            CMTimebaseSetRate(timebase, rate: 0.0)
-            generateStillFrame()
-            scheduleDeepPause()
-        }
-    }
-
-    func resume() {
-        guard takeResumed() else { return }
-        traceLog("  [resume #\(debugID)] asset=\(asset.url.lastPathComponent) rate→1")
-        queue.async { [weak self] in
-            guard let self, isRunning else { return }
-            cancelRamp()
-            cancelDeepPauseTimer()
-            stillFrameLayer.opacity = 0
-            // A switch's restart is mid-flush: its completion builds the readers
-            // and sets the rate from the pause flag. Recreating here would start
-            // a second flush on top of it.
-            guard !flushInFlight else { return }
-            if currentReader == nil {
-                // Woke from deep pause. Readers were freed. Recreate CONTINUING from the paused
-                // position (seamless, no black) so a screen-lock/display-sleep wake resumes the
-                // same video instead of restarting it. (Reader state is queue-confined;
-                // checking it here instead of on the caller thread also closes a race.)
-                recreatePlayback(seamlessResume: true)
-            }
-            CMTimebaseSetRate(timebase, rate: 1.0)
-        }
-    }
-
-    func applyPolicy(_ requested: PlaybackPolicy, animated: Bool = false) {
-        let oldPolicy = currentPolicy
-        let step = PlaybackPolicy.transition(
-            from: oldPolicy, to: requested, animated: animated,
-            displayAsleep: WallpaperState.shared.isDisplayAsleep,
-        )
-        guard step.action != .none else { return }
-        currentPolicy = step.policy
-        extensionLog("  [applyPolicy #\(debugID)] \(oldPolicy) → \(step.policy) (requested \(requested)) \(step.action) asset=\(asset.url.lastPathComponent)")
-
-        switch step.action {
-        case .none:
-            return
-        case .pause:
-            pause()
-        case .rampDown:
-            rampDown()
-        case .resume, .rampUp:
+            guard let self, isRunning, policy != lifecycle.policy else { return }
+            extensionLog("  [applyPolicy #\(debugID)] \(lifecycle.policy) → \(policy) animated=\(animated) asleep=\(lifecycle.displayAsleep) asset=\(asset.url.lastPathComponent)")
             // Battery tiers resolve to downscaled siblings via variantSelector,
             // but the selector is otherwise consulted only at loop boundaries,
             // without this, flipping to Battery Saver (or unplugging on
             // Automatic) kept playing the full file until the clip looped, up
-            // to a minute later. Switch now when the URL differs; the trailing
-            // resume/ramp then continues on the right variant.
-            if let selector = variantSelector {
-                let url = selector(displayPixelSize)
-                if url != asset.url {
-                    switchVideo(to: url)
-                }
+            // to a minute later. Switch now when the URL differs. The asset
+            // change goes first so the tier's resume waits for its reset.
+            if lifecycle.wouldPlay(policy), let url = variantSelector?(displayPixelSize), loadAsset(url) {
+                send(.assetChanged)
             }
-            if step.action == .rampUp {
-                rampUp()
-            } else {
-                resume()
-            }
+            send(.policy(policy, animated: animated))
         }
     }
 
-    /// Display sleep: stop the clock now. Unlike `pause()`, this also stops a
-    /// ramp-down already in flight. Its pause flag and `.paused` policy are
-    /// already set, so `applyPolicy(.paused)` and `pause()` were no-ops and the
-    /// ramp kept decoding for up to 6 s with the displays off.
-    func haltForDisplaySleep() {
-        currentPolicy = .paused
-        let newlyPaused = takePaused()
+    /// The displays went to sleep: stop the clock, the feed, and any ramp, and
+    /// hold rebuilds and switches until `displayDidWake`.
+    func displayDidSleep() {
         queue.async { [weak self] in
             guard let self, isRunning else { return }
-            let wasRamping = rampTimer != nil
-            cancelRamp()
-            CMTimebaseSetRate(timebase, rate: 0.0)
-            if newlyPaused || wasRamping { scheduleDeepPause() }
-            traceLog("  [haltForDisplaySleep #\(debugID)] newlyPaused=\(newlyPaused) cancelledRamp=\(wasRamping)")
+            send(.displaySleep)
         }
     }
 
-    /// Displays woke: run the switch that `performSwitch` held back during sleep.
-    /// Call before the wake policy recompute so a battery tier's copy switch,
-    /// queued by that recompute, lands after this one and wins.
+    /// The displays woke: run the held switch, or the tier's copy change, and
+    /// resume whatever the latest policy asks for. The target is resolved
+    /// here, after the held switch is consumed: the selector already points at
+    /// the latest choice and picks the copy for the current tier.
     func displayDidWake() {
         queue.async { [weak self] in
-            guard let self, isRunning, let url = deferredSwitchURL else { return }
-            deferredSwitchURL = nil
-            performSwitch(to: url)
+            guard let self, isRunning, lifecycle.displayAsleep else { return }
+            var changed = false
+            if lifecycle.deferredSwitch != nil || lifecycle.policy != .paused,
+               let url = variantSelector?(displayPixelSize) ?? lifecycle.deferredSwitch {
+                changed = loadAsset(url)
+            }
+            send(.displayWake(assetChanged: changed))
         }
+    }
+
+    /// Run one event through the lifecycle and perform its effects. Queue-only.
+    private func send(_ event: RendererLifecycle.Event) {
+        pendingEvents.append(event)
+        guard !isDispatching else { return }
+        isDispatching = true
+        while !pendingEvents.isEmpty {
+            let next = pendingEvents.removeFirst()
+            let effects = lifecycle.handle(next)
+            if !effects.isEmpty {
+                traceLog("  [lifecycle #\(debugID)] \(next) → \(effects)")
+            }
+            effects.forEach(perform)
+        }
+        isDispatching = false
+    }
+
+    private func perform(_ effect: RendererLifecycle.Effect) {
+        switch effect {
+        case let .setRate(rate):
+            cancelRamp()
+            CMTimebaseSetRate(timebase, rate: rate)
+        case let .ramp(target):
+            ramp(to: target, over: target > 0 ? Self.rampUpDuration : Self.rampDownDuration) { [weak self] in
+                self?.send(.rampFinished)
+            }
+        case let .startFeeding(generation):
+            feedFromCurrentReader(generation: generation)
+        case .stopFeeding:
+            renderer.stopRequestingMediaData()
+        case .armDeepPause:
+            scheduleDeepPause()
+        case .disarmDeepPause:
+            cancelDeepPauseTimer()
+        case .freeReaders:
+            renderer.stopRequestingMediaData()
+            dropReaders()
+            extensionLog("  [Renderer #\(debugID)] Freed asset readers")
+        case let .beginReset(kind, generation):
+            beginReset(kind, generation: generation)
+        case let .buildPipeline(kind):
+            buildPipeline(kind)
+        case .swapToNextReader:
+            swapToNextReader()
+        }
+    }
+
+    private func dropReaders() {
+        currentReader?.cancelReading()
+        nextReader?.cancelReading()
+        currentReader = nil
+        currentOutput = nil
+        nextReader = nil
+        nextOutput = nil
+    }
+
+    // MARK: - Reset
+
+    /// The one decoder reset, for switches, deep-pause wakes, and recovery.
+    /// A `flush` is a decoder RESET that discards anything enqueued before it
+    /// completes, and two overlapping flushes corrupt the renderer
+    /// (rapid-switch breakage), so the lifecycle keeps one in flight and builds
+    /// the new pipeline only when this flush reports back. The clock freezes
+    /// first so fresh PTS-0 frames aren't judged late.
+    private func beginReset(_ kind: RendererLifecycle.ResetKind, generation: Int) {
+        traceLog("  [reset #\(debugID)] BEGIN \(kind) gen=\(generation) asset=\(asset.url.lastPathComponent)")
+        cancelRamp()
+        CMTimebaseSetRate(timebase, rate: 0.0)
+        renderer.stopRequestingMediaData()
+        dropReaders()
+        // Hold the displayed frame (no blank) unless the decoder failed. The first
+        // new frame is tagged DisplayImmediately and replaces it.
+        renderer.flush(removingDisplayedImage: kind == .recover) { [weak self] in
+            guard let self else { return }
+            queue.async { [weak self] in
+                guard let self, isRunning else { return }
+                send(.resetFlushed(generation: generation))
+            }
+        }
+    }
+
+    /// Build readers on the current asset after a reset's flush and show their
+    /// first frame at once. `.resume` continues from the paused position (a
+    /// display-sleep or screen-lock wake resumes the same video instead of
+    /// restarting it); the other kinds start from 0.
+    private func buildPipeline(_ kind: RendererLifecycle.ResetKind) {
+        let resumeTime = CMTimebaseGetTime(timebase)
+        let continuing = kind == .resume && resumeTime.isNumeric && resumeTime > .zero
+        guard let reader = try? AVAssetReader(asset: asset) else {
+            extensionLog("  [reset #\(debugID)] FAILED to create AVAssetReader for \(asset.url.lastPathComponent)")
+            return
+        }
+        if continuing {
+            // AVAssetReader seeks to the enclosing keyframe and emits from here.
+            reader.timeRange = CMTimeRange(start: resumeTime, duration: .positiveInfinity)
+        }
+        let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
+        output.alwaysCopiesSampleData = false
+        reader.add(output)
+        reader.startReading()
+        currentReader = reader
+        currentOutput = output
+
+        ptsOffset = .zero
+        lastEnqueuedEnd = continuing ? resumeTime : .zero
+        if !continuing {
+            CMTimebaseSetTime(timebase, time: .zero)
+        }
+
+        // Enqueue the first frame while the clock is still frozen, tagged
+        // DisplayImmediately so it replaces the held frame the moment it decodes.
+        if let first = output.copyNextSampleBuffer() {
+            Self.setDisplayImmediately(first)
+            renderer.enqueue(first)
+            let pts = CMSampleBufferGetPresentationTimeStamp(first)
+            let dur = CMSampleBufferGetDuration(first)
+            if pts.isValid {
+                lastEnqueuedEnd = estimatedSampleEnd(pts: pts, duration: dur)
+            }
+        }
+        traceLog("  [reset #\(debugID)] BUILT \(kind) continuing=\(continuing) asset=\(asset.url.lastPathComponent) rendererStatus=\(renderer.status.rawValue)")
+        feedLogBudget = 4
+        prepareNextReader()
     }
 
     // MARK: - Ramp (Apple-like lock screen transition)
@@ -530,51 +546,6 @@ final class VideoRenderer: @unchecked Sendable {
     private static let rampUpDuration: TimeInterval = 2.0
     private static let rampDownDuration: TimeInterval = 6.0
     private static let rampStepInterval: TimeInterval = 1.0 / 120.0
-
-    /// Gradually reduce the timebase rate to zero, then freeze.
-    ///
-    /// `isPaused` flips immediately as the logical state, and the rate follows.
-    /// With it flipped at ramp COMPLETION instead, a resume arriving mid-ramp hit
-    /// resume()/rampUp()'s `isPaused` guards and did nothing, stranding the rate
-    /// wherever the cancelled ramp left it (visibly slow-motion playback).
-    private func rampDown() {
-        guard takePaused() else { return }
-        queue.async { [weak self] in
-            guard let self, isRunning else { return }
-            cancelDeepPauseTimer()
-            ramp(to: 0.0, over: Self.rampDownDuration) { [weak self] in
-                guard let self else { return }
-                generateStillFrame()
-                scheduleDeepPause()
-            }
-        }
-    }
-
-    /// Gradually raise the timebase rate to 1.0, from wherever it is now, so
-    /// reversing a mid-flight ramp-down accelerates from the current speed.
-    private func rampUp() {
-        guard takeResumed() else { return }
-        queue.async { [weak self] in
-            guard let self, isRunning else { return }
-            cancelDeepPauseTimer()
-            stillFrameLayer.opacity = 0
-            // Mid-flush switch: its completion starts playback (see resume()).
-            guard !flushInFlight else { cancelRamp(); return }
-
-            if currentReader == nil {
-                // Deep-paused: no frames to ramp into. Wake instantly (continuing from the paused
-                // position, seamless) instead of running a ramp against an empty pipeline.
-                // (Reader state is queue-confined; checking it here instead of on the
-                // caller thread also closes a race.)
-                cancelRamp()
-                recreatePlayback(seamlessResume: true)
-                CMTimebaseSetRate(timebase, rate: 1.0)
-                return
-            }
-
-            ramp(to: 1.0, over: Self.rampUpDuration)
-        }
-    }
 
     /// Ease the timebase rate from its CURRENT value to `target`.
     ///
@@ -635,7 +606,7 @@ final class VideoRenderer: @unchecked Sendable {
     // After a sustained pause (lock screen overnight, brightness at zero, etc.)
     // the asset reader still holds decoded buffers and the underlying video
     // decoder. Tearing them down frees memory and lets the system fully idle.
-    // On resume we recreate the pipeline from scratch via `recreatePlayback()`.
+    // On resume the lifecycle rebuilds the pipeline through a `.resume` reset.
 
     private static let deepPauseDelay: TimeInterval = 30
 
@@ -645,7 +616,9 @@ final class VideoRenderer: @unchecked Sendable {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + Self.deepPauseDelay)
         timer.setEventHandler { [weak self] in
-            self?.enterDeepPause()
+            guard let self, isRunning else { return }
+            deepPauseTimer = nil
+            send(.deepPauseFired)
         }
         deepPauseTimer = timer
         timer.resume()
@@ -656,180 +629,19 @@ final class VideoRenderer: @unchecked Sendable {
         deepPauseTimer = nil
     }
 
-    /// Runs on the renderer queue when the deep-pause timer fires.
-    private func enterDeepPause() {
-        deepPauseTimer = nil
-        guard isRunning, isPaused, currentReader != nil else { return }
-        renderer.stopRequestingMediaData()
-        currentReader?.cancelReading()
-        nextReader?.cancelReading()
-        currentReader = nil
-        currentOutput = nil
-        nextReader = nil
-        nextOutput = nil
-        extensionLog("  [Renderer] Deep-paused, freed asset readers")
-    }
-
-    /// Rebuild the playback pipeline on the renderer queue. Two modes:
-    /// - `seamlessResume: true` (deep-pause wake): CONTINUE from the paused timebase
-    ///   position, keeping the last frame on screen, no black flash, no restart-from-0.
-    ///   This is what a screen-lock/display-sleep wake uses so the video resumes where it
-    ///   left off (Kiri: "show the same video continuously", not blink-and-restart).
-    /// - `seamlessResume: false` (error recovery): hard reset to time 0 and clear the
-    ///   (possibly corrupt) displayed frame.
-    /// Caller restores the timebase rate.
-    private func recreatePlayback(seamlessResume: Bool = false) {
-        traceLog("  [recreatePlayback #\(debugID)] seamless=\(seamlessResume) asset=\(asset.url.lastPathComponent)")
-        renderer.stopRequestingMediaData()
-        currentReader?.cancelReading()
-        nextReader?.cancelReading()
-        nextReader = nil
-        nextOutput = nil
-
-        let resumeTime = CMTimebaseGetTime(timebase)
-        let continuing = seamlessResume && resumeTime.isNumeric && resumeTime > .zero
-        // Keep the last displayed frame when continuing (no black); clear it on error reset.
-        renderer.flush(removingDisplayedImage: !continuing)
-
-        guard let reader = try? AVAssetReader(asset: asset) else {
-            extensionLog("  [recreatePlayback] FAILED to create AVAssetReader for \(asset.url.lastPathComponent)")
-            currentReader = nil
-            currentOutput = nil
-            return
-        }
-        if continuing {
-            // Resume reading from the paused position (AVAssetReader seeks to the enclosing
-            // keyframe and emits from here) so playback continues instead of restarting.
-            reader.timeRange = CMTimeRange(start: resumeTime, duration: .positiveInfinity)
-        }
-        let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
-        output.alwaysCopiesSampleData = false
-        reader.add(output)
-        reader.startReading()
-        currentReader = reader
-        currentOutput = output
-
-        ptsOffset = .zero
-        lastEnqueuedEnd = continuing ? resumeTime : .zero
-        if !continuing {
-            CMTimebaseSetTime(timebase, time: .zero)
-        }
-
-        // Enqueue the first frame tagged DisplayImmediately so it replaces the held frame the
-        // instant it decodes with no wait on the timebase, and the swap is seamless when continuing.
-        if let first = output.copyNextSampleBuffer() {
-            Self.setDisplayImmediately(first)
-            renderer.enqueue(first)
-            let pts = CMSampleBufferGetPresentationTimeStamp(first)
-            let dur = CMSampleBufferGetDuration(first)
-            if pts.isValid {
-                lastEnqueuedEnd = estimatedSampleEnd(pts: pts, duration: dur)
-            }
-        }
-
-        prepareNextReader()
-        feedFromCurrentReader()
-    }
-
-    /// Restart playback on the already-set `asset`/`videoTrack` from time 0. The
-    /// video changed, so there's no timeline to preserve (that's only for gapless
-    /// looping of the SAME clip). This is `start()`'s sequence applied to a live
-    /// renderer: freeze the clock (rate 0) so the fresh PTS-0 frames aren't judged
-    /// "late", async-flush the decoder (a `flush` is a decoder RESET and discards
-    /// anything enqueued before it completes. That was the "no reaction" bug. Then,
-    /// in the completion, reset the timeline to 0, enqueue the first IDR frame, and
-    /// resume at rate 1. `removingDisplayedImage:false` holds the last frame (no
-    /// black) until that first frame lands. Must run on `queue`.
-    private func restartWithCurrentAsset() {
-        // Serialize the decoder reset: if a flush is already in flight, just mark that
-        // a restart is wanted. When that flush completes it will restart to whatever
-        // `asset` is by then (the latest pick), so rapid switching coalesces to one
-        // reset per settle, never two overlapping flushes.
-        traceLog("  [restart #\(debugID)] ENTER flushInFlight=\(flushInFlight) restartPending=\(restartPending) asset=\(asset.url.lastPathComponent)")
-        if flushInFlight {
-            restartPending = true
-            traceLog("  [restart #\(debugID)] flush in flight → coalescing to latest (\(asset.url.lastPathComponent))")
-            return
-        }
-        flushInFlight = true
-        // Freeze the clock up front so it can't advance past PTS 0 during the async
-        // flush. Otherwise the first frames arrive "late" and get dropped.
-        CMTimebaseSetRate(timebase, rate: 0.0)
-        renderer.stopRequestingMediaData()
-        currentReader?.cancelReading()
-        nextReader?.cancelReading()
-        nextReader = nil
-        nextOutput = nil
-
-        traceLog("  [restart #\(debugID)] flushing decoder for \(asset.url.lastPathComponent)")
-        // Keep the currently displayed frame (no blank). The first new frame below is
-        // tagged DisplayImmediately, which replaces it the instant it decodes.
-        renderer.flush(removingDisplayedImage: false) { [weak self] in
-            guard let self else { extensionLog("  [restart] FLUSH-CB but self gone (flushInFlight leaks!)"); return }
-            traceLog("  [restart #\(debugID)] FLUSH-CB fired (rendererStatus=\(renderer.status.rawValue)) → hop to queue")
-            queue.async { [weak self] in
-                guard let self else { return }
-                flushInFlight = false
-                traceLog("  [restart #\(debugID)] FLUSH-CB on queue: flushInFlight→false, restartPending=\(restartPending), asset=\(asset.url.lastPathComponent), isRunning=\(isRunning)")
-                // Switches arrived during the flush → do exactly one more restart to
-                // the newest asset, instead of feeding this (now stale) one.
-                if restartPending {
-                    restartPending = false
-                    traceLog("  [restart #\(debugID)] coalesced → restarting to \(asset.url.lastPathComponent)")
-                    restartWithCurrentAsset()
-                    return
-                }
-                guard isRunning else { return }
-                guard let reader = try? AVAssetReader(asset: asset) else {
-                    extensionLog("  [restart #\(debugID)] FAILED to create AVAssetReader for \(asset.url.lastPathComponent)")
-                    currentReader = nil
-                    currentOutput = nil
-                    return
-                }
-                let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
-                output.alwaysCopiesSampleData = false
-                reader.add(output)
-                reader.startReading()
-                currentReader = reader
-                currentOutput = output
-
-                // Fresh timeline from 0.
-                ptsOffset = .zero
-                lastEnqueuedEnd = .zero
-                CMTimebaseSetTime(timebase, time: .zero)
-
-                // Enqueue the first (IDR) frame while the clock is still frozen, exactly
-                // like start(), so it isn't dropped as late. Tag it DisplayImmediately so
-                // it replaces the retained old frame the moment it decodes. An instant,
-                // blank-free swap that doesn't depend on the timebase (important since a
-                // switch can land while paused, rate=0).
-                if let first = output.copyNextSampleBuffer() {
-                    Self.setDisplayImmediately(first)
-                    renderer.enqueue(first)
-                    let pts = CMSampleBufferGetPresentationTimeStamp(first)
-                    let dur = CMSampleBufferGetDuration(first)
-                    if pts.isValid {
-                        lastEnqueuedEnd = estimatedSampleEnd(pts: pts, duration: dur)
-                    }
-                }
-
-                CMTimebaseSetRate(timebase, rate: isPaused ? 0.0 : 1.0)
-                traceLog("  [restart #\(debugID)] playing \(asset.url.lastPathComponent) rate=\(isPaused ? 0 : 1) rendererStatus=\(renderer.status.rawValue) requiresFlush=\(renderer.requiresFlushToResumeDecoding) readerStatus=\(reader.status.rawValue) err=\(renderer.error?.localizedDescription ?? "-")")
-                feedLogBudget = 4
-                prepareNextReader()
-                feedFromCurrentReader()
-            }
-        }
-    }
-
     // MARK: - Preloaded Loop Reader
 
     private func prepareNextReader() {
         // Deferred to a separate queue job so the (brief, blocking) variant track load
         // doesn't stall whatever called us, but it stays strictly ordered on `queue`.
         // No Task involved.
+        let generation = lifecycle.generation
         queue.async { [weak self] in
             guard let self, isRunning else { return }
+            // Skip for a replaced pipeline or sleeping displays: a loop
+            // boundary waits for wake, and the swap builds a reader itself
+            // when none is ready.
+            guard lifecycle.generation == generation, !lifecycle.displayAsleep else { return }
             let nextURL = variantSelector?(displayPixelSize)
             if let nextURL, nextURL != asset.url {
                 let newAsset = AVURLAsset(url: nextURL)
@@ -860,9 +672,9 @@ final class VideoRenderer: @unchecked Sendable {
 
     /// Swap to the preloaded next reader at a loop boundary.
     /// Uses timing offset for gapless continuation, no flush, no timebase reset.
+    /// The lifecycle runs it only while feeding is allowed and starts the feed
+    /// after it.
     private func swapToNextReader() {
-        renderer.stopRequestingMediaData()
-
         // Advance offset so the next loop's DTS/PTS continue the timeline.
         ptsOffset = lastEnqueuedEnd
 
@@ -892,14 +704,17 @@ final class VideoRenderer: @unchecked Sendable {
         currentReader?.startReading()
 
         prepareNextReader()
-        feedFromCurrentReader()
     }
 
     // MARK: - Playback Loop
 
-    private func feedFromCurrentReader() {
+    /// Feed the renderer from the current reader. `generation` ties this
+    /// request to one pipeline: once a reset or deep pause replaces it, the
+    /// callback stops and anything it queued is dropped by the lifecycle.
+    private func feedFromCurrentReader(generation: Int) {
         renderer.requestMediaDataWhenReady(on: queue) { [weak self] in
-            guard let self, isRunning else {
+            guard let self, isRunning, lifecycle.generation == generation, let currentOutput else {
+                // A reader that failed to build leaves the held frame on screen.
                 self?.renderer.stopRequestingMediaData()
                 return
             }
@@ -910,7 +725,7 @@ final class VideoRenderer: @unchecked Sendable {
                 extensionLog("  [Renderer] Status failed: \(renderer.error?.localizedDescription ?? "unknown"), recovering")
                 renderer.stopRequestingMediaData()
                 queue.async { [weak self] in
-                    self?.recoverFromError()
+                    self?.send(.decoderFailed(generation: generation))
                 }
                 return
             }
@@ -923,7 +738,7 @@ final class VideoRenderer: @unchecked Sendable {
 
             var enqueuedThisTick = 0
             while renderer.isReadyForMoreMediaData {
-                if let sample = currentOutput?.copyNextSampleBuffer() {
+                if let sample = currentOutput.copyNextSampleBuffer() {
                     let adjusted = offsetTimingForLoop(sample)
                     enqueuedThisTick += 1
 
@@ -947,7 +762,7 @@ final class VideoRenderer: @unchecked Sendable {
                     }
                     renderer.stopRequestingMediaData()
                     queue.async { [weak self] in
-                        self?.swapToNextReader()
+                        self?.send(.readerExhausted(generation: generation))
                     }
                     return
                 }
@@ -999,24 +814,5 @@ final class VideoRenderer: @unchecked Sendable {
         )
 
         return adjusted ?? sample
-    }
-
-    /// Reset everything and restart playback from scratch after a decoder error.
-    private func recoverFromError() {
-        recreatePlayback()
-        CMTimebaseSetRate(timebase, rate: isPaused ? 0.0 : 1.0)
-    }
-
-    // MARK: - Still Frame
-
-    private func generateStillFrame() {
-        // DISABLED. This spawned an AVAssetImageGenerator (its own video decoder) on
-        // every pause to set stillFrameLayer.contents, but a CALayer.contents CGImage
-        // does NOT composite in a remote CAContext (RE-confirmed), so it never showed
-        // anything. Meanwhile, when the desktop thrashes idle/default, these generators
-        // pile up and compete with the playback reader for the appex's limited video-
-        // decoder resources, stalling playback (the ~20s "starvation"). When paused the
-        // displayLayer already holds the last frame, so nothing visible is lost.
-        traceLog("  [generateStillFrame #\(debugID)] skipped (no-op still; last frame held by displayLayer)")
     }
 }
