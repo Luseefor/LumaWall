@@ -27,7 +27,7 @@ private struct DiagnosticsVisibilityReader: NSViewRepresentable {
     func updateNSView(_ nsView: ReaderView, context: Context) {}
 
     static func dismantleNSView(_ nsView: ReaderView, coordinator: Coordinator) {
-        coordinator.attach(to: nil)
+        coordinator.tearDown()
     }
 
     final class ReaderView: NSView {
@@ -49,20 +49,31 @@ private struct DiagnosticsVisibilityReader: NSViewRepresentable {
         init(model: AppModel) { self.model = model }
 
         func attach(to window: NSWindow?) {
+            guard let window else { return tearDown() }
             guard window !== self.window else { return }
-            if let observer { NotificationCenter.default.removeObserver(observer) }
-            observer = nil
+            removeObserver()
             self.window = window
-            if let window {
-                observer = NotificationCenter.default.addObserver(
-                    forName: NSWindow.didChangeOcclusionStateNotification,
-                    object: window,
-                    queue: .main
-                ) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.report() }
-                }
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.report() }
             }
             report()
+        }
+
+        /// Always removes the observer and unregisters this viewer, even if the
+        /// weak window reference has already cleared.
+        func tearDown() {
+            removeObserver()
+            window = nil
+            model.setDiagnosticsViewer(id, visible: false)
+        }
+
+        private func removeObserver() {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = nil
         }
 
         private func report() {
