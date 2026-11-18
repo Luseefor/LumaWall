@@ -216,11 +216,17 @@ enum NativeWallpaperDeployment {
             // Libraries missing any planned copy (pre-variant ones, or ones
             // made before the 1440p copy existed) backfill in the background.
             if needsVariants(existing, displayPixels: displayPixels) {
+                // Encode from the deployed original, not the library file:
+                // the library file can change after the hash check, and only
+                // deploy replaces the deployed one, under entryLock and
+                // followed by metadata carrying the new hash, which makes
+                // publication reject a copy made from the old one.
+                let deployed = videoURL(for: existing)
                 Task.detached {
                     await ensureVariants(
                         for: entryID,
                         contentHash: hash,
-                        sourceURL: asset.mediaURL,
+                        sourceURL: deployed,
                         sourceFPS: existing.fps,
                         sourceSize: existing.resolution,
                         displayPixels: displayPixels
