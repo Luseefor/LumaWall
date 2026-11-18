@@ -142,11 +142,12 @@ struct RendererLifecycle: Equatable {
             if ok {
                 readers = .live
                 animated = rampWhenReady && !displayAsleep
+                rampWhenReady = false
             } else {
+                // Keep a pending ramp for the next attempt.
                 failures += 1
                 requestReset(.restart, &effects)
             }
-            rampWhenReady = false
         case let .policy(requested, isAnimated):
             guard requested != policy else { return [] }
             policy = requested

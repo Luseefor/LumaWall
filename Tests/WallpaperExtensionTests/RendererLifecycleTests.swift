@@ -252,6 +252,18 @@ final class RendererLifecycleTests: XCTestCase {
         _ = life.handle(.readerExhausted(token: 2))
         XCTAssertEqual(life.failures, 0)
     }
+
+    func testRampSurvivesAFailedFirstBuild() {
+        var life = playing()
+        _ = life.handle(.policy(.paused, animated: true))
+        _ = life.handle(.rampFinished)
+        _ = life.handle(.assetChanged)
+        _ = life.handle(.policy(.minimal, animated: true))
+        _ = life.handle(.resetFlushed(generation: 1))
+        XCTAssertEqual(life.handle(.pipelineBuilt(false)), [.beginReset(.restart, generation: 2)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 2)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
+    }
 }
 
 private extension RendererLifecycle.Effect {
