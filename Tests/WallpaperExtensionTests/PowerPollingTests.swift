@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 
 /// Battery and brightness were read every 30 s even with nothing playing
@@ -28,6 +29,16 @@ final class PowerPollingTests: XCTestCase {
             PowerPolling.mode(anyPlaying: false, batteryLevel: PlaybackPolicy.batteryCriticalLevel, displayBrightness: 1),
             .off,
         )
+    }
+
+    func testAReadingOlderThanThePollIsReadAgain() {
+        // With the poll stopped, a policy computed on wake or lock must not
+        // use the battery state from before the Mac was unplugged.
+        let read = Date(timeIntervalSinceReferenceDate: 1_000)
+        XCTAssertTrue(PowerPolling.readIsStale(lastRead: nil, now: read))
+        XCTAssertFalse(PowerPolling.readIsStale(lastRead: read, now: read + PowerPolling.interval - 1))
+        XCTAssertTrue(PowerPolling.readIsStale(lastRead: read, now: read + PowerPolling.interval))
+        XCTAssertTrue(PowerPolling.readIsStale(lastRead: read, now: read - 1), "the clock moved back")
     }
 
     func testPlayingRenderersReportOnlyTheFirstAndLast() {

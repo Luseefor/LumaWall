@@ -10,6 +10,18 @@ enum PowerPolling: Equatable {
     case brightness
     case all
 
+    /// Seconds between reads while the poll runs.
+    static let interval: TimeInterval = 30
+
+    /// Whether a battery and brightness reading taken at `lastRead` is too old
+    /// to compute a policy from. While the poll is stopped, the reading can be
+    /// from before the Mac was unplugged or the displays slept.
+    static func readIsStale(lastRead: Date?, now: Date) -> Bool {
+        guard let lastRead else { return true }
+        let age = now.timeIntervalSince(lastRead)
+        return age < 0 || age >= interval
+    }
+
     static func mode(anyPlaying: Bool, batteryLevel: Int, displayBrightness: Float) -> PowerPolling {
         if anyPlaying { return .all }
         // The critical-battery pause holds on AC too; charging past the level

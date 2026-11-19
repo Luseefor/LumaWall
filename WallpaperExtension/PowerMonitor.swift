@@ -23,8 +23,9 @@ final class PowerMonitor: Sendable {
     private nonisolated(unsafe) var playing = PlayingRenderers()
     private nonisolated(unsafe) var pollMode = PowerPolling.off
     private nonisolated(unsafe) var pollTimer: (any DispatchSourceTimer)?
-    private static let pollInterval: TimeInterval = 30
     private static let pollLeeway: DispatchTimeInterval = .seconds(15)
+    /// When battery and brightness were last both read.
+    private let lastRead = OSAllocatedUnfairLock<Date?>(initialState: nil)
     private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
 
     /// gamepolicyd's state-carrying Darwin notification for Game Mode sessions
@@ -49,9 +50,12 @@ final class PowerMonitor: Sendable {
 
     private init() {}
 
-    /// Current power state snapshot.
+    /// Current power state, re-reading battery and brightness first when the
+    /// last reading is older than the poll interval (the poll stops while
+    /// nothing plays).
     var currentState: PowerState {
-        state.withLock { $0 }
+        readIfStale()
+        return state.withLock { $0 }
     }
 
     /// Re-read battery + brightness now and notify subscribers on change.
@@ -59,8 +63,7 @@ final class PowerMonitor: Sendable {
     /// (e.g. the user picking Battery Saver right after unplugging) applies
     /// against stale power state and looks like "nothing changes".
     func refreshNow() {
-        updateBatteryState()
-        updateBrightnessState()
+        readBatteryAndBrightness()
         pollQueue.async { [weak self] in self?.updatePolling() }
     }
 
@@ -70,10 +73,7 @@ final class PowerMonitor: Sendable {
     func notePlayback(renderer id: Int, playing isPlaying: Bool) {
         pollQueue.async { [weak self] in
             guard let self, playing.set(id, playing: isPlaying) else { return }
-            if playing.anyPlaying {
-                updateBatteryState()
-                updateBrightnessState()
-            }
+            if playing.anyPlaying { readIfStale() }
             updatePolling()
         }
     }
@@ -99,8 +99,7 @@ final class PowerMonitor: Sendable {
             $0.thermalState = ProcessInfo.processInfo.thermalState
             $0.isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
-        updateBatteryState()
-        updateBrightnessState()
+        readBatteryAndBrightness()
 
         // Thermal state, event-driven via notification
         NotificationCenter.default.addObserver(
@@ -151,7 +150,7 @@ final class PowerMonitor: Sendable {
     /// Start, narrow, or stop the poll for the current state. `pollQueue` only.
     private func updatePolling() {
         dispatchPrecondition(condition: .onQueue(pollQueue))
-        let current = currentState
+        let current = state.withLock { $0 }
         let mode = PowerPolling.mode(
             anyPlaying: playing.anyPlaying,
             batteryLevel: current.batteryLevel,
@@ -167,7 +166,7 @@ final class PowerMonitor: Sendable {
         }
         guard pollTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: pollQueue)
-        timer.schedule(deadline: .now() + Self.pollInterval, repeating: Self.pollInterval, leeway: Self.pollLeeway)
+        timer.schedule(deadline: .now() + PowerPolling.interval, repeating: PowerPolling.interval, leeway: Self.pollLeeway)
         timer.setEventHandler { [weak self] in self?.poll() }
         pollTimer = timer
         timer.resume()
@@ -177,11 +176,20 @@ final class PowerMonitor: Sendable {
         switch pollMode {
         case .off: return
         case .brightness: updateBrightnessState()
-        case .all:
-            updateBatteryState()
-            updateBrightnessState()
+        case .all: readBatteryAndBrightness()
         }
         updatePolling()
+    }
+
+    private func readBatteryAndBrightness() {
+        lastRead.withLock { $0 = Date() }
+        updateBatteryState()
+        updateBrightnessState()
+    }
+
+    private func readIfStale() {
+        guard PowerPolling.readIsStale(lastRead: lastRead.withLock { $0 }, now: Date()) else { return }
+        readBatteryAndBrightness()
     }
 
     /// Runs on `thermalQueue` only.
