@@ -142,6 +142,14 @@ struct RendererCopy {
         url.standardizedFileURL == active.original.standardizedFileURL
     }
 
+    /// Whether a preview playing `playing` can hold the still seeded for
+    /// `seedOf` instead of decoding: it plays the original, and the seed is
+    /// of the choice now active, not one a switch before `start` replaced.
+    func previewHoldsSeed(playing: URL, seedOf: URL?) -> Bool {
+        guard let seedOf else { return false }
+        return isOriginal(playing) && isOriginal(seedOf)
+    }
+
     /// Whether a new preview of `original` would open the original for
     /// `tier`, the way `start` picks its file, so its seed needn't decode a
     /// first frame (#35).

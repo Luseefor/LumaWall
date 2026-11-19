@@ -89,6 +89,8 @@ final class VideoRenderer: @unchecked Sendable {
     private let fallbackStill: @Sendable (URL) -> CGImage?
     /// Whether init enqueued a still into the display layer. Set once there.
     private(set) var seededStill = false
+    /// The original whose still init seeded, or nil. Set once there.
+    private var seededOriginal: URL?
     /// Whether `start()` enqueued the first video frame. Set on the queue
     /// before `onFirstFrameReady` runs.
     private(set) var showedFirstFrame = false
@@ -236,6 +238,7 @@ final class VideoRenderer: @unchecked Sendable {
             Self.setDisplayImmediately(stillBuffer)
             renderer.enqueue(stillBuffer)
             seededStill = true
+            seededOriginal = originalURL
             traceLog("  [Renderer #\(debugID)] Seeded still into display layer (\(stillImage.width)x\(stillImage.height))")
         } else {
             traceLog("  [Renderer #\(debugID)] Seeded nothing (stillImage present: \(stillImage != nil)); the display layer is empty until the first frame")
@@ -278,7 +281,7 @@ final class VideoRenderer: @unchecked Sendable {
             // A preview on the original holds its seeded still rather than
             // decode the original's first frame for a small tile (#35). The
             // lifecycle builds a pipeline once a copy or tier lets it play.
-            let holding = isPreview && seededStill && copy.isOriginal(asset.url)
+            let holding = isPreview && copy.previewHoldsSeed(playing: asset.url, seedOf: seededOriginal)
             // Starts the clock and the feed once the pipeline reports built,
             // unless the displays sleep or a pause was applied before this ran.
             // The global flag is read here, on the queue: sleep sets it before
