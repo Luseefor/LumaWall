@@ -1,3 +1,4 @@
+import ImageIO
 import XCTest
 
 /// The still-image cache keeps one BMP per wallpaper, content version and
@@ -125,6 +126,52 @@ final class StillCacheTests: XCTestCase {
         let files = [file(entry(hashB, 3840, 2160), age: 60), file(newer)]
         XCTAssertEqual(StillCache.lookup(files, choiceHash: hashA, version: 1, width: 2560, height: 1440)?.entry, newer)
         XCTAssertNil(StillCache.lookup([], choiceHash: hashA, version: 1, width: 2560, height: 1440))
+    }
+
+    // MARK: Encoding
+
+    /// A 5x130 opaque image whose pixel at (x, y) from the top-left is
+    /// B = y, G = 40 * x, R = 255 - y.
+    private func gradientImage(width: Int = 5, height: Int = 130) throws -> CGImage {
+        let ctx = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue,
+        ))
+        let pixels = try XCTUnwrap(ctx.data).assumingMemoryBound(to: UInt8.self)
+        for y in 0 ..< height {
+            for x in 0 ..< width {
+                let p = pixels + y * width * 4 + x * 4
+                p[0] = UInt8(y); p[1] = UInt8(40 * x); p[2] = UInt8(255 - y); p[3] = 255
+            }
+        }
+        return try XCTUnwrap(ctx.makeImage())
+    }
+
+    func testEncodesATopDownPaddedBGRBitmap() throws {
+        let bmp = try XCTUnwrap(StillCache.encodeBMP(gradientImage()))
+        // 5 px * 3 bytes = 15, padded to 16 per row.
+        XCTAssertEqual(bmp.count, 54 + 16 * 130)
+        XCTAssertEqual(Array(bmp[0 ..< 2]), [0x42, 0x4D])
+        let field = { (offset: Int) in bmp[offset ..< offset + 4].enumerated().reduce(UInt32(0)) { $0 | UInt32($1.element) << (8 * $1.offset) } }
+        XCTAssertEqual(field(2), UInt32(54 + 16 * 130))
+        XCTAssertEqual(field(18), 5)
+        XCTAssertEqual(Int32(bitPattern: field(22)), -130)
+        // Rows 0, 63, 64 (second strip), 129 (partial last strip).
+        for y in [0, 63, 64, 100, 129] {
+            for x in 0 ..< 5 {
+                let o = 54 + y * 16 + x * 3
+                XCTAssertEqual(Array(bmp[o ..< o + 3]), [UInt8(y), UInt8(40 * x), UInt8(255 - y)], "pixel \(x),\(y)")
+            }
+        }
+    }
+
+    func testEncodedBitmapDecodesAtTheImageSize() throws {
+        let bmp = try XCTUnwrap(StillCache.encodeBMP(gradientImage(width: 7, height: 3)))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(bmp as CFData, nil))
+        let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(decoded.width, 7)
+        XCTAssertEqual(decoded.height, 3)
     }
 
     // MARK: Coalescing

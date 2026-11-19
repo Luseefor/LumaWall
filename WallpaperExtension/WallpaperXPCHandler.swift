@@ -389,7 +389,9 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
         }
         let videoURL = findVideoURL(forChoice: renderChoice)
-        let cachedStill = loadCachedSnapshotImage(forChoice: choiceConfiguration)
+        let cachedStill = videoURL.flatMap {
+            loadCachedSnapshotImage(forChoice: choiceConfiguration, videoURL: $0, pixelWidth: Int(destSize.width * scaleFactor), pixelHeight: Int(destSize.height * scaleFactor))
+        }
 
         // Diagnostic bisection: host a still only (no video pipeline). Same context
         // reuse/create/reply as below. That's what we're stress-testing, but there is no renderer.
