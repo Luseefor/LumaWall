@@ -152,6 +152,14 @@ struct RendererLifecycle: Equatable {
 
     var wantsPlayback: Bool { wouldPlay(policy) }
 
+    /// Decoding, or rebuilding to decode: the clock runs (a ramp-down
+    /// included), or a reset or build is under way while playback is wanted.
+    /// A fallback still waiting to retry and a paused or gated renderer are
+    /// idle. `PowerMonitor` polls power while any renderer is active.
+    var isActive: Bool {
+        clock != .stopped || (wantsPlayback && (resetInFlight != nil || readers == .building))
+    }
+
     func wouldPlay(_ policy: PlaybackPolicy) -> Bool {
         policy != .paused && !displayAsleep && surfaceOpen
     }

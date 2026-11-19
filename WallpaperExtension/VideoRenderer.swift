@@ -42,7 +42,7 @@ final class VideoRenderer: @unchecked Sendable {
     /// so each event's effects run against the state that produced them.
     private var pendingEvents: [RendererLifecycle.Event] = []
     private var isDispatching = false
-    /// What `PowerMonitor` last heard about this renderer wanting playback.
+    /// What `PowerMonitor` last heard about this renderer being active.
     private var reportedPlayback = false
     private var rampTimer: (any DispatchSourceTimer)?
     private var deepPauseTimer: (any DispatchSourceTimer)?
@@ -528,13 +528,14 @@ final class VideoRenderer: @unchecked Sendable {
         reportPlayback()
     }
 
-    /// Tell `PowerMonitor` when this renderer starts or stops wanting
-    /// playback, so it polls power only while something plays. Queue-only.
+    /// Tell `PowerMonitor` when this renderer becomes active or idle
+    /// (`RendererLifecycle.isActive`), so it polls power only while something
+    /// decodes. Queue-only.
     private func reportPlayback() {
-        let wants = isRunning && lifecycle.wantsPlayback
-        guard wants != reportedPlayback else { return }
-        reportedPlayback = wants
-        PowerMonitor.shared.notePlayback(renderer: debugID, playing: wants)
+        let active = isRunning && lifecycle.isActive
+        guard active != reportedPlayback else { return }
+        reportedPlayback = active
+        PowerMonitor.shared.notePlayback(renderer: debugID, playing: active)
     }
 
     private func perform(_ effect: RendererLifecycle.Effect) {

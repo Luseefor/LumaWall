@@ -89,6 +89,51 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.clock, .rampingUp)
     }
 
+    func testResumeAfterAHardPauseRampsUp() {
+        var life = playing()
+        _ = life.handle(.policy(.paused, animated: true))
+        _ = life.handle(.hardPause)
+        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.ramp(to: 1), .startFeeding(token: 2), .disarmDeepPause])
+        XCTAssertEqual(life.clock, .rampingUp)
+    }
+
+    // MARK: Activity (what keeps PowerMonitor polling)
+
+    func testActiveWhileTheClockRunsIncludingARampDown() {
+        var life = playing()
+        XCTAssertTrue(life.isActive)
+        _ = life.handle(.policy(.paused, animated: true))
+        XCTAssertTrue(life.isActive, "the unlock ramp-down still decodes")
+        _ = life.handle(.rampFinished)
+        XCTAssertFalse(life.isActive)
+    }
+
+    func testActiveThroughARebuildTowardPlayback() {
+        // A switch on one display must not stop and restart the poll.
+        var life = playing()
+        _ = life.handle(.assetChanged)
+        XCTAssertEqual(life.clock, .stopped)
+        XCTAssertTrue(life.isActive)
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertFalse(life.isActive, "a rebuild nobody will watch")
+    }
+
+    func testFallbackStillWaitingToRetryIsNotActive() {
+        var life = playing()
+        _ = failUntilFallback(&life)
+        XCTAssertTrue(life.wantsPlayback)
+        XCTAssertFalse(life.isActive)
+    }
+
+    func testGatedRendererIsNotActive() {
+        var life = playing()
+        _ = life.handle(.displaySleep)
+        XCTAssertFalse(life.isActive)
+        _ = life.handle(.displayWake(assetChanged: false))
+        _ = life.handle(.surfaceClosed)
+        XCTAssertFalse(life.isActive)
+    }
+
     func testAwakeRampsAreUnchanged() {
         var life = playing()
         XCTAssertEqual(life.handle(.policy(.paused, animated: true)), [.ramp(to: 0)])
