@@ -65,6 +65,30 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.rampFinished), [])
     }
 
+    func testHardPauseCutsARampDownShort() {
+        // Unlock started the ramp-down, then the Mac hit critical thermal: the
+        // policy is already Paused, so only the hard-pause event stops the
+        // seconds of decoding left.
+        var life = playing()
+        XCTAssertEqual(life.handle(.policy(.paused, animated: true)), [.ramp(to: 0)])
+        XCTAssertEqual(life.handle(.policy(.paused, animated: false)), [])
+        XCTAssertTrue(life.feeding)
+        XCTAssertEqual(life.handle(.hardPause), [.setRate(0), .stopFeeding, .armDeepPause])
+        assertStoppedAndIdle(life)
+        XCTAssertEqual(life.handle(.rampFinished), [])
+    }
+
+    func testHardPauseLeavesOtherClocksAlone() {
+        var life = playing()
+        XCTAssertEqual(life.handle(.hardPause), [], "playing: the policy event stops it")
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertEqual(life.handle(.hardPause), [])
+        _ = life.handle(.policy(.full, animated: true))
+        XCTAssertEqual(life.clock, .rampingUp)
+        XCTAssertEqual(life.handle(.hardPause), [])
+        XCTAssertEqual(life.clock, .rampingUp)
+    }
+
     func testAwakeRampsAreUnchanged() {
         var life = playing()
         XCTAssertEqual(life.handle(.policy(.paused, animated: true)), [.ramp(to: 0)])

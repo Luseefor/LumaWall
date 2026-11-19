@@ -244,10 +244,11 @@ final class WallpaperPrefs: @unchecked Sendable {
         // displays that have one: skipping them left one seeded Paused (a
         // fullscreen app on another display) stuck there. Live surfaces only;
         // previews are exempt (see forLiveRenderers).
+        let hardPause = RampMath.cutsRampDown(thermalState: powerState.thermalState, activityState: activityState)
         for displayID in displayIDs.map(Optional.some) + [nil] {
             let displayPolicy = policy(for: displayID)
             state.forLiveRenderers(displayID: displayID) { renderer in
-                renderer.applyPolicy(displayPolicy, animated: animated)
+                renderer.applyPolicy(displayPolicy, animated: animated, hardPause: hardPause && displayPolicy == .paused)
             }
         }
     }

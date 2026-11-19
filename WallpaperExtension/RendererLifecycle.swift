@@ -107,6 +107,9 @@ struct RendererLifecycle: Equatable {
         /// The renderer needs a flush to resume decoding.
         case decoderInterrupted(token: Int)
         case rampFinished
+        /// A pause that must stop decoding at once holds (`RampMath.cutsRampDown`):
+        /// end a ramp-down now instead of feeding it for seconds.
+        case hardPause
         case deepPauseFired
         case retryFired
     }
@@ -250,6 +253,10 @@ struct RendererLifecycle: Equatable {
             case .rampingDown: clock = .stopped
             case .playing, .stopped: return []
             }
+        case .hardPause:
+            guard clock == .rampingDown else { return [] }
+            clock = .stopped
+            effects.append(.setRate(0))
         case .retryFired:
             guard retryArmed else { return [] }
             retryArmed = false
