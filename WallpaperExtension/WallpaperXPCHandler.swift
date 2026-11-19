@@ -99,6 +99,16 @@ private func surfaceReady(_ key: DisplayKey, token: Int) {
     Lifecycle.queue.async { Lifecycle.replies.ready(key, token: token).forEach { $0() } }
 }
 
+/// What a new renderer's display layer is seeded with: the cached still,
+/// else the video's decoded first frame, else the gradient, so the layer
+/// shows something before the first video frame.
+private func seedStill(cached: CGImage?, videoURL: URL) async -> (image: CGImage?, source: String) {
+    if let cached { return (cached, "the cached still") }
+    if let frame = await firstFrameImage(of: videoURL) { return (frame, "the decoded first frame") }
+    if let gradient = VideoRenderer.makeGradientStill() { return (gradient, "the gradient") }
+    return (nil, "nothing")
+}
+
 /// Fail the replies waiting on `key`'s context, which was just removed.
 /// MUST be called on `Lifecycle.queue`.
 private func failHeldReplies(for key: DisplayKey) {
@@ -522,10 +532,14 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // (preview) acquire from creating a duplicate renderer on the same layer.
                 let boxedRoot = SendableBox(value: existing.rootLayer)
                 Task { [boxedRoot, videoURL, loadStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
+                    // create() replaces the no-video gradient this surface
+                    // shows, and the agent already hosts it: seed it even on a
+                    // cache miss so the layer never goes empty.
+                    let seed = await seedStill(cached: loadStill(videoURL), videoURL: videoURL).image
                     let renderer: VideoRenderer
                     do {
                         renderer = try await VideoRenderer.create(
-                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: loadStill(videoURL),
+                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
                             fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         )
@@ -534,6 +548,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                         WallpaperState.shared.clearRendererPending(for: key, token: token)
                         return
                     }
+                    if !renderer.seededStill { installGradientFallback(on: boxedRoot.value) }
                     guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
                         renderer.stop()
                         return
@@ -600,7 +615,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // video, matching Apple's own extensions (which likewise don't reply until ready).
         // Every branch below still replies exactly once so the acquire can never hang.
 
-        if ColorDiag.enabled { reply(replyObj, nil); colorDiagInstall(rootLayer: rootLayer, for: key); return }
+        if ColorDiag.enabled { colorDiagInstall(rootLayer: rootLayer, for: key); reply(replyObj, nil); return }
 
         guard let videoURL else {
             // No video file, so solid gradient fallback. Static content, so it's ready as
@@ -644,17 +659,9 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // A cold start replies once create() has seeded the display
                 // layer, so a cache miss seeds the decoded first frame, or the
                 // gradient, rather than leaving the layer empty.
-                var seed = cachedStill
-                var seeded = cachedStill == nil ? "nothing" : "the cached still"
-                if seed == nil, coldStart {
-                    if let frame = await firstFrameImage(of: videoURL) {
-                        seed = frame
-                        seeded = "the decoded first frame"
-                    } else if let gradient = VideoRenderer.makeGradientStill() {
-                        seed = gradient
-                        seeded = "the gradient"
-                    }
-                }
+                var (seed, seeded) = coldStart
+                    ? await seedStill(cached: cachedStill, videoURL: videoURL)
+                    : (cachedStill, cachedStill == nil ? "nothing" : "the cached still")
                 let renderer: VideoRenderer
                 do {
                     renderer = try await VideoRenderer.create(
@@ -695,7 +702,13 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // we've told the agent to swap off it.
                 let heldStill = cachedStill != nil
                 renderer.start(onFirstFrameReady: {
-                    if !coldStart { surfaceReady(key, token: token) }
+                    if !coldStart {
+                        // A cache miss seeds nothing here, and start() calls
+                        // back without a frame when the reader fails: show the
+                        // gradient rather than reply with an empty layer.
+                        if !renderer.seededStill, !renderer.showedFirstFrame { installGradientFallback(on: boxedRoot.value) }
+                        surfaceReady(key, token: token)
+                    }
                     old?.stop()
                     // Video (or, on failure, the seeded still) is in the display
                     // layer now; the root layer's copy is only memory (a 4K frame

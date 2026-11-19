@@ -80,6 +80,9 @@ final class VideoRenderer: @unchecked Sendable {
     private let fallbackStill: @Sendable (URL) -> CGImage?
     /// Whether init enqueued a still into the display layer. Set once there.
     private(set) var seededStill = false
+    /// Whether `start()` enqueued the first video frame. Set on the queue
+    /// before `onFirstFrameReady` runs.
+    private(set) var showedFirstFrame = false
 
     /// Opens the copy `variantSelector` picks for the root layer's pixel size
     /// and the tier from `tierSource`, falling back to `videoURL` when that
@@ -300,6 +303,7 @@ final class VideoRenderer: @unchecked Sendable {
             renderer.enqueue(firstSample)
             CATransaction.commit()
             CATransaction.flush()
+            showedFirstFrame = true
         }
 
         currentReader = reader
