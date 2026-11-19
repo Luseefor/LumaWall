@@ -38,6 +38,9 @@ actor PosterCache {
     private struct FailedPoster: Hashable {
         let key: Key
         let stamp: PosterStamp
+        /// Hash of the file's first and last few KB. A file rewritten in place
+        /// can keep its size, modification time and inode, but not its content.
+        let content: Int
     }
 
     /// Kept apart from poster failures: the frame generation for a video is
@@ -105,12 +108,17 @@ actor PosterCache {
         // The poster is checked first, so one that appears later shows up
         // even while the video's still is known to fail.
         if let url {
-            let failed = FailedPoster(key: Key(url: url, width: width), stamp: Self.stamp(of: url))
-            if !failedPosters.contains(failed) {
+            let posterKey = Key(url: url, width: width)
+            let stamp = Self.stamp(of: url)
+            // Read the content only when a failure already matches the cheap
+            // stamp, so a poster that has not failed costs no extra IO.
+            let known = failedPosters.contains { $0.key == posterKey && $0.stamp == stamp }
+            let content = known ? Self.contentHash(of: url) : 0
+            if !failedPosters.contains(where: { $0.key == posterKey && $0.stamp == stamp && $0.content == content }) {
                 if let cgImage = Self.decode(url, maxPixelWidth: maxPixelWidth) {
-                    return store(cgImage, for: failed.key)
+                    return store(cgImage, for: posterKey)
                 }
-                remember(failed)
+                remember(FailedPoster(key: posterKey, stamp: stamp, content: known ? content : Self.contentHash(of: url)))
             }
         }
         guard let fallbackVideo else { return nil }
@@ -210,6 +218,20 @@ actor PosterCache {
             size: (attributes?[.size] as? NSNumber)?.intValue,
             fileNumber: (attributes?[.systemFileNumber] as? NSNumber)?.intValue
         )
+    }
+
+    /// Hash of the first and last 4 KB; 0 when the file can't be read.
+    nonisolated private static func contentHash(of url: URL) -> Int {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return 0 }
+        defer { try? handle.close() }
+        let span = 4_096
+        var hasher = Hasher()
+        if let head = try? handle.read(upToCount: span) { hasher.combine(head) }
+        if let end = try? handle.seekToEnd(), end > UInt64(span) {
+            try? handle.seek(toOffset: max(end - UInt64(span), UInt64(span)))
+            if let tail = try? handle.read(upToCount: span) { hasher.combine(tail) }
+        }
+        return hasher.finalize()
     }
 
     /// Real memory of the decoded bitmap, including any row padding.

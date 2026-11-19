@@ -338,6 +338,26 @@ final class PosterCacheTests: XCTestCase {
         XCTAssertNotNil(after)
     }
 
+    func testPosterReplacedInPlaceWithTheSameStampIsDecodedAgain() async throws {
+        // Same size, modification time and inode as the file that failed: only
+        // the content differs.
+        let valid = try writePoster("valid.jpg", width: 800, height: 450)
+        let jpeg = try Data(contentsOf: valid)
+        let poster = folder.appendingPathComponent("swapped.jpg")
+        try Data(count: jpeg.count).write(to: poster)
+        let fixed = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: fixed], ofItemAtPath: poster.path)
+        let cache = PosterCache()
+        let before = await cache.image(for: poster, maxPixelWidth: 640)
+        XCTAssertNil(before)
+        let handle = try FileHandle(forWritingTo: poster)
+        try handle.write(contentsOf: jpeg)
+        try handle.close()
+        try FileManager.default.setAttributes([.modificationDate: fixed], ofItemAtPath: poster.path)
+        let after = await cache.image(for: poster, maxPixelWidth: 640)
+        XCTAssertNotNil(after)
+    }
+
     func testRemoveDropsEverySizeOfAPoster() async throws {
         let url = try writePoster("a.jpg", width: 2000, height: 1250)
         let cache = PosterCache()
