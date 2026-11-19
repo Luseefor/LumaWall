@@ -49,29 +49,11 @@ enum Lifecycle {
     /// gone (asleep/removed) lets it fire. Short enough to save power promptly, long enough
     /// to ride out a brief sleep/wake flicker.
     static let teardownGrace: TimeInterval = 15.0
-}
 
-/// Reply to a deferred acquire with `contextId`, or fail it when teardown
-/// removed that context while the renderer loaded or played its first
-/// frame. Runs on `Lifecycle.queue`, where teardown runs, so the check and
-/// the reply can't straddle one.
-/// Replies for acquires that reused a surface whose renderer is still being
-/// created. They go out with that create's own reply, once the layer holds
-/// something displayable, instead of handing the agent an empty context.
-private let heldReplies = OSAllocatedUnfairLock<[DisplayKey: [@Sendable () -> Void]]>(initialState: [:])
-
-/// False when no create is seeding `key`, so the caller replies now.
-private func holdReply(for key: DisplayKey, _ send: @escaping @Sendable () -> Void) -> Bool {
-    heldReplies.withLock { held in
-        guard held[key] != nil else { return false }
-        held[key]?.append(send)
-        return true
-    }
-}
-
-private func releaseHeldReplies(for key: DisplayKey) {
-    let sends = heldReplies.withLock { $0.removeValue(forKey: key) } ?? []
-    sends.forEach { $0() }
+    /// Acquire replies waiting for a create's layer to show something. Touched
+    /// ONLY on `queue`, where acquire and teardown run, so a reuse can't
+    /// check it between a create's seed and its reply.
+    nonisolated(unsafe) static var replies = ReplyGate<DisplayKey, @Sendable () -> Void>()
 }
 
 /// The no-video gradient, under any other sublayer. A CAGradientLayer
@@ -92,11 +74,14 @@ private func installGradientFallback(on rootLayer: CALayer) {
     CATransaction.commit(); CATransaction.flush()
 }
 
-private func replyIfContextLive<Reply>(
+/// Reply to a deferred acquire with `contextId`, or fail it when teardown
+/// removed that context first. The closure runs on `Lifecycle.queue`, where teardown
+/// runs, so the check and the reply can't straddle one.
+private func heldReply<Reply>(
     _ boxedReply: SendableBox<Reply>, contextId: UInt32, key: DisplayKey,
     reply: @escaping @Sendable (Any?, (any Error)?) -> Void,
-) {
-    Lifecycle.queue.async {
+) -> @Sendable () -> Void {
+    {
         guard WallpaperState.shared.context(for: key)?.contextId == contextId else {
             extensionLog("  [acquire] context \(contextId) was torn down before its reply, failing the acquire")
             reply(nil, NSError(domain: "LumaWallExtension", code: 5, userInfo: [NSLocalizedDescriptionKey: "Surface was torn down before the acquire replied"]))
@@ -106,6 +91,20 @@ private func replyIfContextLive<Reply>(
     }
 }
 
+/// `token`'s create has put something displayable in `key`'s layer, or
+/// given up: send its reply and those of acquires that reused the surface
+/// meanwhile. A create whose context was torn down sends nothing; teardown
+/// answered its replies.
+private func surfaceReady(_ key: DisplayKey, token: Int) {
+    Lifecycle.queue.async { Lifecycle.replies.ready(key, token: token).forEach { $0() } }
+}
+
+/// Fail the replies waiting on `key`'s context, which was just removed.
+/// MUST be called on `Lifecycle.queue`.
+private func failHeldReplies(for key: DisplayKey) {
+    Lifecycle.replies.close(key).forEach { $0() }
+}
+
 /// Arm (or re-arm) the teardown timer for a display whose live wallpaper was invalidated.
 /// MUST be called on `Lifecycle.queue`.
 private func scheduleTeardown(for key: DisplayKey) {
@@ -113,6 +112,7 @@ private func scheduleTeardown(for key: DisplayKey) {
     let item = DispatchWorkItem {
         Lifecycle.teardownTimers[key] = nil
         let torn = WallpaperState.shared.tearDownContext(for: key)
+        failHeldReplies(for: key)
         extensionLog("  [teardown] grace fired for display \(key.displayID) → \(torn ? "stopped renderer + invalidated CAContext" : "nothing to tear down")")
         ShuffleController.shared.syncActiveWithContexts()
     }
@@ -461,7 +461,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
                     reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
                 }
-                reply(replyObj, nil)
+                if Lifecycle.replies.hold(heldReply(SendableBox(value: replyObj), contextId: existing.contextId, key: key, reply: reply), for: key) {
+                    extensionLog("  [acquire] REUSE role mismatch while display \(key.displayID)'s renderer is being created → reply waits for its seed")
+                } else {
+                    reply(replyObj, nil)
+                }
                 extensionLog("  [acquire] REUSE role mismatch (surface isPreview=\(existing.isPreview), request isPreview=\(isPreview), dest=\(destSize)) → reply only, no resize/switch")
                 return
             }
@@ -486,8 +490,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
                 reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
             }
-            let boxedReuseReply = SendableBox(value: replyObj), reuseContextId = existing.contextId
-            if existing.renderer == nil, holdReply(for: key, { replyIfContextLive(boxedReuseReply, contextId: reuseContextId, key: key, reply: reply) }) {
+            if Lifecycle.replies.hold(heldReply(SendableBox(value: replyObj), contextId: existing.contextId, key: key, reply: reply), for: key) {
                 extensionLog("  [acquire] REUSE while display \(key.displayID)'s renderer is being created → reply waits for its seed")
             } else {
                 reply(replyObj, nil)
@@ -632,11 +635,12 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         if let token = WallpaperState.shared.claimRendererCreate(for: key) {
             traceLog("  Setting up VideoRenderer with: \(videoURL.lastPathComponent) (coldStart=\(coldStart))")
             let boxedRoot = SendableBox(value: rootLayer)
-            // The reply object is non-Sendable; box it to cross into the render Task.
-            let boxedReply = SendableBox(value: replyObj)
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
-            heldReplies.withLock { $0[key] = $0[key] ?? [] }
-            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview, pixelWidth, pixelHeight] in
+            // The reply waits in the gate, with those of acquires that reuse
+            // this surface meanwhile, until surfaceReady for this token.
+            let displaced = Lifecycle.replies.open(key, token: token, reply: heldReply(SendableBox(value: replyObj), contextId: contextId, key: key, reply: reply))
+            displaced.forEach { $0() }
+            Task { [coldStart, boxedRoot, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview, pixelWidth, pixelHeight] in
                 // A cold start replies once create() has seeded the display
                 // layer, so a cache miss seeds the decoded first frame, or the
                 // gradient, rather than leaving the layer empty.
@@ -663,16 +667,15 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     WallpaperState.shared.clearRendererPending(for: key, token: token)
                     // Unblock the acquire regardless, with something displayable.
                     installGradientFallback(on: boxedRoot.value)
-                    replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
-                    releaseHeldReplies(for: key)
+                    surfaceReady(key, token: token)
                     return
                 }
                 guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
-                    // The context was torn down while the renderer loaded:
-                    // don't hand the agent a context that no longer exists.
+                    // The context was torn down while the renderer loaded, and
+                    // teardown failed its replies. A create under the same key
+                    // since then holds its own; this token releases none of them.
                     renderer.stop()
-                    reply(nil, NSError(domain: "LumaWallExtension", code: 5, userInfo: [NSLocalizedDescriptionKey: "Surface was torn down while its renderer loaded"]))
-                    releaseHeldReplies(for: key)
+                    surfaceReady(key, token: token)
                     return
                 }
                 // Cold start: the IOSurface still is now seeded + flushed into the display
@@ -683,8 +686,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                         installGradientFallback(on: boxedRoot.value)
                         seeded = "the gradient layer (\(seeded) didn't reach the display layer)"
                     }
-                    replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
-                    releaseHeldReplies(for: key)
+                    surfaceReady(key, token: token)
                     traceLog("  [acquire] cold start → replied after seeding \(seeded) for \(videoURL.lastPathComponent)")
                 }
                 WallpaperPrefs.shared.setActive(true)
@@ -693,10 +695,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // we've told the agent to swap off it.
                 let heldStill = cachedStill != nil
                 renderer.start(onFirstFrameReady: {
-                    if !coldStart {
-                        replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
-                        releaseHeldReplies(for: key)
-                    }
+                    if !coldStart { surfaceReady(key, token: token) }
                     old?.stop()
                     // Video (or, on failure, the seeded still) is in the display
                     // layer now; the root layer's copy is only memory (a 4K frame
@@ -959,6 +958,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         let removedKeys = WallpaperState.shared.removeContexts(forVideoID: videoID)
         for key in removedKeys {
             cancelTeardown(for: key)
+            failHeldReplies(for: key)
         }
         if !removedKeys.isEmpty {
             if WallpaperState.shared.currentVideoID == videoID {
