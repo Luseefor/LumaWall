@@ -139,20 +139,59 @@ final class StillCacheStoreTests: XCTestCase {
     }
 
     func testADirectoryThatRefusesAttributesIsBypassed() async throws {
-        let legacy = try place(hashA, qhd, version: nil, usedAgo: 10)
+        // A complete v1 still the refused directory must not serve.
+        let v1 = try place(hashA, qhd, version: "v1", usedAgo: 10)
         let decodes = OSAllocatedUnfairLock(initialState: 0)
         let encode: @Sendable () async -> Data? = {
             decodes.withLock { $0 += 1 }
             return Self.bmp(Self.blue)
         }
         let store = StillCacheStore(tag: { _, _, _ in EPERM })
-        let first = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd, encode: encode)
-        let again = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK, encode: encode)
+        let first = await store.write(in: dir, choiceHash: hashA, version: "v2", size: qhd, encode: encode)
+        let again = await store.write(in: dir, choiceHash: hashA, version: "v2", size: fourK, encode: encode)
         XCTAssertEqual(first.outcome, .refused(errno: EPERM))
         XCTAssertEqual(again.outcome, .refused(errno: EPERM))
         XCTAssertEqual(decodes.withLock { $0 }, 1, "a refused directory must not be decoded for again")
         XCTAssertNil(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
-        XCTAssertEqual(names(), [legacy.lastPathComponent])
+        XCTAssertEqual(names(), [v1.lastPathComponent])
+    }
+
+    func testARefusedLastUseTagMarksTheDirectory() async {
+        let decodes = OSAllocatedUnfairLock(initialState: 0)
+        let encode: @Sendable () async -> Data? = {
+            decodes.withLock { $0 += 1 }
+            return Self.bmp(Self.blue)
+        }
+        let store = StillCacheStore(tag: { _, name, _ in name == StillCacheStore.usedAttribute ? EACCES : 0 })
+        let first = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd, encode: encode)
+        let again = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK, encode: encode)
+        XCTAssertEqual(first.outcome, .refused(errno: EACCES))
+        XCTAssertEqual(again.outcome, .refused(errno: EACCES))
+        XCTAssertEqual(decodes.withLock { $0 }, 1)
+    }
+
+    func testAWriteDecodingWhenTheDirectoryIsRefusedDoesntPublish() async {
+        let tags = OSAllocatedUnfairLock(initialState: 0)
+        let store = StillCacheStore(tag: { _, _, _ in
+            tags.withLock { $0 += 1 }
+            return EPERM
+        })
+        let gate = StillTestGate()
+        let dir = dir!, hashA = hashA, qhd = qhd
+        let suspended = Task {
+            await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
+                await gate.pass()
+                return Self.bmp(Self.blue)
+            }
+        }
+        guard await gate.reached() else { gate.open(); return XCTFail("the first write never started decoding") }
+        let refused = await store.write(in: dir, choiceHash: hashB, version: "v1", size: qhd) { Self.bmp(Self.red) }
+        XCTAssertEqual(refused.outcome, .refused(errno: EPERM))
+        gate.open()
+        let late = await suspended.value
+        XCTAssertEqual(late.outcome, .refused(errno: EPERM))
+        XCTAssertEqual(tags.withLock { $0 }, 1, "the suspended write tried to publish into a refused directory")
+        XCTAssertEqual(names(), [])
     }
 
     // MARK: Interrupted writes

@@ -124,6 +124,10 @@ actor StillCacheStore {
 
     /// The outcome when no decode is needed, or nil when it is.
     private func settle(_ key: StillCacheKey, version: String, wallpaper: String, in dir: URL) -> (Outcome, StillCacheEntry?)? {
+        // Also runs after the decode: another write may have found the
+        // directory refused while this one was suspended.
+        let scope = dir.standardizedFileURL.path
+        if let refused = refusals.withLock({ $0[scope] }) { return (.refused(errno: refused), nil) }
         guard latest[wallpaper] == version else { return (.superseded, nil) }
         switch StillCache.source(for: key, version: version, in: Self.scan(dir)) {
         case let .existing(entry):
@@ -166,8 +170,8 @@ actor StillCacheStore {
             result = .failed
         } else if case let error = tag(temp, Self.versionAttribute, version), error != 0 {
             result = Self.permanentRefusals.contains(error) ? .refused(error) : .failed
-        } else if tag(temp, Self.usedAttribute, String(now)) != 0 {
-            result = .failed
+        } else if case let error = tag(temp, Self.usedAttribute, String(now)), error != 0 {
+            result = Self.permanentRefusals.contains(error) ? .refused(error) : .failed
         } else if rename(temp.path, dir.appendingPathComponent(entry.fileName).path) != 0 {
             result = .failed
         } else {
