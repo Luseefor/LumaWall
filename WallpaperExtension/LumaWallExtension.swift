@@ -34,12 +34,18 @@ final class LumaWallExtension: NSObject, AppExtension {
             PowerMonitor.shared.startMonitoring()
             Task {
                 for await powerState in PowerMonitor.shared.stateChanges() {
-                    let state = WallpaperState.shared
-                    WallpaperPrefs.shared.applyPolicies(
-                        presentationMode: state.presentationMode,
-                        activityState: state.activityState,
-                        powerState: powerState,
-                    )
+                    // On the queue `updateBody` runs on. A read it takes during
+                    // a lock can post here; recomputing first, with the new
+                    // mode already stored, would play the lock screen without
+                    // the ramp and drop the animated update as a duplicate.
+                    Lifecycle.queue.async {
+                        let state = WallpaperState.shared
+                        WallpaperPrefs.shared.applyPolicies(
+                            presentationMode: state.presentationMode,
+                            activityState: state.activityState,
+                            powerState: powerState,
+                        )
+                    }
                 }
             }
         } else {
