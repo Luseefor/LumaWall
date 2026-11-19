@@ -210,6 +210,8 @@ final class LumaWallExtension: NSObject, AppExtension {
             { _, _, _, _, _ in
                 VideoLibrary.shared.scan()
                 extensionLog("[Extension] Library changed notification received, re-scanned")
+                // A copy may have been published for a held preview.
+                WallpaperState.shared.forPreviewRenderers { $0.libraryDidChange() }
                 SettingsPush.libraryDidChange()
             },
             "app.lumawall.personal.libraryChanged" as CFString,

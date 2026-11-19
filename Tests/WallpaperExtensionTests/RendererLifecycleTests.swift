@@ -352,6 +352,53 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.assetChanged), [.beginReset(.restart, generation: 1)])
     }
 
+    func testPausedLiveTakeoverOfAHeldPreviewShowsItsFirstFrame() {
+        // The seed is the gradient: a paused live surface shows the video's
+        // frame, as a live renderer created paused does.
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false, holding: true))
+        XCTAssertEqual(life.handle(.liveTakeover(keepsSeed: false)), [.beginReset(.restart, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
+        assertStoppedAndIdle(life)
+    }
+
+    func testLiveTakeoverBuildsItsFrameThroughASleepAndAPause() {
+        // The takeover's tier plays, then the displays sleep mid-flush and a
+        // pause lands before wake: the gradient must still give way.
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false, holding: true))
+        XCTAssertEqual(life.handle(.liveTakeover(keepsSeed: false)), [.beginReset(.restart, generation: 1)])
+        _ = life.handle(.policy(.full, animated: false))
+        _ = life.handle(.displaySleep)
+        _ = life.handle(.resetFlushed(generation: 1))
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.buildPipeline(.restart)])
+    }
+
+    func testLiveTakeoverKeepsASeedThatIsTheChoicesStill() {
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false, holding: true))
+        XCTAssertEqual(life.handle(.liveTakeover(keepsSeed: true)), [])
+        XCTAssertEqual(life.readers, .freed)
+    }
+
+    func testLiveTakeoverRebuildsNothingOnceThePreviewHasBuilt() {
+        // Built for a tier, then deep-paused: the frame on screen is the video's.
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false, holding: true))
+        _ = life.handle(.policy(.reduced, animated: false))
+        _ = life.handle(.resetFlushed(generation: 1))
+        _ = life.handle(.pipelineBuilt(true))
+        _ = life.handle(.policy(.paused, animated: false))
+        _ = life.handle(.deepPauseFired)
+        XCTAssertEqual(life.handle(.liveTakeover(keepsSeed: false)), [])
+        var unheld = RendererLifecycle(policy: .paused)
+        _ = unheld.handle(.started(displayAsleep: false))
+        _ = unheld.handle(.pipelineBuilt(true))
+        XCTAssertEqual(unheld.handle(.liveTakeover(keepsSeed: false)), [])
+    }
+
     func testSwitchBeforeStartIsLeftToStart() {
         var life = RendererLifecycle()
         XCTAssertEqual(life.handle(.assetChanged), [])

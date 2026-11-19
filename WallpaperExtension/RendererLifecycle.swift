@@ -89,6 +89,10 @@ struct RendererLifecycle: Equatable {
         /// `holding`: a preview showing its seeded still builds none; the
         /// readers start out freed and build once it can play.
         case started(displayAsleep: Bool, holding: Bool = false)
+        /// A live request took over a preview's surface. A held preview whose
+        /// seed isn't the choice's still (`keepsSeed` false: the gradient)
+        /// builds its first frame, which a paused live surface shows.
+        case liveTakeover(keepsSeed: Bool)
         case pipelineBuilt(Bool)
         case policy(PlaybackPolicy, animated: Bool)
         /// The renderer loaded a different asset (switch or battery-tier copy).
@@ -145,6 +149,9 @@ struct RendererLifecycle: Equatable {
     /// since the fallback still covers a paused renderer and a first frame
     /// would only replace it (#30).
     private(set) var retrying = false
+    /// A held preview's seeded still is on screen and no pipeline has been
+    /// built. Any reset clears it.
+    private(set) var holdingSeed = false
     /// Bumped whenever a reset starts, so a stale flush completion is dropped.
     private(set) var generation = 0
 
@@ -182,6 +189,11 @@ struct RendererLifecycle: Equatable {
             guard readers == .notStarted else { return [] }
             displayAsleep = asleep
             readers = holding ? .freed : .building
+            holdingSeed = holding
+        case let .liveTakeover(keepsSeed):
+            guard holdingSeed, readers == .freed, resetInFlight == nil else { return [] }
+            holdingSeed = false
+            if !keepsSeed { requestReset(.restart, &effects) }
         case let .pipelineBuilt(ok):
             guard readers == .building else { return [] }
             if ok {
@@ -363,6 +375,7 @@ struct RendererLifecycle: Equatable {
             retryArmed = false
             effects.append(.disarmRetry)
         }
+        holdingSeed = false
         generation += 1
         resetInFlight = kind
         feeding = false

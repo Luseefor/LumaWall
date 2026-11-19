@@ -1,4 +1,5 @@
 import Foundation
+import os
 import XCTest
 
 /// The files a renderer opens on create, switch, tier change, and wake. A
@@ -207,15 +208,32 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
     }
 
-    func testPreviewThatOpensTheOriginalHoldsItWithoutDecoding() {
+    private func holdsOriginal(_ selector: @escaping RendererCopy.Selector, tier: PlaybackPolicy) async -> Bool {
+        await RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector, tier: tier, displayPixels: display) { self.open($0) != nil }
+    }
+
+    func testPreviewThatOpensTheOriginalHoldsItWithoutDecoding() async {
         let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/a.mp4") }
-        XCTAssertTrue(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: originalOnly, tier: .full, displayPixels: display))
-        XCTAssertFalse(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector("a"), tier: .full, displayPixels: display))
+        let holdsWithNoCopy = await holdsOriginal(originalOnly, tier: .full)
+        XCTAssertTrue(holdsWithNoCopy)
+        XCTAssertEqual(attempts, [], "the original isn't probed")
+        let holdsWithCopy = await holdsOriginal(selector("a"), tier: .full)
+        XCTAssertFalse(holdsWithCopy)
         // A paused preview opens the Full copy, which is cheap to decode.
-        XCTAssertFalse(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector("a"), tier: .paused, displayPixels: display))
+        let holdsPaused = await holdsOriginal(selector("a"), tier: .paused)
+        XCTAssertFalse(holdsPaused)
         let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         XCTAssertTrue(copy.isOriginal(URL(fileURLWithPath: "/videos/./a.mp4")))
         XCTAssertFalse(copy.isOriginal(url("a.full.mov")))
+    }
+
+    func testPreviewWhoseCopyHasNoVideoHoldsTheOriginal() async {
+        // The renderer falls back to the original and holds, so the seed
+        // must not decode the original either.
+        playable.remove("a.full.mov")
+        let holds = await holdsOriginal(selector("a"), tier: .full)
+        XCTAssertTrue(holds)
+        XCTAssertEqual(attempts, ["a.full.mov"])
     }
 
     func testPreviewHoldsItsSeedOnlyWhileTheSeedIsOfTheChoiceItOpened() {
@@ -228,6 +246,28 @@ final class RendererCopyTests: XCTestCase {
         let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/b.mp4") }
         XCTAssertEqual(copy.switchTo(url("b.mp4"), selector: originalOnly, current: url("a.mp4"), tier: .full, displayPixels: display, hold: false, open: open), opened("b.mp4"))
         XCTAssertFalse(copy.previewHoldsSeed(playing: url("b.mp4"), seedOf: url("a.mp4")))
+    }
+
+    func testHeldPreviewPlaysACopyPublishedLater() {
+        // The selector reads the library each time, so the recheck after a
+        // rescan moves a held preview onto the new copy.
+        let published = OSAllocatedUnfairLock(initialState: false)
+        let library: RendererCopy.Selector = { _, tier in
+            URL(fileURLWithPath: published.withLock { $0 } ? "/videos/a.\(tier).mov" : "/videos/a.mp4")
+        }
+        var copy = RendererCopy(original: url("a.mp4"), selector: library)
+        XCTAssertEqual(copy.previewTier(.full, displayPixels: display, playing: url("a.mp4")), .paused)
+        published.withLock { $0 = true }
+        XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
+        XCTAssertEqual(copy.retier(current: url("a.mp4"), tier: .full, displayPixels: display, open: open), opened("a.full.mov"))
+    }
+
+    func testLiveTakeoverKeepsOnlyAStillOfTheActiveChoice() {
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertTrue(copy.liveKeepsSeed(seedOf: url("a.mp4"), seedIsStill: true))
+        XCTAssertFalse(copy.liveKeepsSeed(seedOf: url("a.mp4"), seedIsStill: false), "the gradient")
+        XCTAssertFalse(copy.liveKeepsSeed(seedOf: url("b.mp4"), seedIsStill: true), "another choice's still")
+        XCTAssertFalse(copy.liveKeepsSeed(seedOf: nil, seedIsStill: false), "nothing seeded")
     }
 
     // MARK: Tier changes

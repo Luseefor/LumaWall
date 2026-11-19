@@ -81,10 +81,13 @@ private func reframeGradientFallback(on rootLayer: CALayer) {
 }
 
 /// A preview renderer that will open `videoURL`'s original holds its seed
-/// without decoding (#35), so the seed must not decode either.
-private func previewHoldsOriginal(_ videoURL: URL, selector: @escaping RendererCopy.Selector, displayID: UInt32?, pixelWidth: Int, pixelHeight: Int) -> Bool {
+/// without decoding (#35), so the seed must not decode either. That
+/// includes a copy with no video track, which leaves it on the original.
+private func previewHoldsOriginal(_ videoURL: URL, selector: @escaping RendererCopy.Selector, displayID: UInt32?, pixelWidth: Int, pixelHeight: Int) async -> Bool {
     let tier = LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: true)
-    return RendererCopy.previewHoldsOriginal(videoURL, selector: selector, tier: tier, displayPixels: CGSize(width: pixelWidth, height: pixelHeight))
+    return await RendererCopy.previewHoldsOriginal(videoURL, selector: selector, tier: tier, displayPixels: CGSize(width: pixelWidth, height: pixelHeight)) { url in
+        (try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first) != nil
+    }
 }
 
 /// Reply to a deferred acquire with `contextId`, or fail it when teardown
@@ -115,11 +118,12 @@ private func surfaceReady(_ key: DisplayKey, token: Int) {
 /// What a new renderer's display layer is seeded with: the cached still,
 /// else the video's decoded first frame (unless `decode` is false), else the
 /// gradient, so the layer shows something before the first video frame.
-private func seedStill(cached: CGImage?, videoURL: URL, decode: Bool = true) async -> (image: CGImage?, source: String) {
-    if let cached { return (cached, "the cached still") }
-    if decode, let frame = await firstFrameImage(of: videoURL) { return (frame, "the decoded first frame") }
-    if let gradient = VideoRenderer.makeGradientStill() { return (gradient, "the gradient") }
-    return (nil, "nothing")
+/// `isStill`: the image is a frame of the video, not the gradient.
+private func seedStill(cached: CGImage?, videoURL: URL, decode: Bool = true) async -> (image: CGImage?, source: String, isStill: Bool) {
+    if let cached { return (cached, "the cached still", true) }
+    if decode, let frame = await firstFrameImage(of: videoURL) { return (frame, "the decoded first frame", true) }
+    if let gradient = VideoRenderer.makeGradientStill() { return (gradient, "the gradient", false) }
+    return (nil, "nothing", false)
 }
 
 /// Fail the replies waiting on `key`'s context, which was just removed.
@@ -563,12 +567,12 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     // create() replaces the no-video gradient this surface
                     // shows, and the agent already hosts it: seed it even on a
                     // cache miss so the layer never goes empty.
-                    let holds = isPreview && previewHoldsOriginal(videoURL, selector: selector, displayID: displayID, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
-                    let seed = await seedStill(cached: loadStill(videoURL), videoURL: videoURL, decode: !holds).image
+                    let holds = isPreview ? await previewHoldsOriginal(videoURL, selector: selector, displayID: displayID, pixelWidth: pixelWidth, pixelHeight: pixelHeight) : false
+                    let seed = await seedStill(cached: loadStill(videoURL), videoURL: videoURL, decode: !holds)
                     let renderer: VideoRenderer
                     do {
                         renderer = try await VideoRenderer.create(
-                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
+                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed.image, stillIsOfVideo: seed.isStill,
                             fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                             isPreview: isPreview,
@@ -690,14 +694,14 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // layer, so a cache miss seeds the decoded first frame, or the
                 // gradient, rather than leaving the layer empty. A preview that
                 // will hold the original shows its seed and decodes nothing.
-                let holds = isPreview && previewHoldsOriginal(videoURL, selector: selector, displayID: displayID, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
-                var (seed, seeded) = coldStart || holds
+                let holds = isPreview ? await previewHoldsOriginal(videoURL, selector: selector, displayID: displayID, pixelWidth: pixelWidth, pixelHeight: pixelHeight) : false
+                var (seed, seeded, seedIsStill) = coldStart || holds
                     ? await seedStill(cached: cachedStill, videoURL: videoURL, decode: !holds)
-                    : (cachedStill, cachedStill == nil ? "nothing" : "the cached still")
+                    : (cachedStill, cachedStill == nil ? "nothing" : "the cached still", cachedStill != nil)
                 let renderer: VideoRenderer
                 do {
                     renderer = try await VideoRenderer.create(
-                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
+                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed, stillIsOfVideo: seedIsStill,
                         fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         isPreview: isPreview,
