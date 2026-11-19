@@ -207,6 +207,17 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
     }
 
+    func testPreviewThatOpensTheOriginalHoldsItWithoutDecoding() {
+        let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/a.mp4") }
+        XCTAssertTrue(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: originalOnly, tier: .full, displayPixels: display))
+        XCTAssertFalse(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector("a"), tier: .full, displayPixels: display))
+        // A paused preview opens the Full copy, which is cheap to decode.
+        XCTAssertFalse(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector("a"), tier: .paused, displayPixels: display))
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertTrue(copy.isOriginal(URL(fileURLWithPath: "/videos/./a.mp4")))
+        XCTAssertFalse(copy.isOriginal(url("a.full.mov")))
+    }
+
     // MARK: Tier changes
 
     func testPausedRendererResumingOnBatteryMovesToTheBatteryCopy() async {

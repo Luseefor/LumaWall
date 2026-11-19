@@ -130,10 +130,25 @@ struct RendererCopy {
     /// playing means the copy didn't open.
     func previewTier(_ tier: PlaybackPolicy, displayPixels: CGSize, playing: URL? = nil) -> PlaybackPolicy {
         guard tier != .paused else { return .paused }
-        let original = active.original.standardizedFileURL
-        if active.selector(displayPixels, tier).standardizedFileURL == original { return .paused }
-        if let playing, playing.standardizedFileURL == original { return .paused }
+        if isOriginal(active.selector(displayPixels, tier)) { return .paused }
+        if let playing, isOriginal(playing) { return .paused }
         return tier
+    }
+
+    /// Whether `url` is the active choice's original. A preview that opened
+    /// it holds a frame, and its seeded still can be that frame, so `start`
+    /// builds no pipeline for it (#35).
+    func isOriginal(_ url: URL) -> Bool {
+        url.standardizedFileURL == active.original.standardizedFileURL
+    }
+
+    /// Whether a new preview of `original` would open the original for
+    /// `tier`, the way `start` picks its file, so its seed needn't decode a
+    /// first frame (#35).
+    static func previewHoldsOriginal(_ original: URL, selector: @escaping Selector, tier: PlaybackPolicy, displayPixels: CGSize) -> Bool {
+        let copy = RendererCopy(original: original, selector: selector)
+        let played = copy.previewTier(tier, displayPixels: displayPixels)
+        return copy.isOriginal(candidates(original, selector: selector, tier: played, displayPixels: displayPixels)[0])
     }
 
     /// Where the next loop's reader comes from.

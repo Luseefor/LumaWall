@@ -326,6 +326,32 @@ final class RendererLifecycleTests: XCTestCase {
         assertStoppedAndIdle(life)
     }
 
+    func testHeldPreviewStartsWithNoPipeline() {
+        // A preview with no copy for its tile shows its still; decoding the
+        // original's first frame for it was waste (#35).
+        var life = RendererLifecycle(policy: .paused)
+        XCTAssertEqual(life.handle(.started(displayAsleep: false, holding: true)), [])
+        XCTAssertEqual(life.readers, .freed)
+        XCTAssertFalse(life.isActive)
+        assertStoppedAndIdle(life)
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [], "no build is running to report")
+    }
+
+    func testHeldPreviewBuildsItsPipelineWhenItCanPlay() {
+        // A copy appeared or the tier changed: build then, from 0.
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false, holding: true))
+        XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [.beginReset(.resume, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.resume)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 1)])
+    }
+
+    func testHeldPreviewRebuildsForASwitch() {
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false, holding: true))
+        XCTAssertEqual(life.handle(.assetChanged), [.beginReset(.restart, generation: 1)])
+    }
+
     func testSwitchBeforeStartIsLeftToStart() {
         var life = RendererLifecycle()
         XCTAssertEqual(life.handle(.assetChanged), [])

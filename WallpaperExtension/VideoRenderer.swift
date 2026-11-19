@@ -275,12 +275,21 @@ final class VideoRenderer: @unchecked Sendable {
                 adopt(loaded)
             }
             send(.policy(playedTier(requestedTier, playing: asset.url), animated: false))
+            // A preview on the original holds its seeded still rather than
+            // decode the original's first frame for a small tile (#35). The
+            // lifecycle builds a pipeline once a copy or tier lets it play.
+            let holding = isPreview && seededStill && copy.isOriginal(asset.url)
             // Starts the clock and the feed once the pipeline reports built,
             // unless the displays sleep or a pause was applied before this ran.
             // The global flag is read here, on the queue: sleep sets it before
             // sending `displayDidSleep` to the renderers it knows, so a renderer
             // it missed still sees it.
-            send(.started(displayAsleep: WallpaperState.shared.isDisplayAsleep))
+            send(.started(displayAsleep: WallpaperState.shared.isDisplayAsleep, holding: holding))
+            if holding {
+                traceLog("  [start #\(debugID)] preview holds its still, no pipeline for \(asset.url.lastPathComponent)")
+                onFirstFrameReady?()
+                return
+            }
             let built = buildFirstPipeline()
             if !built {
                 extensionLog("  [start #\(debugID)] FAILED to start reading \(asset.url.lastPathComponent)")

@@ -43,7 +43,7 @@ struct RendererLifecycle: Equatable {
         /// `buildPipeline` is running; `.pipelineBuilt` reports the result.
         case building
         case live
-        /// Freed by deep pause.
+        /// Freed by deep pause, or never built for a held preview.
         case freed
         /// A reset's flush completed while a gate was shut, or during a retry
         /// while paused; build once the gates open (and, for a retry, once
@@ -86,7 +86,9 @@ struct RendererLifecycle: Equatable {
 
     enum Event: Equatable {
         /// `start()` is building the first pipeline; `.pipelineBuilt` follows.
-        case started(displayAsleep: Bool)
+        /// `holding`: a preview showing its seeded still builds none; the
+        /// readers start out freed and build once it can play.
+        case started(displayAsleep: Bool, holding: Bool = false)
         case pipelineBuilt(Bool)
         case policy(PlaybackPolicy, animated: Bool)
         /// The renderer loaded a different asset (switch or battery-tier copy).
@@ -176,10 +178,10 @@ struct RendererLifecycle: Equatable {
         var effects: [Effect] = []
         var animated = false
         switch event {
-        case let .started(asleep):
+        case let .started(asleep, holding):
             guard readers == .notStarted else { return [] }
             displayAsleep = asleep
-            readers = .building
+            readers = holding ? .freed : .building
         case let .pipelineBuilt(ok):
             guard readers == .building else { return [] }
             if ok {

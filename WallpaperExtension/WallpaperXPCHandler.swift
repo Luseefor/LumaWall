@@ -80,6 +80,13 @@ private func reframeGradientFallback(on rootLayer: CALayer) {
     rootLayer.sublayers?.filter { $0 is CAGradientLayer }.forEach { $0.frame = rootLayer.bounds }
 }
 
+/// A preview renderer that will open `videoURL`'s original holds its seed
+/// without decoding (#35), so the seed must not decode either.
+private func previewHoldsOriginal(_ videoURL: URL, selector: @escaping RendererCopy.Selector, displayID: UInt32?, pixelWidth: Int, pixelHeight: Int) -> Bool {
+    let tier = LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: true)
+    return RendererCopy.previewHoldsOriginal(videoURL, selector: selector, tier: tier, displayPixels: CGSize(width: pixelWidth, height: pixelHeight))
+}
+
 /// Reply to a deferred acquire with `contextId`, or fail it when teardown
 /// removed that context first. The closure runs on `Lifecycle.queue`, where teardown
 /// runs, so the check and the reply can't straddle one.
@@ -106,11 +113,11 @@ private func surfaceReady(_ key: DisplayKey, token: Int) {
 }
 
 /// What a new renderer's display layer is seeded with: the cached still,
-/// else the video's decoded first frame, else the gradient, so the layer
-/// shows something before the first video frame.
-private func seedStill(cached: CGImage?, videoURL: URL) async -> (image: CGImage?, source: String) {
+/// else the video's decoded first frame (unless `decode` is false), else the
+/// gradient, so the layer shows something before the first video frame.
+private func seedStill(cached: CGImage?, videoURL: URL, decode: Bool = true) async -> (image: CGImage?, source: String) {
     if let cached { return (cached, "the cached still") }
-    if let frame = await firstFrameImage(of: videoURL) { return (frame, "the decoded first frame") }
+    if decode, let frame = await firstFrameImage(of: videoURL) { return (frame, "the decoded first frame") }
     if let gradient = VideoRenderer.makeGradientStill() { return (gradient, "the gradient") }
     return (nil, "nothing")
 }
@@ -556,7 +563,8 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     // create() replaces the no-video gradient this surface
                     // shows, and the agent already hosts it: seed it even on a
                     // cache miss so the layer never goes empty.
-                    let seed = await seedStill(cached: loadStill(videoURL), videoURL: videoURL).image
+                    let holds = isPreview && previewHoldsOriginal(videoURL, selector: selector, displayID: displayID, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+                    let seed = await seedStill(cached: loadStill(videoURL), videoURL: videoURL, decode: !holds).image
                     let renderer: VideoRenderer
                     do {
                         renderer = try await VideoRenderer.create(
@@ -680,9 +688,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             Task { [coldStart, boxedRoot, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview, pixelWidth, pixelHeight] in
                 // A cold start replies once create() has seeded the display
                 // layer, so a cache miss seeds the decoded first frame, or the
-                // gradient, rather than leaving the layer empty.
-                var (seed, seeded) = coldStart
-                    ? await seedStill(cached: cachedStill, videoURL: videoURL)
+                // gradient, rather than leaving the layer empty. A preview that
+                // will hold the original shows its seed and decodes nothing.
+                let holds = isPreview && previewHoldsOriginal(videoURL, selector: selector, displayID: displayID, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+                var (seed, seeded) = coldStart || holds
+                    ? await seedStill(cached: cachedStill, videoURL: videoURL, decode: !holds)
                     : (cachedStill, cachedStill == nil ? "nothing" : "the cached still")
                 let renderer: VideoRenderer
                 do {
