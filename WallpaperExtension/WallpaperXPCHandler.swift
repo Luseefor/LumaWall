@@ -51,6 +51,24 @@ enum Lifecycle {
     static let teardownGrace: TimeInterval = 15.0
 }
 
+/// Reply to a deferred acquire with `contextId`, or fail it when teardown
+/// removed that context while the renderer loaded or played its first
+/// frame. Runs on `Lifecycle.queue`, where teardown runs, so the check and
+/// the reply can't straddle one.
+private func replyIfContextLive<Reply>(
+    _ boxedReply: SendableBox<Reply>, contextId: UInt32, key: DisplayKey,
+    reply: @escaping @Sendable (Any?, (any Error)?) -> Void,
+) {
+    Lifecycle.queue.async {
+        guard WallpaperState.shared.context(for: key)?.contextId == contextId else {
+            extensionLog("  [acquire] context \(contextId) was torn down before its reply, failing the acquire")
+            reply(nil, NSError(domain: "LumaWallExtension", code: 5, userInfo: [NSLocalizedDescriptionKey: "Surface was torn down before the acquire replied"]))
+            return
+        }
+        reply(boxedReply.value, nil)
+    }
+}
+
 /// Arm (or re-arm) the teardown timer for a display whose live wallpaper was invalidated.
 /// MUST be called on `Lifecycle.queue`.
 private func scheduleTeardown(for key: DisplayKey) {
@@ -92,6 +110,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
     /// the thumbnail service), set in `accept(connection:)`. Logged so acquire and
     /// invalidation can be attributed to a specific connection.
     var connectionPID: Int32 = -1
+
+    /// Unique per connection (the agent reuses its PID across reconnects), so
+    /// an invalidate can be matched to the connection that acquired.
+    let connectionSerial = WallpaperXPCHandler.serials.withLock { $0 += 1; return $0 }
+    private static let serials = OSAllocatedUnfairLock(initialState: 0)
 
     /// Whether this connection's most recent acquire was a Settings *preview*
     /// (`isPreview: true`). A preview connection reports its own presentation state
@@ -227,6 +250,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
     private func acquireBody(id: Any?, request: Any?, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
         traceLog("=== ACQUIRE ===")
+        LumaWallExtension.catchUpDisplaySleep()
 
         // Extract destination size from WallpaperCreationRequestXPC
         var destSize = CGSize(width: 2_560, height: 1_440) // fallback
@@ -358,8 +382,12 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         let key = DisplayKey(displayID: displayID0, surfaceUUID: surfaceUUID)
         WallpaperState.shared.registerWallpaperID(surfaceUUID, key: key)
         // A re-acquire of THIS surface (display woke / preview refresh / switch) cancels its
-        // pending teardown so a brief invalidate→re-acquire flicker doesn't drop it.
+        // pending teardown so a brief invalidate→re-acquire flicker doesn't drop it,
+        // and resumes the playback the invalidate stopped.
         cancelTeardown(for: key)
+        if WallpaperState.shared.noteAcquire(for: key, byPreview: isPreview, connection: connectionSerial) == true {
+            extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
+        }
         let videoURL = findVideoURL(forChoice: renderChoice)
         let cachedStill = loadCachedSnapshotImage(forChoice: choiceConfiguration)
 
@@ -437,12 +465,12 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 renderer.switchVideo(to: videoURL, variantSelector: selector)
                 WallpaperState.shared.updateVideoID(choiceConfiguration, for: key)
                 WallpaperPrefs.shared.setActive(true)
-            } else if WallpaperState.shared.claimRendererCreate(for: key) {
+            } else if let token = WallpaperState.shared.claimRendererCreate(for: key) {
                 // Context exists but no renderer yet AND no create already in flight,
                 // attach one to the existing root layer. The claim prevents a racing
                 // (preview) acquire from creating a duplicate renderer on the same layer.
                 let boxedRoot = SendableBox(value: existing.rootLayer)
-                Task { [boxedRoot, videoURL, cachedStill, selector, key, choiceConfiguration, displayID, isPreview] in
+                Task { [boxedRoot, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
                     let renderer: VideoRenderer
                     do {
                         renderer = try await VideoRenderer.create(
@@ -451,10 +479,13 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                         )
                     } catch {
                         extensionLog("  [Renderer] swap create failed: \(error)")
-                        WallpaperState.shared.clearRendererPending(for: key)
+                        WallpaperState.shared.clearRendererPending(for: key, token: token)
                         return
                     }
-                    let old = WallpaperState.shared.setRenderer(renderer, videoID: choiceConfiguration, for: key)
+                    guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
+                        renderer.stop()
+                        return
+                    }
                     old?.stop()
                     WallpaperPrefs.shared.setActive(true)
                     renderer.start()
@@ -501,7 +532,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Install the persistent slot now (renderer added async) so a concurrent
         // acquire for the same display reuses this context instead of creating another.
         WallpaperState.shared.installContext(
-            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor),
+            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor, slot: SurfaceSlot(acquiredBy: connectionSerial)),
             for: key,
         )
         extensionLog("  Created context \(contextId) for display \(key.displayID)")
@@ -559,13 +590,13 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
         // Claim the single create slot for this display. If a racing (preview)
         // acquire beat us to it, skip, exactly one renderer per display.
-        if WallpaperState.shared.claimRendererCreate(for: key) {
+        if let token = WallpaperState.shared.claimRendererCreate(for: key) {
             traceLog("  Setting up VideoRenderer with: \(videoURL.lastPathComponent) (coldStart=\(coldStart))")
             let boxedRoot = SendableBox(value: rootLayer)
             // The reply object is non-Sendable; box it to cross into the render Task.
             let boxedReply = SendableBox(value: replyObj)
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
-            Task { [coldStart, boxedRoot, boxedReply, videoURL, cachedStill, selector, key, choiceConfiguration, displayID, isPreview] in
+            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
                 let renderer: VideoRenderer
                 do {
                     renderer = try await VideoRenderer.create(
@@ -574,24 +605,31 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     )
                 } catch {
                     extensionLog("  [Renderer] Failed to create: \(error)")
-                    WallpaperState.shared.clearRendererPending(for: key)
-                    reply(boxedReply.value, nil) // unblock the acquire regardless (create failed)
+                    WallpaperState.shared.clearRendererPending(for: key, token: token)
+                    // Unblock the acquire regardless (create failed).
+                    replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
+                    return
+                }
+                guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
+                    // The context was torn down while the renderer loaded:
+                    // don't hand the agent a context that no longer exists.
+                    renderer.stop()
+                    reply(nil, NSError(domain: "LumaWallExtension", code: 5, userInfo: [NSLocalizedDescriptionKey: "Surface was torn down while its renderer loaded"]))
                     return
                 }
                 // Cold start: the IOSurface still is now seeded + flushed into the display
                 // layer, so reply. The agent hosts our context already showing the still
                 // (no black gap), and video plays over it.
                 if coldStart {
-                    reply(boxedReply.value, nil)
+                    replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
                     traceLog("  [acquire] cold start → replied after still seeded for \(videoURL.lastPathComponent)")
                 }
-                let old = WallpaperState.shared.setRenderer(renderer, videoID: choiceConfiguration, for: key)
                 WallpaperPrefs.shared.setActive(true)
                 // Switch: reply only once the first video frame is composited (cold start
                 // already replied with the still). Either way, stop the old renderer once
                 // we've told the agent to swap off it.
                 renderer.start(onFirstFrameReady: {
-                    if !coldStart { reply(boxedReply.value, nil) }
+                    if !coldStart { replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply) }
                     old?.stop()
                     // After the reply so a pre-first-frame pause can't stall the
                     // acquire: apply pause conditions that predate this process
@@ -743,9 +781,18 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             }
             reply(nil); return
         }
-        WallpaperState.shared.forgetWallpaperID(uuid)
+        // Nobody hosts the surface now: stop decoding at once, but keep the
+        // context and its frame so a re-acquire within the grace is seamless.
+        // An ambiguous invalidate (another open connection reacquired since,
+        // or the picker shares the surface) keeps playing through the grace,
+        // as on main, and keeps the id so the owner's invalidate still lands.
+        let action = WallpaperState.shared.invalidate(key, by: connectionSerial)
+        if action?.retiresWallpaperID ?? true {
+            WallpaperState.shared.forgetWallpaperID(uuid)
+        }
         scheduleTeardown(for: key)
-        extensionLog("=== INVALIDATE === UUID \(uuid) → tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
+        let stopped = action == .graceOnly ? "ambiguous (reacquired elsewhere or shared with the picker), keeps playing" : "stopped playback"
+        extensionLog("=== INVALIDATE === UUID \(uuid) → \(stopped), tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
         reply(nil)
     }
 

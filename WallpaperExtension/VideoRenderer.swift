@@ -344,9 +344,10 @@ final class VideoRenderer: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, isRunning else { return }
             let tier = tierSource()
-            switch copy.switchTo(url, selector: variantSelector, current: asset.url, tier: tier, displayPixels: displayPixelSize, asleep: lifecycle.displayAsleep, open: loadBlocking) {
+            let hold = lifecycle.displayAsleep || !lifecycle.surfaceOpen
+            switch copy.switchTo(url, selector: variantSelector, current: asset.url, tier: tier, displayPixels: displayPixelSize, hold: hold, open: loadBlocking) {
             case .held:
-                traceLog("  [switchVideo #\(debugID)] DEFERRED until wake: \(url.lastPathComponent)")
+                traceLog("  [switchVideo #\(debugID)] DEFERRED until wake or reopen: \(url.lastPathComponent)")
                 return
             case let .opened(loaded):
                 adopt(loaded)
@@ -469,6 +470,24 @@ final class VideoRenderer: @unchecked Sendable {
         }
     }
 
+    /// The agent invalidated this surface (false) or acquired it again
+    /// (true). Closed stops the clock and feed but keeps the frame and the
+    /// readers, so a reopen within the teardown grace resumes in place.
+    /// Reopening on awake displays opens a switch held while closed.
+    func setSurfaceOpen(_ open: Bool) {
+        queue.async { [weak self] in
+            guard let self, isRunning, open != lifecycle.surfaceOpen else { return }
+            guard open else { send(.surfaceClosed); return }
+            var changed = false
+            if !lifecycle.displayAsleep,
+               case let .opened(loaded) = copy.reopen(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, open: loadBlocking) {
+                adopt(loaded)
+                changed = true
+            }
+            send(.surfaceReopened(assetChanged: changed))
+        }
+    }
+
     /// The displays woke: open the latest held switch, or the copy for a tier
     /// that changed during sleep, for the tier current now, and resume
     /// whatever the latest policy asks for.
@@ -476,7 +495,9 @@ final class VideoRenderer: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, isRunning, lifecycle.displayAsleep else { return }
             var changed = false
-            if case let .opened(loaded) = copy.wake(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, open: loadBlocking) {
+            // A closed surface keeps its held switch and copy for the reopen.
+            if lifecycle.surfaceOpen,
+               case let .opened(loaded) = copy.wake(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, open: loadBlocking) {
                 adopt(loaded)
                 changed = true
             }
@@ -814,6 +835,17 @@ final class VideoRenderer: @unchecked Sendable {
     private func swapToNextReader() {
         // Advance offset so the next loop's DTS/PTS continue the timeline.
         ptsOffset = lastEnqueuedEnd
+
+        // The preload (or, with none, the current file) may predate a tier
+        // change; read the tier's copy from this loop on.
+        let preloaded = (nextReader?.asset as? AVURLAsset)?.url ?? asset.url
+        if let replacement = copy.loopReplacement(preloaded: preloaded, current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize),
+           let (newAsset, track) = loadBlocking(replacement) {
+            traceLog("  [Renderer] preload \(preloaded.lastPathComponent) is for an older tier, looping into \(replacement.lastPathComponent)")
+            nextReader = nil
+            nextOutput = nil
+            installNextReader(asset: newAsset, track: track)
+        }
 
         if let nr = nextReader, let no = nextOutput {
             if let nrAsset = nr.asset as? AVURLAsset, nrAsset.url != asset.url {

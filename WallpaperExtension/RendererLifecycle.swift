@@ -13,6 +13,12 @@ import Foundation
 /// same queue as policy updates, an update decided before sleep is undone by
 /// the sleep event and one decided after it sees the gate.
 ///
+/// A closed surface (invalidated by the agent) is a second gate beside sleep. It stops the clock and feed but keeps the
+/// readers and the displayed frame, so a re-acquire resumes in place with no
+/// flush and no blank frame. While either gate is shut a flushed reset waits
+/// to build, and the renderer holds switches, so nothing decodes into the
+/// held frame; the latest of them applies once both gates open.
+///
 /// Every pipeline rebuild (a switch, a deep-pause wake, decoder recovery)
 /// goes through one reset: at most one flush is in flight, a reset requested
 /// during it is merged into it, and the clock and feed start only once the
@@ -84,6 +90,11 @@ struct RendererLifecycle: Equatable {
         /// The renderer loaded a different asset (switch or battery-tier copy).
         case assetChanged
         case displaySleep
+        /// The agent invalidated the surface.
+        case surfaceClosed
+        /// The surface was acquired again. `assetChanged`: the renderer
+        /// opened a switch it held while the surface was closed.
+        case surfaceReopened(assetChanged: Bool)
         /// `assetChanged`: the renderer loaded the held switch or the tier's copy.
         case displayWake(assetChanged: Bool)
         case resetFlushed(generation: Int)
@@ -105,6 +116,7 @@ struct RendererLifecycle: Equatable {
 
     private(set) var policy: PlaybackPolicy = .full
     private(set) var displayAsleep = false
+    private(set) var surfaceOpen = true
     private(set) var clock: Clock = .stopped
     private(set) var readers: Readers = .notStarted
     /// The reset whose flush is in flight, with any later request merged in.
@@ -124,6 +136,10 @@ struct RendererLifecycle: Equatable {
     private(set) var retryArmed = false
     /// Bumped whenever a reset starts, so a stale flush completion is dropped.
     private(set) var generation = 0
+    /// Readers were freed while the surface was closed. Its clock counts every
+    /// loop, so resuming from it can seek past the clip (#27); the next
+    /// rebuild restarts instead, whenever it runs.
+    private(set) var restartFreedReaders = false
 
     /// `policy` is the tier the renderer was created for, so the recompute
     /// after its first frame doesn't move it off the copy it opened.
@@ -134,7 +150,7 @@ struct RendererLifecycle: Equatable {
     var wantsPlayback: Bool { wouldPlay(policy) }
 
     func wouldPlay(_ policy: PlaybackPolicy) -> Bool {
-        policy != .paused && !displayAsleep
+        policy != .paused && !displayAsleep && surfaceOpen
     }
 
     /// Whether a feed callback or event from registration `token` may act.
@@ -176,21 +192,18 @@ struct RendererLifecycle: Equatable {
             guard !displayAsleep else { return [] }
             displayAsleep = true
             rampWhenReady = false
+        case .surfaceClosed:
+            guard surfaceOpen else { return [] }
+            surfaceOpen = false
+            rampWhenReady = false
+        case let .surfaceReopened(assetChanged):
+            guard !surfaceOpen else { return [] }
+            surfaceOpen = true
+            releaseGates(assetChanged: assetChanged, &effects)
         case let .displayWake(assetChanged):
             guard displayAsleep else { return [] }
             displayAsleep = false
-            if assetChanged { failures = 0 }
-            if case let .awaitingBuild(kind) = readers {
-                let build = assetChanged ? max(kind, .restart) : kind
-                if build == .resume, !wantsPlayback {
-                    readers = .freed
-                } else {
-                    readers = .building
-                    effects.append(.buildPipeline(build))
-                }
-            } else if assetChanged {
-                requestReset(.restart, &effects)
-            }
+            releaseGates(assetChanged: assetChanged, &effects)
         case let .resetFlushed(flushed):
             guard flushed == generation, let kind = resetInFlight else { return [] }
             resetInFlight = nil
@@ -199,8 +212,9 @@ struct RendererLifecycle: Equatable {
                 failedRounds += 1
                 rampWhenReady = false
                 effects.append(.showFallback)
-            } else if displayAsleep {
-                // Building decodes the first frame; nobody can see it now.
+            } else if !gatesOpen {
+                // Building decodes a first frame nobody can see, and on a
+                // closed surface it would replace the held frame.
                 readers = .awaitingBuild(kind)
             } else {
                 readers = .building
@@ -247,6 +261,7 @@ struct RendererLifecycle: Equatable {
             deepPauseArmed = false
             guard readers == .live, resetInFlight == nil, clock == .stopped else { break }
             readers = .freed
+            if !surfaceOpen { restartFreedReaders = true }
             effects.append(.freeReaders)
         }
         reconcile(animated: animated, &effects)
@@ -276,6 +291,28 @@ struct RendererLifecycle: Equatable {
         readerCompleted ? .readerExhausted(token: token) : .readerFailed(token: token)
     }
 
+    /// Neither the sleep gate nor the closed gate is shut.
+    private var gatesOpen: Bool { !displayAsleep && surfaceOpen }
+
+    /// A gate opened: run the build a shut gate held back, or the restart for
+    /// an asset the renderer opened as it opened. Waits while the other gate
+    /// is still shut.
+    private mutating func releaseGates(assetChanged: Bool, _ effects: inout [Effect]) {
+        if assetChanged { failures = 0 }
+        guard gatesOpen else { return }
+        if case let .awaitingBuild(kind) = readers {
+            let build = assetChanged ? max(kind, .restart) : kind
+            if build == .resume, !wantsPlayback {
+                readers = .freed
+            } else {
+                readers = .building
+                effects.append(.buildPipeline(build))
+            }
+        } else if assetChanged {
+            requestReset(.restart, &effects)
+        }
+    }
+
     private mutating func requestReset(_ kind: ResetKind, _ effects: inout [Effect]) {
         if let inFlight = resetInFlight {
             resetInFlight = max(inFlight, kind)
@@ -300,6 +337,7 @@ struct RendererLifecycle: Equatable {
             effects.append(.disarmRetry)
         }
         generation += 1
+        restartFreedReaders = false
         resetInFlight = kind
         feeding = false
         clock = .stopped
@@ -309,7 +347,8 @@ struct RendererLifecycle: Equatable {
     /// Bring the clock, feed, and deep-pause timer in line with the state.
     private mutating func reconcile(animated: Bool, _ effects: inout [Effect]) {
         if !displayAsleep, resetInFlight == nil, readers == .freed, wantsPlayback {
-            requestReset(.resume, &effects)
+            // A restart's flush keeps the frame up, like a resume's.
+            requestReset(restartFreedReaders ? .restart : .resume, &effects)
         }
         let ready = readers == .live && resetInFlight == nil
         let wantClock = wantsPlayback && ready
@@ -319,8 +358,9 @@ struct RendererLifecycle: Equatable {
             if wantClock {
                 clock = animated ? .rampingUp : .playing
                 effects.append(animated ? .ramp(to: 1) : .setRate(1))
-            } else if clock == .rampingDown, displayAsleep || !ready {
-                // Sleep cuts a ramp-down short instead of decoding for seconds.
+            } else if clock == .rampingDown, displayAsleep || !surfaceOpen || !ready {
+                // Sleep or a closed surface cuts a ramp-down short instead of
+                // decoding for seconds nobody sees.
                 clock = .stopped
                 effects.append(.setRate(0))
             }

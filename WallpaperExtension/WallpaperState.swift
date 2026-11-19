@@ -26,11 +26,12 @@ struct ActiveWallpaper: @unchecked Sendable {
     /// keeps the original size and the wallpaper renders into a sub-region of the panel.
     var destSize: CGSize
     var scaleFactor: CGFloat
-    /// True while a `VideoRenderer.create` is in flight for this slot. Prevents a
-    /// second (e.g. preview) acquire from spinning up a *duplicate* renderer on the
-    /// same rootLayer while the first acquire's async create hasn't populated
-    /// `renderer` yet. Cleared when the renderer is set or the create fails.
-    var rendererPending: Bool = false
+    /// Whether playback is open (false from an invalidate until the next
+    /// acquire: the renderer stops decoding, the context and its frame stay)
+    /// and which `VideoRenderer.create` owns the slot, so a second (e.g.
+    /// preview) acquire can't add a duplicate renderer to the same root
+    /// layer and a create for a torn-down context can't land in its successor.
+    var slot = SurfaceSlot()
 }
 
 /// Identifies one hosted wallpaper SURFACE, a distinct `CAContext`/layer tree that
@@ -74,8 +75,12 @@ final class WallpaperState: Sendable {
         var currentVideoID: String? = UserDefaults.standard.string(forKey: WallpaperState.selectedVideoKey)
         var presentationMode: String = "active"
         var activityState: String = "active"
-        var isDisplayAsleep: Bool = false
+        var sleepGate = SleepGate()
         var isScreenLocked: Bool = false
+        /// Identifies each renderer create, across contexts.
+        var lastCreateToken = 0
+        /// `WallpaperXPCHandler.connectionSerial` of each open connection.
+        var openConnections: Set<Int> = []
     }
 
     private let lock = OSAllocatedUnfairLock(initialState: State())
@@ -116,47 +121,112 @@ final class WallpaperState: Sendable {
         lock.withLock { $0.contexts[key] = context }
     }
 
-    /// Atomically claim the right to create the renderer for a slot. Returns true
-    /// only if the slot has no renderer AND no create is already in flight, in
-    /// which case it marks a create pending. A concurrent (preview) acquire gets
-    /// false and must NOT create a duplicate renderer. This is what guarantees
-    /// exactly one renderer per display despite racing desktop+preview acquires.
-    func claimRendererCreate(for key: DisplayKey) -> Bool {
-        let claimed = lock.withLock { state -> Bool in
-            guard var context = state.contexts[key] else { return false }
-            if context.renderer != nil || context.rendererPending { return false }
-            context.rendererPending = true
+    /// Atomically claim the right to create the renderer for a slot. Returns a
+    /// token only if the slot has no renderer AND no create is already in
+    /// flight. A concurrent (preview) acquire gets nil and must NOT create a
+    /// duplicate renderer. This is what guarantees exactly one renderer per
+    /// display despite racing desktop+preview acquires. The token ties the
+    /// create to this context: pass it back to install or release.
+    func claimRendererCreate(for key: DisplayKey) -> Int? {
+        let token = lock.withLock { state -> Int? in
+            guard var context = state.contexts[key] else { return nil }
+            state.lastCreateToken += 1
+            guard context.slot.claimCreate(token: state.lastCreateToken) else { return nil }
             state.contexts[key] = context
-            return true
+            return state.lastCreateToken
         }
-        traceLog("  [claimRendererCreate] display=\(key.displayID) → \(claimed ? "CLAIMED (will create)" : "denied (renderer exists or create pending)")")
-        return claimed
+        traceLog("  [claimRendererCreate] display=\(key.displayID) → \(token.map { "CLAIMED #\($0) (will create)" } ?? "denied (renderer exists or create pending)")")
+        return token
     }
 
     /// Release a create claim without installing a renderer (create threw).
-    func clearRendererPending(for key: DisplayKey) {
+    func clearRendererPending(for key: DisplayKey, token: Int) {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return }
-            context.rendererPending = false
+            context.slot.failCreate(token: token)
             state.contexts[key] = context
         }
     }
 
-    /// Swap the renderer for an existing display slot (the wallpaper changed),
-    /// keeping the same `caContext`/`contextId`/`rootLayer`. Returns the previous
-    /// renderer for the caller to stop.
-    func setRenderer(_ renderer: VideoRenderer?, videoID: String?, for key: DisplayKey) -> VideoRenderer? {
-        let previous = lock.withLock { state -> VideoRenderer? in
-            guard var context = state.contexts[key] else { return nil }
+    enum RendererInstall {
+        case installed(previous: VideoRenderer?)
+        /// The claim's context was torn down (and maybe recreated) while the
+        /// renderer loaded; its layers belong to the old root. Stop it.
+        case stale
+    }
+
+    /// Install the renderer a claimed create built, keeping the slot's
+    /// `caContext`/`contextId`/`rootLayer`.
+    func installRenderer(_ renderer: VideoRenderer, token: Int, videoID: String?, for key: DisplayKey) -> RendererInstall {
+        let result = lock.withLock { state -> RendererInstall in
+            guard var context = state.contexts[key] else { return .stale }
+            guard case let .install(closed) = context.slot.finishCreate(token: token) else { return .stale }
             let previous = context.renderer
             context.renderer = renderer
+            // Told under the lock so it can't land after a reopen that
+            // `setSurfaceOpen` sends for the same surface.
+            if closed { renderer.setSurfaceOpen(false) }
             context.videoID = videoID
-            context.rendererPending = false
             state.contexts[key] = context
-            return previous
+            return .installed(previous: previous)
         }
-        traceLog("  [setRenderer] display=\(key.displayID) new=\(renderer.map { "#\($0.debugID)" } ?? "nil") replacing=\(previous.map { "#\($0.debugID)" } ?? "nil") videoID=\(videoID ?? "nil")")
-        return previous
+        switch result {
+        case let .installed(previous):
+            traceLog("  [setRenderer] display=\(key.displayID) new=#\(renderer.debugID) replacing=\(previous.map { "#\($0.debugID)" } ?? "nil") videoID=\(videoID ?? "nil")")
+        case .stale:
+            extensionLog("  [setRenderer] display=\(key.displayID) renderer #\(renderer.debugID) finished after its context was torn down, dropping it")
+        }
+        return result
+    }
+
+    /// An acquire from connection `connection` reached an existing context:
+    /// record it and reopen the surface. A request of the other role is
+    /// handed the context unchanged (the reply-only reuse in acquire) and
+    /// doesn't count as an acquisition. Returns whether it reopened, or nil
+    /// when the key has no context yet.
+    func noteAcquire(for key: DisplayKey, byPreview: Bool, connection: Int) -> Bool? {
+        lock.withLock { state in
+            guard var context = state.contexts[key] else { return nil }
+            let reopened = context.slot.acquired(by: connection, replyOnly: byPreview != context.isPreview)
+            state.contexts[key] = context
+            if reopened { context.renderer?.setSurfaceOpen(true) }
+            return reopened
+        }
+    }
+
+    func connectionOpened(_ serial: Int) {
+        lock.withLock { _ = $0.openConnections.insert(serial) }
+    }
+
+    func connectionClosed(_ serial: Int) {
+        lock.withLock { _ = $0.openConnections.remove(serial) }
+    }
+
+    /// An invalidate from connection `serial` reached `key`'s context: close
+    /// it unless the invalidate is ambiguous (`SurfaceSlot.invalidated`).
+    /// Nil when the key has no context.
+    func invalidate(_ key: DisplayKey, by serial: Int) -> SurfaceSlot.InvalidateAction? {
+        lock.withLock { state in
+            guard var context = state.contexts[key] else { return nil }
+            let action = context.slot.invalidated(by: serial, openConnections: state.openConnections)
+            let closed = action == .close && context.slot.setOpen(false)
+            state.contexts[key] = context
+            if closed { context.renderer?.setSurfaceOpen(false) }
+            return action
+        }
+    }
+
+    /// Open or close a surface's playback and tell its renderer. Sent under
+    /// the lock, so the renderer sees opens and closes in the order they were
+    /// recorded even when `installRenderer` races them. Returns whether it changed.
+    @discardableResult
+    func setSurfaceOpen(_ open: Bool, for key: DisplayKey) -> Bool {
+        lock.withLock { state in
+            guard var context = state.contexts[key], context.slot.setOpen(open) else { return false }
+            state.contexts[key] = context
+            context.renderer?.setSurfaceOpen(open)
+            return true
+        }
     }
 
     /// Record the destination geometry for a slot, returning the slot (with its live
@@ -275,12 +345,14 @@ final class WallpaperState: Sendable {
 
     /// Drop a WallpaperID mapping once its instance is invalidated.
     func forgetWallpaperID(_ uuid: UUID) {
-        lock.withLock { state in
-            _ = state.keyForWallpaperUUID.removeValue(forKey: uuid)
-            state.recentlyForgotten.append(uuid)
-            if state.recentlyForgotten.count > 32 {
-                state.recentlyForgotten.removeFirst(state.recentlyForgotten.count - 32)
-            }
+        lock.withLock { Self.forget(uuid, in: &$0) }
+    }
+
+    private static func forget(_ uuid: UUID, in state: inout State) {
+        _ = state.keyForWallpaperUUID.removeValue(forKey: uuid)
+        state.recentlyForgotten.append(uuid)
+        if state.recentlyForgotten.count > 32 {
+            state.recentlyForgotten.removeFirst(state.recentlyForgotten.count - 32)
         }
     }
 
@@ -299,7 +371,11 @@ final class WallpaperState: Sendable {
     @discardableResult
     func tearDownContext(for key: DisplayKey) -> Bool {
         let removed = lock.withLock { state -> ActiveWallpaper? in
-            state.contexts.removeValue(forKey: key)
+            // Ids kept through an ambiguous invalidate's grace retire here.
+            for (uuid, mapped) in state.keyForWallpaperUUID where mapped == key {
+                Self.forget(uuid, in: &state)
+            }
+            return state.contexts.removeValue(forKey: key)
         }
         guard let removed else { return false }
         removed.renderer?.stop()
@@ -429,8 +505,31 @@ final class WallpaperState: Sendable {
 
     /// Whether all displays are currently asleep.
     var isDisplayAsleep: Bool {
-        get { lock.withLock { $0.isDisplayAsleep } }
-        set { lock.withLock { $0.isDisplayAsleep = newValue } }
+        lock.withLock { $0.sleepGate.asleep }
+    }
+
+    /// Record `screensDidSleep` or `screensDidWake`. Set before the caller
+    /// tells the renderers, so a renderer starting meanwhile reads it.
+    func noteDisplaySleepNotification(asleep: Bool) {
+        lock.withLock { _ = $0.sleepGate.notified(asleep: asleep) }
+    }
+
+    /// The sleep gate's epoch, read before sampling the displays.
+    var displaySleepEpoch: Int {
+        lock.withLock { $0.sleepGate.epoch }
+    }
+
+    /// Close the sleep gate for displays sampled at `epoch` (see
+    /// `SleepGate.catchUp`) and pause every renderer. Renderers are told
+    /// under the lock, so a wake noted after this reaches them after it.
+    func catchUpDisplaySleep(sampledAt epoch: Int, displays: [Bool]) -> Bool {
+        lock.withLock { state in
+            guard state.sleepGate.catchUp(sampledAt: epoch, displays: displays) else { return false }
+            for renderer in state.contexts.values.compactMap(\.renderer) {
+                renderer.displayDidSleep()
+            }
+            return true
+        }
     }
 
     /// Whether the screen is currently locked (lock screen showing).

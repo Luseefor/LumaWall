@@ -26,6 +26,8 @@ final class LumaWallExtension: NSObject, AppExtension {
                 Task { await SettingsPush.push() }
             }
             observeDisplaySleepWake()
+            // After the observers, so a wake posted from here on still lands.
+            Self.catchUpDisplaySleep()
             observeScreenLockState()
             WallpaperPrefs.shared.observeChanges()
             WallpaperXPCHandler.startGeometryAudit()
@@ -77,7 +79,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             object: nil, queue: .main,
         ) { _ in
             // Set before notifying: a renderer starting now reads it instead.
-            WallpaperState.shared.isDisplayAsleep = true
+            WallpaperState.shared.noteDisplaySleepNotification(asleep: true)
             WallpaperState.shared.forEachRenderer { renderer in
                 renderer.displayDidSleep()
             }
@@ -87,7 +89,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             forName: NSWorkspace.screensDidWakeNotification,
             object: nil, queue: .main,
         ) { _ in
-            WallpaperState.shared.isDisplayAsleep = false
+            WallpaperState.shared.noteDisplaySleepNotification(asleep: false)
             // Recompute first: renderers still asleep only record the new tiers,
             // so the wake below resumes on fresh policy instead of briefly
             // playing on the one from before sleep. Wake also reaches the
@@ -105,6 +107,19 @@ final class LumaWallExtension: NSObject, AppExtension {
                 Self.recomputeAndApplyPolicy()
             }
         }
+    }
+
+    /// Close the sleep gate when the displays report asleep but no
+    /// `screensDidSleep` arrived: a process launched during display sleep
+    /// never gets one (#34). Run at launch and before each acquire builds a
+    /// renderer, so no first frame starts decoding in the dark.
+    /// A wake notified while the displays are sampled wins (`SleepGate`).
+    static func catchUpDisplaySleep() {
+        let state = WallpaperState.shared
+        let epoch = state.displaySleepEpoch
+        let displays = DisplaySleep.onlineDisplays()
+        guard state.catchUpDisplaySleep(sampledAt: epoch, displays: displays) else { return }
+        extensionLog("[Extension] All \(displays.count) online display(s) report asleep with no sleep notification, paused all renderers")
     }
 
     /// Track screen lock state via distributed notifications from loginwindow.

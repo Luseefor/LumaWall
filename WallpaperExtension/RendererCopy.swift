@@ -48,18 +48,19 @@ struct RendererCopy {
         return nil
     }
 
-    /// Switch to choice `url` (its original) picked by `selector`. While the
-    /// displays sleep the switch is held, and a later one replaces it.
+    /// Switch to choice `url` (its original) picked by `selector`. With
+    /// `hold` (the displays sleep or the surface is closed) the switch is
+    /// held, and a later one replaces it.
     mutating func switchTo<Loaded>(
         _ url: URL,
         selector: @escaping Selector,
         current: URL,
         tier: PlaybackPolicy,
         displayPixels: CGSize,
-        asleep: Bool,
+        hold: Bool,
         open: (URL) -> Loaded?,
     ) -> Opened<Loaded> {
-        if asleep {
+        if hold {
             held = (url, selector)
             return .held
         }
@@ -93,6 +94,29 @@ struct RendererCopy {
         }
         guard tier != .paused else { return .unchanged }
         return retier(current: current, tier: tier, displayPixels: displayPixels, open: open)
+    }
+
+    /// The surface reopened: open the switch held while it was closed. A
+    /// tier change alone waits for the loop boundary, so a reopen with
+    /// nothing held resumes in place.
+    mutating func reopen<Loaded>(
+        current: URL,
+        tier: PlaybackPolicy,
+        displayPixels: CGSize,
+        open: (URL) -> Loaded?,
+    ) -> Opened<Loaded> {
+        guard let held else { return .unchanged }
+        self.held = nil
+        return openFirst(held, tier: tier, displayPixels: displayPixels, current: current, open: open)
+    }
+
+    /// The file to read at a loop boundary instead of `preloaded`, or nil to
+    /// keep it. A preload is picked for the tier current when it was made, so
+    /// a tier change recorded while the surface was closed or the displays
+    /// slept would otherwise play one more loop of the old copy.
+    func loopReplacement(preloaded: URL, current: URL, tier: PlaybackPolicy, displayPixels: CGSize) -> URL? {
+        let wanted = preloadURL(current: current, tier: tier, displayPixels: displayPixels)
+        return wanted == preloaded ? nil : wanted
     }
 
     func preloadURL(current: URL, tier: PlaybackPolicy, displayPixels: CGSize) -> URL {
