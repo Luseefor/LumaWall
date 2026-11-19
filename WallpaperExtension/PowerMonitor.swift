@@ -53,8 +53,10 @@ final class PowerMonitor: Sendable {
     /// The scheduled poll runs every ~30s, so without this a prefs change
     /// (e.g. the user picking Battery Saver right after unplugging) applies
     /// against stale power state and looks like "nothing changes".
-    func refreshNow() {
+    @discardableResult
+    func refreshNow() -> PowerState {
         pollQueue.sync { readHardware() }
+        return state.withLock { $0.state }
     }
 
     /// A renderer started or stopped wanting playback. The poll runs while
