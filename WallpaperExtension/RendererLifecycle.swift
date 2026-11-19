@@ -45,7 +45,9 @@ struct RendererLifecycle: Equatable {
         case live
         /// Freed by deep pause.
         case freed
-        /// A reset's flush completed while the displays slept; build on wake.
+        /// A reset's flush completed while a gate was shut, or during a retry
+        /// while paused; build once the gates open (and, for a retry, once
+        /// playback is wanted).
         case awaitingBuild(ResetKind)
         /// Rebuilding failed `maxFailures` times in a row; the fallback still
         /// shows. A retry runs after a growing delay while playback is
@@ -137,6 +139,10 @@ struct RendererLifecycle: Equatable {
     /// Times this video fell back to the still; sets the retry delay.
     private(set) var failedRounds = 0
     private(set) var retryArmed = false
+    /// A retry of a failed video is rebuilding. Its builds wait for playback,
+    /// since the fallback still covers a paused renderer and a first frame
+    /// would only replace it (#30).
+    private(set) var retrying = false
     /// Bumped whenever a reset starts, so a stale flush completion is dropped.
     private(set) var generation = 0
     /// Readers were freed while the surface was closed. Its clock counts every
@@ -182,6 +188,7 @@ struct RendererLifecycle: Equatable {
             guard readers == .building else { return [] }
             if ok {
                 readers = .live
+                retrying = false
                 animated = rampWhenReady && !displayAsleep
                 rampWhenReady = false
             } else {
@@ -193,12 +200,13 @@ struct RendererLifecycle: Equatable {
             guard requested != policy else { return [] }
             policy = requested
             animated = isAnimated && !displayAsleep
-            // Freed readers rebuild in reconcile below before the clock can run.
-            let rebuilding = resetInFlight != nil || readers == .building || readers == .freed
-            rampWhenReady = animated && rebuilding && wantsPlayback
+            // Freed readers and waiting builds start in reconcile below,
+            // before the clock can run. A change without animation between
+            // playing tiers keeps a ramp already pending.
+            let rebuilding = resetInFlight != nil || readers == .building || readers == .freed || isAwaitingBuild
+            rampWhenReady = (animated || rampWhenReady) && rebuilding && wantsPlayback
         case .assetChanged:
-            failures = 0
-            failedRounds = 0
+            resetFailureCounts()
             requestReset(.restart, &effects)
         case .displaySleep:
             guard !displayAsleep else { return [] }
@@ -223,14 +231,11 @@ struct RendererLifecycle: Equatable {
                 readers = .failed
                 failedRounds += 1
                 rampWhenReady = false
+                retrying = false
                 effects.append(.showFallback)
-            } else if !gatesOpen {
-                // Building decodes a first frame nobody can see, and on a
-                // closed surface it would replace the held frame.
-                readers = .awaitingBuild(kind)
             } else {
-                readers = .building
-                effects.append(.buildPipeline(kind))
+                // Reconcile builds it unless a gate is shut or a retry is paused.
+                readers = .awaitingBuild(kind)
             }
         case let .readerExhausted(token):
             guard acceptsFeed(token: token), readers == .live, resetInFlight == nil else { return [] }
@@ -271,6 +276,7 @@ struct RendererLifecycle: Equatable {
             retryArmed = false
             guard readers == .failed, resetInFlight == nil, wantsPlayback else { break }
             failures = 0
+            retrying = true
             requestReset(.restart, &effects)
         case .deepPauseFired:
             guard deepPauseArmed else { return [] }
@@ -310,20 +316,28 @@ struct RendererLifecycle: Equatable {
     /// Neither the sleep gate nor the closed gate is shut.
     private var gatesOpen: Bool { !displayAsleep && surfaceOpen }
 
-    /// A gate opened: run the build a shut gate held back, or the restart for
-    /// an asset the renderer opened as it opened. Waits while the other gate
-    /// is still shut.
+    private var isAwaitingBuild: Bool {
+        if case .awaitingBuild = readers { return true }
+        return false
+    }
+
+    /// A different video starts with no failures and no backoff.
+    private mutating func resetFailureCounts() {
+        failures = 0
+        failedRounds = 0
+        retrying = false
+    }
+
+    /// A gate opened: let reconcile run the build a shut gate held back, or
+    /// restart for an asset the renderer opened as it opened. Waits while the
+    /// other gate is still shut.
     private mutating func releaseGates(assetChanged: Bool, _ effects: inout [Effect]) {
-        if assetChanged { failures = 0 }
+        if assetChanged { resetFailureCounts() }
         guard gatesOpen else { return }
         if case let .awaitingBuild(kind) = readers {
             let build = assetChanged ? max(kind, .restart) : kind
-            if build == .resume, !wantsPlayback {
-                readers = .freed
-            } else {
-                readers = .building
-                effects.append(.buildPipeline(build))
-            }
+            // A paused resume has nothing new to show; it rebuilds on play.
+            readers = build == .resume && !wantsPlayback ? .freed : .awaitingBuild(build)
         } else if assetChanged {
             requestReset(.restart, &effects)
         }
@@ -362,6 +376,12 @@ struct RendererLifecycle: Equatable {
 
     /// Bring the clock, feed, and deep-pause timer in line with the state.
     private mutating func reconcile(animated: Bool, _ effects: inout [Effect]) {
+        // Building behind a shut gate decodes a first frame nobody can see,
+        // and on a closed surface it would replace the held frame.
+        if gatesOpen, case let .awaitingBuild(kind) = readers, !retrying || wantsPlayback {
+            readers = .building
+            effects.append(.buildPipeline(kind))
+        }
         if !displayAsleep, resetInFlight == nil, readers == .freed, wantsPlayback {
             // A restart's flush keeps the frame up, like a resume's.
             requestReset(restartFreedReaders ? .restart : .resume, &effects)
