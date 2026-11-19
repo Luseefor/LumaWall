@@ -251,7 +251,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         }
         let previewTier = previewPolicy(powerState: powerState)
         state.forPreviewRenderers { renderer in
-            renderer.applyPolicy(previewTier, animated: false, hardPause: hardPause && previewTier == .paused)
+            renderer.applyPolicy(previewTier, animated: false, hardPause: hardPause && previewTier == .paused, onBattery: powerState.isOnBattery)
         }
     }
 
