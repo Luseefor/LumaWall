@@ -620,15 +620,6 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
                     return
                 }
-                // create() has enqueued the still into the display layer's
-                // IOSurface; the root layer's copy is now only memory (a 4K
-                // frame is 33 MB decoded).
-                if cachedStill != nil {
-                    CATransaction.begin()
-                    CATransaction.setDisableActions(true)
-                    boxedRoot.value.contents = nil
-                    CATransaction.commit()
-                }
                 guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
                     // The context was torn down while the renderer loaded:
                     // don't hand the agent a context that no longer exists.
@@ -647,9 +638,19 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // Switch: reply only once the first video frame is composited (cold start
                 // already replied with the still). Either way, stop the old renderer once
                 // we've told the agent to swap off it.
+                let heldStill = cachedStill != nil
                 renderer.start(onFirstFrameReady: {
                     if !coldStart { replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply) }
                     old?.stop()
+                    // Video (or, on failure, the seeded still) is in the display
+                    // layer now; the root layer's copy is only memory (a 4K frame
+                    // is 33 MB decoded).
+                    if heldStill {
+                        CATransaction.begin()
+                        CATransaction.setDisableActions(true)
+                        boxedRoot.value.contents = nil
+                        CATransaction.commit()
+                    }
                     // After the reply so a pre-first-frame pause can't stall the
                     // acquire: apply pause conditions that predate this process
                     // (fullscreen app, occlusion, per-display pause), which arrive
