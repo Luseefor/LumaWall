@@ -121,6 +121,7 @@ targets:
       - path: WallpaperExtension/ThermalHold.swift
       - path: WallpaperExtension/RendererLifecycle.swift
       - path: WallpaperExtension/RendererCopy.swift
+      - path: WallpaperExtension/DisplaySleep.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:

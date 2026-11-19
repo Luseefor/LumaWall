@@ -254,6 +254,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
     private func acquireBody(id: Any?, request: Any?, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
         traceLog("=== ACQUIRE ===")
+        LumaWallExtension.catchUpDisplaySleep()
 
         // Extract destination size from WallpaperCreationRequestXPC
         var destSize = CGSize(width: 2_560, height: 1_440) // fallback

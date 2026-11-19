@@ -26,6 +26,8 @@ final class LumaWallExtension: NSObject, AppExtension {
                 Task { await SettingsPush.push() }
             }
             observeDisplaySleepWake()
+            // After the observers, so a wake posted from here on still lands.
+            Self.catchUpDisplaySleep()
             observeScreenLockState()
             WallpaperPrefs.shared.observeChanges()
             WallpaperXPCHandler.startGeometryAudit()
@@ -76,11 +78,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             forName: NSWorkspace.screensDidSleepNotification,
             object: nil, queue: .main,
         ) { _ in
-            // Set before notifying: a renderer starting now reads it instead.
-            WallpaperState.shared.isDisplayAsleep = true
-            WallpaperState.shared.forEachRenderer { renderer in
-                renderer.displayDidSleep()
-            }
+            Self.enterDisplaySleep()
             extensionLog("[Extension] Displays asleep, paused all renderers")
         }
         center.addObserver(
@@ -105,6 +103,25 @@ final class LumaWallExtension: NSObject, AppExtension {
                 Self.recomputeAndApplyPolicy()
             }
         }
+    }
+
+    private static func enterDisplaySleep() {
+        // Set before notifying: a renderer starting now reads it instead.
+        WallpaperState.shared.isDisplayAsleep = true
+        WallpaperState.shared.forEachRenderer { renderer in
+            renderer.displayDidSleep()
+        }
+    }
+
+    /// Close the sleep gate when the displays report asleep but no
+    /// `screensDidSleep` arrived: a process launched during display sleep
+    /// never gets one (#34). Run at launch and before each acquire builds a
+    /// renderer, so no first frame starts decoding in the dark.
+    static func catchUpDisplaySleep() {
+        let displays = DisplaySleep.onlineDisplays()
+        guard DisplaySleep.missedSleep(flagAsleep: WallpaperState.shared.isDisplayAsleep, displays: displays) else { return }
+        enterDisplaySleep()
+        extensionLog("[Extension] All \(displays.count) online display(s) report asleep with no sleep notification, paused all renderers")
     }
 
     /// Track screen lock state via distributed notifications from loginwindow.
