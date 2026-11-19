@@ -836,6 +836,17 @@ final class VideoRenderer: @unchecked Sendable {
         // Advance offset so the next loop's DTS/PTS continue the timeline.
         ptsOffset = lastEnqueuedEnd
 
+        // The preload (or, with none, the current file) may predate a tier
+        // change; read the tier's copy from this loop on.
+        let preloaded = (nextReader?.asset as? AVURLAsset)?.url ?? asset.url
+        if let replacement = copy.loopReplacement(preloaded: preloaded, current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize),
+           let (newAsset, track) = loadBlocking(replacement) {
+            traceLog("  [Renderer] preload \(preloaded.lastPathComponent) is for an older tier, looping into \(replacement.lastPathComponent)")
+            nextReader = nil
+            nextOutput = nil
+            installNextReader(asset: newAsset, track: track)
+        }
+
         if let nr = nextReader, let no = nextOutput {
             if let nrAsset = nr.asset as? AVURLAsset, nrAsset.url != asset.url {
                 asset = nrAsset

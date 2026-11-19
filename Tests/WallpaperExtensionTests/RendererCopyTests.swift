@@ -114,6 +114,15 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertEqual(attempts, [])
     }
 
+    func testLoopBoundaryReplacesAPreloadMadeForAnOlderTier() {
+        // The tier moved to Reduced while the surface was closed; the reader
+        // preloaded at Full would have played one more loop of the Full copy.
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(copy.loopReplacement(preloaded: url("a.full.mov"), current: url("a.full.mov"), tier: .reduced, displayPixels: display), url("a.reduced.mov"))
+        XCTAssertNil(copy.loopReplacement(preloaded: url("a.full.mov"), current: url("a.full.mov"), tier: .full, displayPixels: display))
+        XCTAssertNil(copy.loopReplacement(preloaded: url("a.full.mov"), current: url("a.full.mov"), tier: .paused, displayPixels: display), "paused keeps the current copy")
+    }
+
     // MARK: Tier changes
 
     func testPausedRendererResumingOnBatteryMovesToTheBatteryCopy() async {

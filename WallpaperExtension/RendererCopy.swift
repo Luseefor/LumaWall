@@ -110,6 +110,15 @@ struct RendererCopy {
         return openFirst(held, tier: tier, displayPixels: displayPixels, current: current, open: open)
     }
 
+    /// The file to read at a loop boundary instead of `preloaded`, or nil to
+    /// keep it. A preload is picked for the tier current when it was made, so
+    /// a tier change recorded while the surface was closed or the displays
+    /// slept would otherwise play one more loop of the old copy.
+    func loopReplacement(preloaded: URL, current: URL, tier: PlaybackPolicy, displayPixels: CGSize) -> URL? {
+        let wanted = preloadURL(current: current, tier: tier, displayPixels: displayPixels)
+        return wanted == preloaded ? nil : wanted
+    }
+
     func preloadURL(current: URL, tier: PlaybackPolicy, displayPixels: CGSize) -> URL {
         VariantSelection.preloadURL(current: current, tier: tier, displayPixels: displayPixels, selector: active.selector)
     }
