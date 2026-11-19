@@ -538,10 +538,11 @@ final class VideoRenderer: @unchecked Sendable {
                case let .opened(loaded) = copy.reopen(current: asset.url, tier: requestedTier, displayPixels: displayPixelSize, open: loadBlocking) {
                 adopt(loaded)
                 changed = true
-                // The new choice sets what a preview plays.
-                applyTier(requestedTier, animated: false)
             }
             send(.surfaceReopened(assetChanged: changed))
+            // The file or a tier change recorded while closed (a copy that
+            // now serves it) sets what a preview plays.
+            if isPreview { applyTier(requestedTier, animated: false) }
         }
     }
 
@@ -557,9 +558,9 @@ final class VideoRenderer: @unchecked Sendable {
                case let .opened(loaded) = copy.wake(current: asset.url, tier: requestedTier, displayPixels: displayPixelSize, open: loadBlocking) {
                 adopt(loaded)
                 changed = true
-                applyTier(requestedTier, animated: false)
             }
             send(.displayWake(assetChanged: changed))
+            if isPreview { applyTier(requestedTier, animated: false) }
         }
     }
 
@@ -966,6 +967,9 @@ final class VideoRenderer: @unchecked Sendable {
             }
             currentReader = next.reader
             currentOutput = next.output
+            // A preview whose copy went away may loop into the original:
+            // hold its frame instead.
+            if isPreview { applyTier(requestedTier, animated: false) }
         } else {
             // The feed reports the missing reader as a failure.
             currentReader = nil
