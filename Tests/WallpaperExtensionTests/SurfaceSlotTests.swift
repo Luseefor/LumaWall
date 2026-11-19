@@ -318,6 +318,34 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertFalse(slot.tearsDownAtGraceEnd)
     }
 
+    // MARK: Preview rules
+
+    func testAPickerSharingTheLiveSurfaceLeavesItLive() {
+        // #35: the picker handed the live context must not change its
+        // playback or lifetime; dismissing it leaves the wallpaper playing.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertFalse(slot.holdsPreviewFrame(contextIsPreview: false))
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .graceOnly)
+        XCTAssertTrue(slot.open, "still playing")
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+        XCTAssertFalse(slot.holdsPreviewFrame(contextIsPreview: false))
+    }
+
+    func testALiveRequestHandedAPreviewContextStopsTheFrameHold() {
+        // A preview's renderer holds one frame when no copy fits. A live
+        // host handed that context must not see the hold, now or later.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        XCTAssertTrue(slot.holdsPreviewFrame(contextIsPreview: true))
+        _ = slot.acquired(by: 1, replyOnly: false)
+        XCTAssertTrue(slot.holdsPreviewFrame(contextIsPreview: true), "another preview acquire")
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertFalse(slot.holdsPreviewFrame(contextIsPreview: true))
+        _ = slot.invalidated(by: 2, openConnections: [1, 2])
+        _ = slot.acquired(by: 1, replyOnly: false)
+        XCTAssertFalse(slot.holdsPreviewFrame(contextIsPreview: true), "for good")
+    }
+
     func testInvalidateWithNoKnownAcquirerCloses() {
         var slot = SurfaceSlot()
         XCTAssertEqual(slot.invalidated(by: 3, openConnections: [3]), .close)

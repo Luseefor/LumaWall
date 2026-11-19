@@ -166,6 +166,7 @@ final class WallpaperState: Sendable {
             // Told under the lock so it can't land after a reopen that
             // `setSurfaceOpen` sends for the same surface.
             if closed { renderer.setSurfaceOpen(false) }
+            if context.isPreview, !context.slot.holdsPreviewFrame(contextIsPreview: true) { renderer.playAsLive() }
             context.videoID = videoID
             state.contexts[key] = context
             return .installed(previous: previous)
@@ -187,9 +188,11 @@ final class WallpaperState: Sendable {
     func noteAcquire(for key: DisplayKey, byPreview: Bool, connection: Int) -> Bool? {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
+            let held = context.slot.holdsPreviewFrame(contextIsPreview: context.isPreview)
             let reopened = context.slot.acquired(by: connection, replyOnly: byPreview != context.isPreview)
             state.contexts[key] = context
             if reopened { context.renderer?.setSurfaceOpen(true) }
+            if held, !context.slot.holdsPreviewFrame(contextIsPreview: context.isPreview) { context.renderer?.playAsLive() }
             return reopened
         }
     }

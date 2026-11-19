@@ -14,6 +14,9 @@ struct SurfaceSlot: Equatable {
     /// without changing it (the Settings picker reusing the live surface's
     /// id). That host's invalidate comes on its own connection.
     private(set) var sharers: Set<Int> = []
+    /// A request of the other role was ever handed this context. On a
+    /// preview context that request was live, so it plays as live for good.
+    private(set) var everShared = false
     /// The latest acquirer left: its invalidate, or the agent's cleanup after
     /// its connection dropped. An acquire clears it.
     private(set) var ownerLeft = false
@@ -52,6 +55,7 @@ struct SurfaceSlot: Equatable {
     /// its invalidate must not freeze the surface's real owner.
     mutating func acquired(by connection: Int?, replyOnly: Bool) -> Bool {
         if replyOnly {
+            everShared = true
             // A live request reacquiring on a new connection replaces the
             // desktop's old one, which may have dropped without a word.
             if let connection {
@@ -125,6 +129,15 @@ struct SurfaceSlot: Equatable {
         guard !hosted(openConnections: openConnections) else { return false }
         open = false
         return true
+    }
+
+    /// Whether the renderer holds one frame when no copy fits its viewport.
+    /// Only a preview context does, and only until a live request is handed
+    /// it: a desktop showing that context must never freeze on that rule.
+    /// (It keeps the preview tier, whose pauses the live rules all share.)
+    /// A preview sharing a live context never changes it.
+    func holdsPreviewFrame(contextIsPreview: Bool) -> Bool {
+        contextIsPreview && !everShared
     }
 
     /// The grace after an invalidate ran out with no reacquire. Only a closed
