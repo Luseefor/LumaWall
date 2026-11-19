@@ -100,20 +100,45 @@ struct PowerSample {
     private(set) var batteryReadAt: Date?
 
     /// Merge one read. `battery` nil (the read failed, or only brightness was
-    /// read) keeps the old battery fields and their time. True when `state`
-    /// changed.
-    mutating func merge(battery: (onBattery: Bool, level: Int)?, brightness: Float, at now: Date) -> Bool {
+    /// read) keeps the old battery fields and their time; `brightness` nil (a
+    /// power-source read) keeps the old brightness. True when `state` changed.
+    mutating func merge(battery: (onBattery: Bool, level: Int)?, brightness: Float?, at now: Date) -> Bool {
         let before = state
         if let battery {
             state.isOnBattery = battery.onBattery
             state.batteryLevel = battery.level
             batteryReadAt = now
         }
-        state.displayBrightness = brightness
+        if let brightness { state.displayBrightness = brightness }
         return state != before
     }
 
     func batteryIsStale(now: Date) -> Bool {
         PowerPolling.readIsStale(lastRead: batteryReadAt, now: now)
+    }
+}
+
+/// Power notifications as signals, not values: each queues one read of the
+/// latest snapshot on `Lifecycle.queue` (where lock and unlock read power
+/// too), so a notification that waited behind a transition can't apply a
+/// sample older than the transition's. Redundant notifications coalesce
+/// into the queued read. It always applies: another path may have applied a
+/// different reading since, and reapplying an unchanged tier does nothing.
+struct PowerSignal {
+    private var queued = false
+
+    /// A notification arrived. True when the caller must queue a read;
+    /// false when one is already queued.
+    mutating func notified() -> Bool {
+        guard !queued else { return false }
+        queued = true
+        return true
+    }
+
+    /// The queued read runs: the snapshot to apply. Taken under the same
+    /// lock as `notified`, so a notification after this read queues another.
+    mutating func take(latest: PowerSnapshot) -> PowerSnapshot {
+        queued = false
+        return latest
     }
 }

@@ -25,6 +25,11 @@ final class PowerMonitor: Sendable {
     private static let pollLeeway: DispatchTimeInterval = .seconds(15)
     private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
     private let powerSourceToken = OSAllocatedUnfairLock(initialState: NOTIFY_TOKEN_INVALID)
+    /// Held across each battery read and its merge, so a read that sampled
+    /// the power source earlier can't land over one that sampled it later. A
+    /// transition reading off the poll queue waits for at most the one read
+    /// in flight, not for poll work.
+    private let batteryReads = NSLock()
 
     /// gamepolicyd's state-carrying Darwin notification for Game Mode sessions
     /// (name recovered from the gamepolicyd binary; posted with notify_set_state).
@@ -57,6 +62,30 @@ final class PowerMonitor: Sendable {
     func refreshNow() -> PowerState {
         pollQueue.sync { readHardware() }
         return state.withLock { $0.state }
+    }
+
+    /// The latest reading, with no I/O.
+    var latestState: PowerState {
+        state.withLock { $0.state }
+    }
+
+    /// Read only the power source, on the caller's thread, for a lock,
+    /// unlock or wake: it picks the copy and the ramp length from this
+    /// reading, so it doesn't wait behind poll work or read brightness first.
+    /// Brightness, logging, the poll and subscribers catch up on `pollQueue`.
+    @discardableResult
+    func readPowerSource() -> PowerState {
+        let (_, changed, current) = mergeReading(battery: true, brightness: nil)
+        pollQueue.async { [weak self] in
+            guard let self else { return }
+            if changed {
+                extensionLog("[PowerMonitor] Battery → level=\(current.batteryLevel) onBattery=\(current.isOnBattery)")
+                yieldToSubscribers(latestState)
+            }
+            // Brightness may have dropped while the poll was off.
+            readHardware(battery: false)
+        }
+        return current
     }
 
     /// A renderer started or stopped wanting playback. The poll runs while
@@ -158,13 +187,8 @@ final class PowerMonitor: Sendable {
     /// `pollQueue` only.
     private func readHardware(battery: Bool = true) {
         dispatchPrecondition(condition: .onQueue(pollQueue))
-        let reading = battery ? Self.readBattery() : nil
         let brightness = Self.readBuiltInBrightness() ?? 1.0
-        let (previous, changed, current) = state.withLock { sample in
-            let previous = sample.state
-            let changed = sample.merge(battery: reading, brightness: brightness, at: Date())
-            return (previous, changed, sample.state)
-        }
+        let (previous, changed, current) = mergeReading(battery: battery, brightness: brightness)
         if changed {
             if current.isOnBattery != previous.isOnBattery || current.batteryLevel != previous.batteryLevel {
                 extensionLog("[PowerMonitor] Battery → level=\(current.batteryLevel) onBattery=\(current.isOnBattery)")
@@ -175,6 +199,20 @@ final class PowerMonitor: Sendable {
             yieldToSubscribers(current)
         }
         apply(poller.reading(batteryLevel: current.batteryLevel, displayBrightness: current.displayBrightness))
+    }
+
+    /// Read the battery when `battery` (under `batteryReads`) and merge it
+    /// with `brightness`: the state before, whether it changed, and after.
+    private func mergeReading(battery: Bool, brightness: Float?) -> (previous: PowerState, changed: Bool, current: PowerState) {
+        let merge = { [state] (reading: (onBattery: Bool, level: Int)?) in
+            state.withLock { sample in
+                let previous = sample.state
+                let changed = sample.merge(battery: reading, brightness: brightness, at: Date())
+                return (previous, changed, sample.state)
+            }
+        }
+        guard battery else { return merge(nil) }
+        return batteryReads.withLock { merge(Self.readBattery()) }
     }
 
     private func readIsStale() -> Bool {

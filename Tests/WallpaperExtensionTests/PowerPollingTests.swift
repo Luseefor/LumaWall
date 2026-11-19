@@ -101,6 +101,52 @@ final class PowerPollingTests: XCTestCase {
         XCTAssertTrue(sample.batteryIsStale(now: now + 40))
     }
 
+    func testABatteryOnlyReadKeepsBrightness() {
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+        var sample = PowerSample()
+        _ = sample.merge(battery: (onBattery: false, level: 90), brightness: 0.3, at: now)
+        XCTAssertTrue(sample.merge(battery: (onBattery: true, level: 90), brightness: nil, at: now + 1))
+        XCTAssertEqual(sample.state.displayBrightness, 0.3)
+    }
+
+    // MARK: Power notifications
+
+    func testANotificationQueuedBehindATransitionDoesntReplayAnOlderSample() {
+        // Unplugged: the power-source notification is queued on the
+        // lifecycle queue behind a lock update, which reads battery itself.
+        // The queued read applies that reading, never the AC sample from
+        // before the unplug.
+        var battery = PowerSnapshot()
+        battery.isOnBattery = true
+        var signal = PowerSignal()
+        XCTAssertTrue(signal.notified())
+        XCTAssertEqual(signal.take(latest: battery), battery)
+    }
+
+    func testAQueuedReadAppliesASnapshotEvenIfItWasAppliedBefore() {
+        // The read applied normal brightness; a prefs reload then applied a
+        // zero-brightness reading and paused. Brightness comes back to the
+        // same value before the next queued read runs: it must still apply,
+        // or the wallpaper stays paused.
+        let normal = PowerSnapshot()
+        var signal = PowerSignal()
+        XCTAssertTrue(signal.notified())
+        XCTAssertEqual(signal.take(latest: normal), normal)
+        XCTAssertTrue(signal.notified())
+        XCTAssertEqual(signal.take(latest: normal), normal)
+    }
+
+    func testNotificationsCoalesceUntilTheQueuedReadRuns() {
+        var signal = PowerSignal()
+        XCTAssertTrue(signal.notified())
+        XCTAssertFalse(signal.notified(), "a read is already queued")
+        XCTAssertFalse(signal.notified())
+        var hot = PowerSnapshot()
+        hot.thermalState = .serious
+        XCTAssertEqual(signal.take(latest: hot), hot)
+        XCTAssertTrue(signal.notified(), "the next notification queues a new read")
+    }
+
     func testPlayingRenderersReportOnlyTheFirstAndLast() {
         var playing = PlayingRenderers()
         XCTAssertTrue(playing.set(1, playing: true))
