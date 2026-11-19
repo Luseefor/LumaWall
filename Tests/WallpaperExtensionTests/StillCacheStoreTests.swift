@@ -84,8 +84,10 @@ final class StillCacheStoreTests: XCTestCase {
         try place(hashB, qhd, version: "v1", usedAgo: 100)
         let dir = dir!, hashA = hashA, qhd = qhd
         let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
+        let seedLocking = DispatchSemaphore(value: 0)
         let seedReturned = DispatchSemaphore(value: 0)
         let seedFound = OSAllocatedUnfairLock<Bool?>(initialState: nil)
+        let seedReachedLock = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let seedWaited = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let seedDone = expectation(description: "seed returned")
         let store = StillCacheStore(budget: 2 * stillFixtureBytes, onEvictionScan: {
@@ -95,16 +97,20 @@ final class StillCacheStoreTests: XCTestCase {
                 seedReturned.signal()
                 seedDone.fulfill()
             }
-            // An unblocked load of an 86-byte file returns well within this.
-            let waited = seedReturned.wait(timeout: .now() + 1) == .timedOut
+            // Hold the scan until the seed is at the lock, however late it
+            // is scheduled, then give it time it would only need unblocked.
+            let reached = seedLocking.wait(timeout: .now() + 5) == .success
+            seedReachedLock.withLock { $0 = reached }
+            let waited = seedReturned.wait(timeout: .now() + 0.5) == .timedOut
             seedWaited.withLock { $0 = waited }
-        })
+        }, onSeedLocking: { seedLocking.signal() })
         shared.withLock { $0 = store }
         let writeDone = expectation(description: "write returned")
         let hashB = hashB, fourK = fourK
         startWrite(store, in: dir, choiceHash: hashB, version: "v1", size: fourK, bgr: stillGreen) { writeDone.fulfill() }
         wait(for: [writeDone, seedDone], timeout: 10)
-        XCTAssertEqual(seedWaited.withLock { $0 }, true, "the seed ran while eviction held its scan")
+        XCTAssertEqual(seedReachedLock.withLock { $0 }, true, "the seed never reached the lock while eviction held its scan")
+        XCTAssertEqual(seedWaited.withLock { $0 }, true, "the seed returned while eviction held its scan")
         XCTAssertEqual(seedFound.withLock { $0 }, false, "the seed's only candidate was evicted before it could pick it")
         XCTAssertFalse(FileManager.default.fileExists(atPath: seeded.path))
     }
@@ -115,14 +121,17 @@ final class StillCacheStoreTests: XCTestCase {
         try place(hashA, qhd, version: "v1", usedAgo: 10, data: stillFixture(stillBlue))
         let dir = dir!, hashA = hashA, qhd = qhd
         let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
+        let writeFinished = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let store = StillCacheStore(onSeedPicked: {
             guard let store = shared.withLock({ $0 }) else { return }
             let written = DispatchSemaphore(value: 0)
             startWrite(store, in: dir, choiceHash: hashA, version: "v2", size: qhd, bgr: stillRed) { written.signal() }
-            written.wait()
+            let finished = written.wait(timeout: .now() + 10) == .success
+            writeFinished.withLock { $0 = finished }
         })
         shared.withLock { $0 = store }
         let image = try XCTUnwrap(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        XCTAssertEqual(writeFinished.withLock { $0 }, true, "the write after the pick never returned")
         XCTAssertEqual(try stillTestPixel(image, x: 0, y: 0), stillBlue)
         XCTAssertEqual(StillCacheStore.scan(dir).map(\.version), ["v2"])
     }
