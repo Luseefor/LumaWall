@@ -389,14 +389,18 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
         }
         let videoURL = findVideoURL(forChoice: renderChoice)
-        let cachedStill = videoURL.flatMap {
-            loadCachedSnapshotImage(forChoice: choiceConfiguration, videoURL: $0, pixelWidth: Int(destSize.width * scaleFactor), pixelHeight: Int(destSize.height * scaleFactor))
+        // Read (and later decode) the cached still only where a new renderer
+        // is seeded with it: a same-choice re-acquire or an in-place switch
+        // never uses it.
+        let pixelWidth = Int(destSize.width * scaleFactor), pixelHeight = Int(destSize.height * scaleFactor)
+        let loadStill = { @Sendable [choiceConfiguration] (url: URL) in
+            loadCachedSnapshotImage(forChoice: choiceConfiguration, videoURL: url, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
         }
 
         // Diagnostic bisection: host a still only (no video pipeline). Same context
         // reuse/create/reply as below. That's what we're stress-testing, but there is no renderer.
         if Bisect.stillOnly {
-            acquireStillOnlyBisect(key: key, displayID: displayID, destSize: destSize, scaleFactor: scaleFactor, videoURL: videoURL, cachedStill: cachedStill, choice: choiceConfiguration, reply: reply)
+            acquireStillOnlyBisect(key: key, displayID: displayID, destSize: destSize, scaleFactor: scaleFactor, videoURL: videoURL, cachedStill: videoURL.flatMap(loadStill), choice: choiceConfiguration, reply: reply)
             return
         }
 
@@ -472,11 +476,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // attach one to the existing root layer. The claim prevents a racing
                 // (preview) acquire from creating a duplicate renderer on the same layer.
                 let boxedRoot = SendableBox(value: existing.rootLayer)
-                Task { [boxedRoot, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
+                Task { [boxedRoot, videoURL, loadStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
                     let renderer: VideoRenderer
                     do {
                         renderer = try await VideoRenderer.create(
-                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
+                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: loadStill(videoURL), variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         )
                     } catch {
@@ -500,8 +504,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             } else {
                 traceLog("  [acquire] renderer create already in flight for display \(key.displayID), skipping duplicate")
             }
-            let w = Int(destSize.width * scaleFactor), h = Int(destSize.height * scaleFactor)
-            Task { [videoURL, choiceConfiguration, w, h] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: w, displayPixelHeight: h) }
+            Task { [videoURL, choiceConfiguration, pixelWidth, pixelHeight] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: pixelWidth, displayPixelHeight: pixelHeight) }
             return
         }
 
@@ -518,6 +521,9 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         }
         let contextId = caContext.contextId
 
+        // Only a surface that gets a renderer needs the still; the renderer
+        // takes it as its IOSurface seed, and the root layer holds it until then.
+        let cachedStill = ColorDiag.enabled ? nil : videoURL.flatMap(loadStill)
         let layerFrame = CGRect(origin: .zero, size: destSize)
         let rootLayer = CALayer()
         rootLayer.frame = layerFrame
@@ -612,6 +618,15 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
                     return
                 }
+                // create() has enqueued the still into the display layer's
+                // IOSurface; the root layer's copy is now only memory (a 4K
+                // frame is 33 MB decoded).
+                if cachedStill != nil {
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    boxedRoot.value.contents = nil
+                    CATransaction.commit()
+                }
                 guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
                     // The context was torn down while the renderer loaded:
                     // don't hand the agent a context that no longer exists.
@@ -644,8 +659,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             traceLog("  [acquire] renderer create already in flight for display \(key.displayID), skipping duplicate (create path)")
             reply(replyObj, nil)
         }
-        let w = Int(destSize.width * scaleFactor), h = Int(destSize.height * scaleFactor)
-        Task { await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: w, displayPixelHeight: h) }
+        Task { [pixelWidth, pixelHeight] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: pixelWidth, displayPixelHeight: pixelHeight) }
     }
 
     /// Bisection acquire: identical CAContext reuse/create/reply as `acquireBody`, but
