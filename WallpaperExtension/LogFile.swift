@@ -7,7 +7,15 @@ final class LogFile: Sendable {
     let url: URL
     let maxSize: UInt64
     let rotatedCopies: Int
-    private let handle = OSAllocatedUnfairLock(initialState: nil as FileHandle?)
+    /// Writes between checks that the open handle is still the file at `url`.
+    static let pathCheckInterval = 64
+    private struct State: @unchecked Sendable {
+        var handle: FileHandle?
+        var writesSinceCheck = 0
+    }
+
+    /// Only touched inside the lock.
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     init(url: URL, maxSize: UInt64, rotatedCopies: Int) {
         self.url = url
@@ -19,23 +27,40 @@ final class LogFile: Sendable {
     /// A failed write drops the handle so the next call reopens the file.
     func append(_ line: String) {
         guard let data = line.data(using: .utf8) else { return }
-        handle.withLock { handle in
-            if let h = handle, ((try? h.offset()) ?? 0) >= maxSize {
+        state.withLock { state in
+            if let h = state.handle, ((try? h.offset()) ?? 0) >= maxSize {
                 try? h.close()
-                handle = nil
+                state.handle = nil
                 rotate()
             }
-            if handle == nil { handle = open() }
-            guard let h = handle else { return }
+            // A log deleted or replaced while open keeps taking writes into
+            // the unlinked file, so check now and then that it's still there.
+            state.writesSinceCheck += 1
+            if let h = state.handle, state.writesSinceCheck >= Self.pathCheckInterval {
+                state.writesSinceCheck = 0
+                if !isFileAtURL(h) {
+                    try? h.close()
+                    state.handle = nil
+                }
+            }
+            if state.handle == nil { state.handle = open() }
+            guard let h = state.handle else { return }
             do {
                 // write(contentsOf:) throws; write(_:) raises an Objective-C
                 // exception Swift can't catch, which aborted the extension.
                 try h.write(contentsOf: data)
             } catch {
                 try? h.close()
-                handle = nil
+                state.handle = nil
             }
         }
+    }
+
+    /// True when `handle` is still open on the file at `url`.
+    private func isFileAtURL(_ handle: FileHandle) -> Bool {
+        var open = stat(), current = stat()
+        guard fstat(handle.fileDescriptor, &open) == 0, stat(url.path, &current) == 0 else { return false }
+        return open.st_dev == current.st_dev && open.st_ino == current.st_ino
     }
 
     private func open() -> FileHandle? {

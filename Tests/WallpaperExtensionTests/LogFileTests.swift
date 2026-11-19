@@ -46,4 +46,15 @@ final class LogFileTests: XCTestCase {
         log.append("kept\n")
         XCTAssertEqual(contents("missing/extension.log"), "kept\n")
     }
+
+    func testALogDeletedUnderTheWriterIsRecreated() throws {
+        // Deleting extension.log while the extension runs left the handle
+        // writing to the unlinked file, so nothing reached the path again.
+        let url = dir.appendingPathComponent("extension.log")
+        let log = LogFile(url: url, maxSize: 1_000_000, rotatedCopies: 2)
+        log.append("first\n")
+        try FileManager.default.removeItem(at: url)
+        for i in 0 ..< LogFile.pathCheckInterval { log.append("line \(i)\n") }
+        XCTAssertTrue(contents("extension.log").hasSuffix("line \(LogFile.pathCheckInterval - 1)\n"))
+    }
 }
