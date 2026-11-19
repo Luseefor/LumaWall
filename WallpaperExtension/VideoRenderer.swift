@@ -544,10 +544,11 @@ final class VideoRenderer: @unchecked Sendable {
             guard let self, isRunning, isPreview else { return }
             isPreview = false
             extensionLog("  [Renderer #\(debugID)] a live request shares this preview surface, preview hold off")
-            applyTier(requestedTier, animated: false)
-            // Still paused: a held gradient seed gives way to the video's
-            // frame, as on a live surface created paused.
+            // A held gradient seed gives way to the video's frame, as on a
+            // live surface created paused. Before the tier, whose resume a
+            // pause could drop behind a shut gate; this restart survives it.
             send(.liveTakeover(keepsSeed: copy.liveKeepsSeed(seedOf: seededOriginal, seedIsStill: seedIsOfVideo)))
+            applyTier(requestedTier, animated: false)
         }
     }
 

@@ -363,6 +363,19 @@ final class RendererLifecycleTests: XCTestCase {
         assertStoppedAndIdle(life)
     }
 
+    func testLiveTakeoverBuildsItsFrameThroughASleepAndAPause() {
+        // The takeover's tier plays, then the displays sleep mid-flush and a
+        // pause lands before wake: the gradient must still give way.
+        var life = RendererLifecycle(policy: .paused)
+        _ = life.handle(.started(displayAsleep: false, holding: true))
+        XCTAssertEqual(life.handle(.liveTakeover(keepsSeed: false)), [.beginReset(.restart, generation: 1)])
+        _ = life.handle(.policy(.full, animated: false))
+        _ = life.handle(.displaySleep)
+        _ = life.handle(.resetFlushed(generation: 1))
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.buildPipeline(.restart)])
+    }
+
     func testLiveTakeoverKeepsASeedThatIsTheChoicesStill() {
         var life = RendererLifecycle(policy: .paused)
         _ = life.handle(.started(displayAsleep: false, holding: true))
