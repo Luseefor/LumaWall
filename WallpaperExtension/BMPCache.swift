@@ -42,6 +42,15 @@ func loadCachedSnapshotImage(forChoice videoID: String?, videoURL: URL, pixelWid
     return image
 }
 
+/// A cached still of the file `videoURL` under any choice, for a renderer
+/// that has lost track of which choice it plays but knows the file.
+func loadCachedStill(ofVideo videoURL: URL, pixelWidth: Int, pixelHeight: Int) -> CGImage? {
+    guard let cacheDir = WallpaperState.shared.cacheDirectoryURL else { return nil }
+    let gained = cacheDir.startAccessingSecurityScopedResource()
+    defer { if gained { cacheDir.stopAccessingSecurityScopedResource() } }
+    return stillStore.load(in: cacheDir, choiceHash: nil, version: stillVersion(of: videoURL), size: StillSize(width: pixelWidth, height: pixelHeight))
+}
+
 /// Make sure the Agent's cache directory holds a BMP of the video's first
 /// frame for this display size. See StillCacheStore for how entries are
 /// kept, shared between sizes and evicted.
@@ -79,17 +88,21 @@ func writeBMPSnapshot(videoURL: URL, videoID: String? = nil, displayPixelWidth: 
 }
 
 private func firstFrameBMP(of videoURL: URL) async -> Data? {
+    guard let image = await firstFrameImage(of: videoURL) else { return nil }
+    traceLog("  [BMPCache] Rendering \(image.width)x\(image.height) BGR24")
+    return StillCache.encodeBMP(image)
+}
+
+/// The video's first frame, oriented as it plays.
+func firstFrameImage(of videoURL: URL) async -> CGImage? {
     let generator = AVAssetImageGenerator(asset: AVURLAsset(url: videoURL))
     generator.appliesPreferredTrackTransform = true
-    let image: CGImage
     do {
-        image = try await generator.image(at: .zero).image
+        return try await generator.image(at: .zero).image
     } catch {
         traceLog("  [BMPCache] Failed to get video frame: \(error)")
         return nil
     }
-    traceLog("  [BMPCache] Rendering \(image.width)x\(image.height) BGR24")
-    return StillCache.encodeBMP(image)
 }
 
 /// Writes keyed the id-less case by file name, so loads must too.

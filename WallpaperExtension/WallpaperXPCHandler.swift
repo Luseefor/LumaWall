@@ -481,7 +481,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     do {
                         renderer = try await VideoRenderer.create(
                             rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: loadStill(videoURL),
-                            fallbackStill: { loadStill(videoURL) }, variantSelector: selector,
+                            fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         )
                     } catch {
@@ -605,12 +605,26 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             // The reply object is non-Sendable; box it to cross into the render Task.
             let boxedReply = SendableBox(value: replyObj)
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
-            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, loadStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
+            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview, pixelWidth, pixelHeight] in
+                // A cold start replies once create() has seeded the display
+                // layer, so a cache miss seeds the decoded first frame, or the
+                // gradient, rather than leaving the layer empty.
+                var seed = cachedStill
+                var seeded = cachedStill == nil ? "nothing" : "the cached still"
+                if seed == nil, coldStart {
+                    if let frame = await firstFrameImage(of: videoURL) {
+                        seed = frame
+                        seeded = "the decoded first frame"
+                    } else if let gradient = VideoRenderer.makeGradientStill() {
+                        seed = gradient
+                        seeded = "the gradient"
+                    }
+                }
                 let renderer: VideoRenderer
                 do {
                     renderer = try await VideoRenderer.create(
-                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill,
-                        fallbackStill: { loadStill(videoURL) }, variantSelector: selector,
+                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
+                        fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                     )
                 } catch {
@@ -632,7 +646,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // (no black gap), and video plays over it.
                 if coldStart {
                     replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
-                    traceLog("  [acquire] cold start → replied after still seeded for \(videoURL.lastPathComponent)")
+                    traceLog("  [acquire] cold start → replied after seeding \(seeded) for \(videoURL.lastPathComponent)")
                 }
                 WallpaperPrefs.shared.setActive(true)
                 // Switch: reply only once the first video frame is composited (cold start

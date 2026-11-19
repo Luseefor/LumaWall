@@ -71,10 +71,11 @@ final class VideoRenderer: @unchecked Sendable {
     /// queue when a switch or the first frame picks a copy, so a recompute
     /// still on its way can't make it open the wrong one.
     private let tierSource: @Sendable () -> PlaybackPolicy
-    /// Loads the still shown when the video can't be rebuilt. Read only
-    /// then, so a playing renderer doesn't hold a decoded frame for it; nil
-    /// (nothing cached any more) shows the gradient.
-    private let fallbackStill: @Sendable () -> CGImage?
+    /// Loads the still of the given original shown when the video can't be
+    /// rebuilt. Called only then, with the original being played (switches,
+    /// including ones held until wake or reopen, move it), so a playing
+    /// renderer doesn't hold a decoded frame; nil shows the gradient.
+    private let fallbackStill: @Sendable (URL) -> CGImage?
 
     /// Opens the copy `variantSelector` picks for the root layer's pixel size
     /// and the tier from `tierSource`, falling back to `videoURL` when that
@@ -84,7 +85,7 @@ final class VideoRenderer: @unchecked Sendable {
         rootLayer: CALayer,
         videoURL: URL,
         stillImage: CGImage? = nil,
-        fallbackStill: @escaping @Sendable () -> CGImage? = { nil },
+        fallbackStill: @escaping @Sendable (URL) -> CGImage? = { _ in nil },
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
     ) async throws -> VideoRenderer {
@@ -146,7 +147,7 @@ final class VideoRenderer: @unchecked Sendable {
         asset: AVURLAsset,
         videoTrack: AVAssetTrack,
         stillImage: CGImage?,
-        fallbackStill: @escaping @Sendable () -> CGImage?,
+        fallbackStill: @escaping @Sendable (URL) -> CGImage?,
         nominalFrameRate: Double,
         originalURL: URL,
         variantSelector: @escaping RendererCopy.Selector,
@@ -215,7 +216,7 @@ final class VideoRenderer: @unchecked Sendable {
             renderer.enqueue(stillBuffer)
             traceLog("  [Renderer #\(debugID)] Seeded still into display layer (\(stillImage.width)x\(stillImage.height))")
         } else {
-            traceLog("  [Renderer #\(debugID)] No still to seed (stillImage present: \(stillImage != nil))")
+            traceLog("  [Renderer #\(debugID)] Seeded nothing (stillImage present: \(stillImage != nil)); the display layer is empty until the first frame")
         }
         CATransaction.commit()
         // flush() (not just commit()) is what pushes the layer tree to the render
@@ -585,7 +586,7 @@ final class VideoRenderer: @unchecked Sendable {
     /// gradient when there is none, rather than a frozen or cleared frame. The
     /// reset before this flushed the renderer, so it accepts the buffer.
     private func showFallbackStill() {
-        let still = fallbackStill()
+        let still = fallbackStill(copy.activeOriginal)
         extensionLog("  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing \(still == nil ? "the gradient" : "the still")")
         guard let image = still ?? Self.makeGradientStill(),
               let buffer = makeStillSampleBuffer(from: image) else { return }
@@ -595,7 +596,7 @@ final class VideoRenderer: @unchecked Sendable {
 
     /// The acquire path's no-video gradient as an image; the display layer
     /// scales it to fill.
-    private static func makeGradientStill() -> CGImage? {
+    static func makeGradientStill() -> CGImage? {
         let side = 64
         guard let context = CGContext(
             data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
