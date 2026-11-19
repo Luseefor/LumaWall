@@ -45,6 +45,8 @@ final class VideoRenderer: @unchecked Sendable {
     /// What `PowerMonitor` last heard about this renderer being active.
     private var reportedPlayback = false
     private var rampTimer: (any DispatchSourceTimer)?
+    /// The battery flag of the latest policy, for ramp lengths. Queue-only.
+    private var rampOnBattery = false
     private var deepPauseTimer: (any DispatchSourceTimer)?
     private var retryTimer: (any DispatchSourceTimer)?
 
@@ -468,9 +470,12 @@ final class VideoRenderer: @unchecked Sendable {
 
     /// `hardPause`: the pause must stop decoding at once
     /// (`RampMath.cutsRampDown`), so it skips the ramp and ends one in flight.
-    func applyPolicy(_ policy: PlaybackPolicy, animated: Bool = false, hardPause: Bool = false) {
+    /// `onBattery` is the reading the policy came from; ramps take their
+    /// length from it rather than reading power again.
+    func applyPolicy(_ policy: PlaybackPolicy, animated: Bool = false, hardPause: Bool = false, onBattery: Bool) {
         queue.async { [weak self] in
             guard let self, isRunning else { return }
+            rampOnBattery = onBattery
             applyTier(policy, animated: animated && !hardPause)
             if hardPause { send(.hardPause) }
         }
@@ -597,8 +602,7 @@ final class VideoRenderer: @unchecked Sendable {
             cancelRamp()
             CMTimebaseSetRate(timebase, rate: rate)
         case let .ramp(target):
-            let onBattery = PowerMonitor.shared.currentState.isOnBattery
-            ramp(to: target, over: RampMath.fullDuration(toward: target, onBattery: onBattery)) { [weak self] in
+            ramp(to: target, over: RampMath.fullDuration(toward: target, onBattery: rampOnBattery)) { [weak self] in
                 self?.send(.rampFinished)
             }
         case let .startFeeding(token):

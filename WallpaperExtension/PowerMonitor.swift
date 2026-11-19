@@ -64,6 +64,29 @@ final class PowerMonitor: Sendable {
         state.withLock { $0.state }
     }
 
+    /// Read only the power source, on the caller's thread, for a lock or
+    /// unlock: it picks the copy and the ramp length from this reading, so it
+    /// doesn't wait behind poll work or read brightness. When the reading
+    /// changed something, logging, the poll and subscribers catch up on
+    /// `pollQueue`, which also reads brightness.
+    func readPowerSource() -> PowerState {
+        let started = Date()
+        let reading = Self.readBattery()
+        let (previous, current) = state.withLock { sample in
+            let previous = sample.state
+            _ = sample.merge(battery: reading, brightness: nil, at: started)
+            return (previous, sample.state)
+        }
+        guard current != previous else { return current }
+        pollQueue.async { [weak self] in
+            guard let self else { return }
+            extensionLog("[PowerMonitor] Battery → level=\(current.batteryLevel) onBattery=\(current.isOnBattery)")
+            yieldToSubscribers(latestState)
+            readHardware(battery: false)
+        }
+        return current
+    }
+
     /// A renderer started or stopped wanting playback. The poll runs while
     /// any renderer plays; the first one to start re-reads power at once,
     /// since nothing was read while all were paused.
@@ -163,11 +186,12 @@ final class PowerMonitor: Sendable {
     /// `pollQueue` only.
     private func readHardware(battery: Bool = true) {
         dispatchPrecondition(condition: .onQueue(pollQueue))
+        let started = Date()
         let reading = battery ? Self.readBattery() : nil
         let brightness = Self.readBuiltInBrightness() ?? 1.0
         let (previous, changed, current) = state.withLock { sample in
             let previous = sample.state
-            let changed = sample.merge(battery: reading, brightness: brightness, at: Date())
+            let changed = sample.merge(battery: reading, brightness: brightness, at: started)
             return (previous, changed, sample.state)
         }
         if changed {

@@ -101,6 +101,28 @@ final class PowerPollingTests: XCTestCase {
         XCTAssertTrue(sample.batteryIsStale(now: now + 40))
     }
 
+    func testAReadStartedBeforeTheLatestOneLeavesItsBattery() {
+        // A transition reads the power source off the poll queue; a poll
+        // that started reading earlier must not land its older battery
+        // state over the transition's.
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+        var sample = PowerSample()
+        XCTAssertTrue(sample.merge(battery: (onBattery: true, level: 80), brightness: nil, at: start + 1))
+        XCTAssertTrue(sample.merge(battery: (onBattery: false, level: 81), brightness: 0.4, at: start))
+        XCTAssertEqual(sample.state.isOnBattery, true)
+        XCTAssertEqual(sample.state.batteryLevel, 80)
+        XCTAssertEqual(sample.state.displayBrightness, 0.4, "brightness is read only by the poll, in order")
+        XCTAssertEqual(sample.batteryReadAt, start + 1)
+    }
+
+    func testABatteryOnlyReadKeepsBrightness() {
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+        var sample = PowerSample()
+        _ = sample.merge(battery: (onBattery: false, level: 90), brightness: 0.3, at: now)
+        XCTAssertTrue(sample.merge(battery: (onBattery: true, level: 90), brightness: nil, at: now + 1))
+        XCTAssertEqual(sample.state.displayBrightness, 0.3)
+    }
+
     // MARK: Power notifications
 
     func testANotificationQueuedBehindATransitionDoesntReplayAnOlderSample() {

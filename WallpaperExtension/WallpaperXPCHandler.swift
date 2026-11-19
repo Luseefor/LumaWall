@@ -854,7 +854,8 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
         // A lock or unlock picks the copy and the ramp length from this
         // reading: take a new one rather than trust one from before an unplug.
-        let power = modeChanged ? PowerMonitor.shared.refreshNow() : PowerMonitor.shared.currentState
+        // Only the power source; brightness and logging follow off this path.
+        let power = modeChanged ? PowerMonitor.shared.readPowerSource() : PowerMonitor.shared.currentState
         prefs.applyPolicies(
             presentationMode: presentationMode,
             activityState: activityState,
@@ -864,8 +865,8 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         LumaWallExtension.notePowerApplied(power)
 
         previousPresentationMode = presentationMode
-        extensionLog("=== UPDATE (desktop pid \(connectionPID)) === mode: \(presentationMode), activity: \(activityState)")
         reply(nil)
+        extensionLog("=== UPDATE (desktop pid \(connectionPID)) === mode: \(presentationMode), activity: \(activityState)")
     }
 
     func invalidate(withId id: Any?, reply: @escaping @Sendable ((any Error)?) -> Void) {

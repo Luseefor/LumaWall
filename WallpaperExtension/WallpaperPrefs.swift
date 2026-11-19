@@ -246,7 +246,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         for displayID in displayIDs.map(Optional.some) + [nil] {
             let displayPolicy = policy(for: displayID)
             state.forLiveRenderers(displayID: displayID) { renderer in
-                renderer.applyPolicy(displayPolicy, animated: animated, hardPause: hardPause && displayPolicy == .paused)
+                renderer.applyPolicy(displayPolicy, animated: animated, hardPause: hardPause && displayPolicy == .paused, onBattery: powerState.isOnBattery)
             }
         }
         let previewTier = previewPolicy(powerState: powerState)
