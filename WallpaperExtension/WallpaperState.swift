@@ -83,6 +83,8 @@ final class WallpaperState: Sendable {
         var isScreenLocked: Bool = false
         /// Identifies each renderer create, across contexts.
         var lastCreateToken = 0
+        /// `WallpaperXPCHandler.connectionSerial` of each open connection.
+        var openConnections: Set<Int> = []
     }
 
     private let lock = OSAllocatedUnfairLock(initialState: State())
@@ -187,14 +189,37 @@ final class WallpaperState: Sendable {
     /// preview context a live request takes over. `playsAsPreview` says
     /// whether it still takes a preview lease. Nil when the key has no
     /// context yet.
-    func noteAcquire(for key: DisplayKey, byPreview: Bool) -> (acquired: SurfaceSlot.Acquired, playsAsPreview: Bool)? {
+    func noteAcquire(for key: DisplayKey, byPreview: Bool, connection: Int) -> (acquired: SurfaceSlot.Acquired, playsAsPreview: Bool)? {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
-            let acquired = context.slot.acquired(byPreview: byPreview, contextIsPreview: context.isPreview)
+            let acquired = context.slot.acquired(byPreview: byPreview, contextIsPreview: context.isPreview, by: connection)
             state.contexts[key] = context
             if acquired.reopened { context.renderer?.setSurfaceOpen(true) }
             if acquired.promoted { context.renderer?.promoteToLive() }
             return (acquired, context.playsAsPreview)
+        }
+    }
+
+    func connectionOpened(_ serial: Int) {
+        lock.withLock { _ = $0.openConnections.insert(serial) }
+    }
+
+    func connectionClosed(_ serial: Int) {
+        lock.withLock { _ = $0.openConnections.remove(serial) }
+    }
+
+    /// An invalidate from connection `serial` reached `key`'s context: close
+    /// it unless the invalidate is ambiguous (`SurfaceSlot.invalidated`).
+    /// Nil when the key has no context.
+    func invalidate(_ key: DisplayKey, by serial: Int) -> SurfaceSlot.InvalidateAction? {
+        lock.withLock { state in
+            guard var context = state.contexts[key] else { return nil }
+            let action = context.slot.invalidated(by: serial, openConnections: state.openConnections)
+            if action == .close, context.slot.setOpen(false) {
+                state.contexts[key] = context
+                context.renderer?.setSurfaceOpen(false)
+            }
+            return action
         }
     }
 

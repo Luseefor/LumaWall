@@ -120,6 +120,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
     /// invalidation can be attributed to a specific connection.
     var connectionPID: Int32 = -1
 
+    /// Unique per connection (the agent reuses its PID across reconnects), so
+    /// an invalidate can be matched to the connection that acquired.
+    let connectionSerial = WallpaperXPCHandler.serials.withLock { $0 += 1; return $0 }
+    private static let serials = OSAllocatedUnfairLock(initialState: 0)
+
     /// Whether this connection's most recent acquire was a Settings *preview*
     /// (`isPreview: true`). A preview connection reports its own presentation state
     /// (which idles/toggles as the picker is interacted with), and since every
@@ -389,7 +394,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // pending teardown so a brief invalidate→re-acquire flicker doesn't drop it,
         // and resumes the playback the invalidate stopped.
         cancelTeardown(for: key)
-        if let (acquired, playsAsPreview) = WallpaperState.shared.noteAcquire(for: key, byPreview: isPreview) {
+        if let (acquired, playsAsPreview) = WallpaperState.shared.noteAcquire(for: key, byPreview: isPreview, connection: connectionSerial) {
             if acquired.reopened {
                 extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
             }
@@ -546,7 +551,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Install the persistent slot now (renderer added async) so a concurrent
         // acquire for the same display reuses this context instead of creating another.
         WallpaperState.shared.installContext(
-            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor),
+            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor, slot: SurfaceSlot(acquiredBy: connectionSerial)),
             for: key,
         )
         extensionLog("  Created context \(contextId) for display \(key.displayID)")
@@ -799,10 +804,13 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         WallpaperState.shared.forgetWallpaperID(uuid)
         // Nobody hosts the surface now: stop decoding at once, but keep the
         // context and its frame so a re-acquire within the grace is seamless.
-        WallpaperState.shared.setSurfaceOpen(false, for: key)
-        endPreviewLease(for: key)
+        // An invalidate that may predate a reacquire on another open
+        // connection keeps playing through the grace, as before #12.
+        let action = WallpaperState.shared.invalidate(key, by: connectionSerial)
+        if action != .graceOnly { endPreviewLease(for: key) }
         scheduleTeardown(for: key)
-        extensionLog("=== INVALIDATE === UUID \(uuid) → stopped playback, tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
+        let stopped = action == .graceOnly ? "reacquired on another open connection, keeps playing" : "stopped playback"
+        extensionLog("=== INVALIDATE === UUID \(uuid) → \(stopped), tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
         reply(nil)
     }
 

@@ -11,9 +11,15 @@ struct SurfaceSlot: Equatable {
     private(set) var open = true
     /// A desktop or lock-screen request acquired this context.
     private(set) var servedLive = false
+    /// The connection that made the latest acquire, when known.
+    private(set) var lastAcquirer: Int?
     /// The token of the renderer create in flight.
     private(set) var pendingCreate: Int?
     private(set) var hasRenderer = false
+
+    init(acquiredBy connection: Int? = nil) {
+        lastAcquirer = connection
+    }
 
     enum Finish: Equatable {
         /// Install the renderer; tell it to close first when `closed`.
@@ -39,9 +45,10 @@ struct SurfaceSlot: Equatable {
     }
 
     /// An acquire reached this context.
-    mutating func acquired(byPreview: Bool, contextIsPreview: Bool) -> Acquired {
+    mutating func acquired(byPreview: Bool, contextIsPreview: Bool, by connection: Int?) -> Acquired {
         let wasPreview = playsAsPreview(contextIsPreview: contextIsPreview)
         if !byPreview { servedLive = true }
+        if let connection { lastAcquirer = connection }
         return Acquired(reopened: setOpen(true), promoted: wasPreview && !playsAsPreview(contextIsPreview: contextIsPreview))
     }
 
@@ -50,6 +57,23 @@ struct SurfaceSlot: Equatable {
     /// lease ran out, or hold one frame when no copy fits.
     func playsAsPreview(contextIsPreview: Bool) -> Bool {
         contextIsPreview && !servedLive
+    }
+
+    enum InvalidateAction: Equatable {
+        /// The invalidate belongs to the latest acquisition: stop playback now.
+        case close
+        /// It may belong to an earlier acquisition that another, still open
+        /// connection has since replaced: keep playing through the grace.
+        case graceOnly
+    }
+
+    /// The protocol names only the surface, so the connection decides. An
+    /// invalidate from the latest acquirer, or after the latest acquirer's
+    /// connection dropped (the agent cleaning up on a new connection), is
+    /// unambiguous.
+    func invalidated(by connection: Int, openConnections: Set<Int>) -> InvalidateAction {
+        guard let lastAcquirer, lastAcquirer != connection, openConnections.contains(lastAcquirer) else { return .close }
+        return .graceOnly
     }
 
     /// Claim the slot's one renderer create for `token`.

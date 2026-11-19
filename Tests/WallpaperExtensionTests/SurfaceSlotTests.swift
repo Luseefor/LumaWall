@@ -50,8 +50,8 @@ final class SurfaceSlotTests: XCTestCase {
     func testAcquireReopensAClosedSurface() {
         var slot = SurfaceSlot()
         slot.setOpen(false)
-        XCTAssertTrue(slot.acquired(byPreview: false, contextIsPreview: false).reopened)
-        XCTAssertFalse(slot.acquired(byPreview: false, contextIsPreview: false).reopened, "already open")
+        XCTAssertTrue(slot.acquired(byPreview: false, contextIsPreview: false, by: nil).reopened)
+        XCTAssertFalse(slot.acquired(byPreview: false, contextIsPreview: false, by: nil).reopened, "already open")
     }
 
     func testALiveRequestPromotesAPreviewContextForGood() {
@@ -60,19 +60,48 @@ final class SurfaceSlotTests: XCTestCase {
         // wallpaper, and hold one frame when no copy fits; it plays as live.
         var slot = SurfaceSlot()
         XCTAssertTrue(slot.playsAsPreview(contextIsPreview: true))
-        XCTAssertEqual(slot.acquired(byPreview: true, contextIsPreview: true), .init(reopened: false, promoted: false))
-        XCTAssertEqual(slot.acquired(byPreview: false, contextIsPreview: true), .init(reopened: false, promoted: true))
+        XCTAssertEqual(slot.acquired(byPreview: true, contextIsPreview: true, by: nil), .init(reopened: false, promoted: false))
+        XCTAssertEqual(slot.acquired(byPreview: false, contextIsPreview: true, by: nil), .init(reopened: false, promoted: true))
         XCTAssertFalse(slot.playsAsPreview(contextIsPreview: true))
-        XCTAssertEqual(slot.acquired(byPreview: true, contextIsPreview: true), .init(reopened: false, promoted: false))
+        XCTAssertEqual(slot.acquired(byPreview: true, contextIsPreview: true, by: nil), .init(reopened: false, promoted: false))
         XCTAssertFalse(slot.playsAsPreview(contextIsPreview: true), "a later preview acquire doesn't demote it")
-        XCTAssertEqual(slot.acquired(byPreview: false, contextIsPreview: true).promoted, false, "promoted once")
+        XCTAssertEqual(slot.acquired(byPreview: false, contextIsPreview: true, by: nil).promoted, false, "promoted once")
     }
 
     func testALiveContextIsNeverAPreview() {
         var slot = SurfaceSlot()
         XCTAssertFalse(slot.playsAsPreview(contextIsPreview: false))
-        XCTAssertFalse(slot.acquired(byPreview: false, contextIsPreview: false).promoted)
-        XCTAssertFalse(slot.acquired(byPreview: true, contextIsPreview: false).promoted)
+        XCTAssertFalse(slot.acquired(byPreview: false, contextIsPreview: false, by: nil).promoted)
+        XCTAssertFalse(slot.acquired(byPreview: true, contextIsPreview: false, by: nil).promoted)
+    }
+
+    // MARK: Invalidate
+
+    func testInvalidateFromTheLatestAcquirerCloses() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .close)
+        _ = slot.acquired(byPreview: false, contextIsPreview: false, by: 2)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .close)
+    }
+
+    func testReconnectCleanupForASurfaceNotYetReacquiredCloses() {
+        // Logged: the old connection drops, the new one invalidates the old
+        // surfaces it hasn't reacquired.
+        let slot = SurfaceSlot(acquiredBy: 1)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [2]), .close)
+    }
+
+    func testInvalidateFromAnOlderConnectionAfterAReacquireKeepsTheGrace() {
+        // The surface was reacquired on another open connection before this
+        // invalidate, which may belong to the earlier acquisition. Before
+        // #12 it played through the grace; it still does.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(byPreview: false, contextIsPreview: false, by: 2)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .graceOnly)
+    }
+
+    func testInvalidateWithNoKnownAcquirerCloses() {
+        XCTAssertEqual(SurfaceSlot().invalidated(by: 3, openConnections: [3]), .close)
     }
 
     func testRenewalSupersedesTheEarlierTimer() {
