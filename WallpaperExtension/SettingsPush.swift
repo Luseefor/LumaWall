@@ -48,7 +48,8 @@ enum SettingsPush {
         pending?.cancel()
         let work = DispatchWorkItem {
             pending = nil
-            Task { await push() }
+            // The notification's observer rescanned before calling here.
+            Task { await push(rescan: false) }
         }
         pending = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
@@ -64,12 +65,13 @@ enum SettingsPush {
 
     /// Build the current view models once and send them over every live
     /// connection. With no connection there is nobody to build for.
-    static func push() async {
+    /// `rescan` false reuses the library listing (see `libraryDidChange`).
+    static func push(rescan: Bool = true) async {
         guard !liveProxies().isEmpty else {
             extensionLog("[SettingsPush] No live host connection, cache refreshes on the next query")
             return
         }
-        guard let models = await buildSettingsViewModelsXPC() else {
+        guard let models = await buildSettingsViewModelsXPC(rescan: rescan) else {
             extensionLog("[SettingsPush] Build failed, nothing pushed")
             return
         }

@@ -26,9 +26,6 @@ final class VideoLibrary: Sendable {
     /// index file while holding it, so index writes land in scan order.
     private let scanLock = NSLock()
     private nonisolated(unsafe) var scanRecord = LibraryScanRecord()
-    /// How long a scan stays fresh for `scanUnlessFresh`. The app posts a
-    /// library-change notification, which rescans, after each change.
-    private static let scanReuse: TimeInterval = 10
 
     private init() {
         let docs = FileManager.default.homeDirectoryForCurrentUser
@@ -93,30 +90,18 @@ final class VideoLibrary: Sendable {
         return variantURL(for: id, variant: chosen)
     }
 
-    /// `scan`, unless the listing in use comes from a scan that started in
-    /// the last `scanReuse` seconds.
-    func scanUnlessFresh() {
-        let fresh = scanLock.withLock { scanRecord.isFresh(now: Date(), maxAge: Self.scanReuse) }
-        if fresh {
-            traceLog("[VideoLibrary] Reusing a scan from the last \(Int(Self.scanReuse))s")
-            return
-        }
-        scan()
-    }
-
     /// Scan the videos directory and rebuild the in-memory index.
     /// Also migrates any legacy `wallpaper.{mp4,mov,m4v}` from Documents root.
     func scan() {
         migrateLegacyVideo()
 
-        let startedAt = Date()
         let token = scanLock.withLock { scanRecord.begin() }
         var discovered = [VideoEntry]()
         let fm = FileManager.default
         guard let subdirs = try? fm.contentsOfDirectory(
             at: videosDir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles,
         ) else {
-            publish([], token: token, startedAt: startedAt)
+            publish([], token: token)
             return
         }
 
@@ -171,15 +156,15 @@ final class VideoLibrary: Sendable {
         }
 
         discovered.sort { $0.dateAdded < $1.dateAdded }
-        publish(discovered, token: token, startedAt: startedAt)
+        publish(discovered, token: token)
     }
 
     /// Install a scan's listing unless a scan that started later already
     /// published.
-    private func publish(_ listing: [VideoEntry], token: Int, startedAt: Date) {
+    private func publish(_ listing: [VideoEntry], token: Int) {
         scanLock.lock()
         defer { scanLock.unlock() }
-        guard scanRecord.finish(token, startedAt: startedAt) else {
+        guard scanRecord.finish(token) else {
             traceLog("[VideoLibrary] Dropped a scan superseded by a newer one")
             return
         }
