@@ -207,6 +207,29 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
     }
 
+    func testPreviewThatOpensTheOriginalHoldsItWithoutDecoding() {
+        let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/a.mp4") }
+        XCTAssertTrue(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: originalOnly, tier: .full, displayPixels: display))
+        XCTAssertFalse(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector("a"), tier: .full, displayPixels: display))
+        // A paused preview opens the Full copy, which is cheap to decode.
+        XCTAssertFalse(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector("a"), tier: .paused, displayPixels: display))
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertTrue(copy.isOriginal(URL(fileURLWithPath: "/videos/./a.mp4")))
+        XCTAssertFalse(copy.isOriginal(url("a.full.mov")))
+    }
+
+    func testPreviewHoldsItsSeedOnlyWhileTheSeedIsOfTheChoiceItOpened() {
+        // A switch before start() leaves the previous choice's still in the
+        // layer; holding it would show the wrong wallpaper.
+        var copy = RendererCopy(original: url("a.mp4"), selector: { _, _ in URL(fileURLWithPath: "/videos/a.mp4") })
+        XCTAssertTrue(copy.previewHoldsSeed(playing: url("a.mp4"), seedOf: url("a.mp4")))
+        XCTAssertFalse(copy.previewHoldsSeed(playing: url("a.mp4"), seedOf: nil), "nothing seeded")
+        XCTAssertFalse(copy.previewHoldsSeed(playing: url("a.full.mov"), seedOf: url("a.mp4")), "a copy plays")
+        let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/b.mp4") }
+        XCTAssertEqual(copy.switchTo(url("b.mp4"), selector: originalOnly, current: url("a.mp4"), tier: .full, displayPixels: display, hold: false, open: open), opened("b.mp4"))
+        XCTAssertFalse(copy.previewHoldsSeed(playing: url("b.mp4"), seedOf: url("a.mp4")))
+    }
+
     // MARK: Tier changes
 
     func testPausedRendererResumingOnBatteryMovesToTheBatteryCopy() async {
