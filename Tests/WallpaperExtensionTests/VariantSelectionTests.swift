@@ -78,6 +78,23 @@ final class VariantSelectionTests: XCTestCase {
         XCTAssertEqual(reduced?.filename, "Wallpaper.reduced.mov")
     }
 
+    func testReducedPlaysTheCopyTheAppRanksAsPlayed() {
+        // Rows shared with the app's queue test (QHDFitFixtures.reducedRows).
+        for fixture in QHDFitFixtures.reducedRows {
+            let sizes = [
+                "Wallpaper.reduced.mov": CGSize(width: 1920, height: 1080),
+                "Wallpaper.minimal.mov": CGSize(width: 1280, height: 720),
+                "Wallpaper.qhd.mov": CGSize(width: 2560, height: 1440),
+            ]
+            let sourceFPS = Int(fixture.fps.rounded())
+            let copies = fixture.planned.sorted().compactMap { name in
+                sizes[name].map { VideoVariant(filename: name, fps: name == "Wallpaper.qhd.mov" ? sourceFPS : min(sourceFPS, 30), resolution: $0) }
+            }
+            let pick = VariantSelection.variant(for: .reduced, sourceFPS: sourceFPS, sourceResolution: fixture.source, variants: copies)
+            XCTAssertEqual(pick?.filename, fixture.reducedPlays, "\(fixture)")
+        }
+    }
+
     func testFullQualityPicksTheQHDCopyWhereTheAppPlansIt() {
         // Rows shared with the app's planning test (QHDFitFixtures.swift).
         for fixture in QHDFitFixtures.rows {

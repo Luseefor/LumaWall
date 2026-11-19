@@ -179,8 +179,12 @@ final class NativeWallpaperEngine {
         let enabled = snapshot.assignments.filter(\.isEnabled)
         nativeHostLog.info("restore: \(enabled.count) enabled assignment(s), \(connected.count) display(s)")
         var map: [UInt32: NativeWallpaperDeployment.EntryInfo] = [:]
-        let skipped: (DisplayAssignment) -> Bool = { assignment in
-            onlyDefaultCrop && (!assignment.composition.usesDefaultCrop || assignment.composition.spanningCanvas != nil)
+        let skipped: (DisplayAssignment) -> Bool = { Self.leavesToOverlay($0, onlyDefaultCrop: onlyDefaultCrop) }
+        // A display that moved to a cropped or spanning overlay no longer
+        // plays natively. Leaving its old entry in `active` would tell the
+        // copy queue a wallpaper still shows there.
+        for displayID in Self.overlayOwnedDisplays(in: enabled, onlyDefaultCrop: onlyDefaultCrop) {
+            active.removeValue(forKey: displayID)
         }
         // Each wallpaper's copies are planned for the displays it goes on.
         var targets: [WallpaperID: [ConnectedDisplay]] = [:]
@@ -231,6 +235,17 @@ final class NativeWallpaperEngine {
             if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             nativeHostLog.error("restore: assignment failed: \(error, privacy: .public)")
         }
+    }
+
+    /// True when the overlay engine owns this assignment, so a native restore
+    /// leaves it alone (`onlyDefaultCrop`).
+    nonisolated static func leavesToOverlay(_ assignment: DisplayAssignment, onlyDefaultCrop: Bool) -> Bool {
+        onlyDefaultCrop && (!assignment.composition.usesDefaultCrop || assignment.composition.spanningCanvas != nil)
+    }
+
+    /// The displays whose enabled assignment the overlay owns.
+    nonisolated static func overlayOwnedDisplays(in assignments: [DisplayAssignment], onlyDefaultCrop: Bool) -> Set<DisplayID> {
+        Set(assignments.filter { $0.isEnabled && leavesToOverlay($0, onlyDefaultCrop: onlyDefaultCrop) }.map(\.displayID))
     }
 
     func reapplyAssignments() {

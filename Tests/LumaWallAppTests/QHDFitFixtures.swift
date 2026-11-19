@@ -39,4 +39,29 @@ enum QHDFitFixtures {
         row(wide, 60, CGSize(width: 2560, height: 1440), false),
         row(uhd, 60, CGSize(width: 1440, height: 2560), false),
     ]
+
+    /// A source and the copies the app plans for it, with the one Reduced
+    /// plays once they all exist. A source with no 1080p copy plays the
+    /// 720p one in Reduced.
+    struct ReducedRow {
+        let source: CGSize
+        let fps: Double
+        let planned: Set<String>
+        let reducedPlays: String?
+    }
+
+    private static let reducedName = "Wallpaper.reduced.mov"
+    private static let minimalName = "Wallpaper.minimal.mov"
+    private static let qhdName = "Wallpaper.qhd.mov"
+
+    static let reducedRows: [ReducedRow] = [
+        ReducedRow(source: uhd, fps: 60, planned: [reducedName, minimalName, qhdName], reducedPlays: reducedName),
+        ReducedRow(source: uhd, fps: 30, planned: [reducedName, minimalName, qhdName], reducedPlays: reducedName),
+        ReducedRow(source: CGSize(width: 2560, height: 1440), fps: 60, planned: [reducedName, minimalName], reducedPlays: reducedName),
+        // No 1080p copy is planned at or below 1920 px.
+        ReducedRow(source: CGSize(width: 1920, height: 1080), fps: 60, planned: [minimalName], reducedPlays: minimalName),
+        ReducedRow(source: CGSize(width: 1600, height: 900), fps: 60, planned: [minimalName], reducedPlays: minimalName),
+        ReducedRow(source: CGSize(width: 1600, height: 900), fps: 30, planned: [minimalName], reducedPlays: minimalName),
+        ReducedRow(source: CGSize(width: 1280, height: 720), fps: 60, planned: [], reducedPlays: nil),
+    ]
 }
