@@ -14,14 +14,20 @@ struct SurfaceSlot: Equatable {
     /// without changing it (the Settings picker reusing the live surface's
     /// id). That host's invalidate comes on its own connection.
     private(set) var sharers: Set<Int> = []
-    /// The latest acquirer sent its invalidate; an acquire clears it.
+    /// The latest acquirer left: its invalidate, or the agent's cleanup after
+    /// its connection dropped. An acquire clears it.
     private(set) var ownerLeft = false
     /// The token of the renderer create in flight.
     private(set) var pendingCreate: Int?
     private(set) var hasRenderer = false
 
-    init(acquiredBy connection: Int? = nil) {
+    /// The role of the request that created the context; sharers are the
+    /// other role.
+    let ownerIsPreview: Bool
+
+    init(acquiredBy connection: Int? = nil, ownerIsPreview: Bool = false) {
         lastAcquirer = connection
+        self.ownerIsPreview = ownerIsPreview
     }
 
     enum Finish: Equatable {
@@ -46,7 +52,11 @@ struct SurfaceSlot: Equatable {
     /// its invalidate must not freeze the surface's real owner.
     mutating func acquired(by connection: Int?, replyOnly: Bool) -> Bool {
         if replyOnly {
-            if let connection { sharers.insert(connection) }
+            // A live request reacquiring on a new connection replaces the
+            // desktop's old one, which may have dropped without a word.
+            if let connection {
+                if ownerIsPreview { sharers = [connection] } else { sharers.insert(connection) }
+            }
         } else if let connection {
             lastAcquirer = connection
             ownerLeft = false
@@ -71,34 +81,48 @@ struct SurfaceSlot: Equatable {
     }
 
     /// The protocol names only the surface, so the connection decides which
-    /// host left: a sharer's connection, the latest acquirer's (or any, once
-    /// the acquirer's connection dropped: the agent cleaning up on a new
-    /// connection), or an older connection a reacquire elsewhere replaced,
-    /// which changes nothing. On a connection that is both the acquirer's and
-    /// a sharer's, the first invalidate counts as the sharer's. The surface
-    /// closes, and the slot with it, once the acquirer has left and no sharer
-    /// on an open connection is left to host it. A dropped connection alone
-    /// doesn't mean the acquirer left: the agent can keep its host across a
-    /// reconnect, so a sharer's invalidate waits for the acquirer's own.
+    /// host left: a sharer's connection, the latest acquirer's, or another
+    /// one. Another connection is the agent cleaning up after a reconnect
+    /// when a host's connection has dropped (that host left), and otherwise
+    /// an older connection a reacquire replaced, which changes nothing. On a
+    /// connection that is both the acquirer's and a sharer's, the first
+    /// invalidate counts as the sharer's. The surface closes, and the slot
+    /// with it, once no host is left (`hosted`).
     mutating func invalidated(by connection: Int, openConnections: Set<Int>) -> InvalidateAction {
-        if sharers.remove(connection) == nil {
-            if let lastAcquirer, lastAcquirer != connection, openConnections.contains(lastAcquirer) {
-                return .graceOnly
-            }
+        if sharers.remove(connection) != nil {
+            // That sharer left.
+        } else if lastAcquirer == nil || lastAcquirer == connection {
             ownerLeft = true
+        } else {
+            let ownerDropped = lastAcquirer.map { !openConnections.contains($0) } ?? false
+            let droppedSharers = sharers.subtracting(openConnections)
+            guard ownerDropped || !droppedSharers.isEmpty else { return .graceOnly }
+            if ownerDropped { ownerLeft = true }
+            sharers.subtract(droppedSharers)
         }
         return closeIfUnhosted(openConnections: openConnections) ? .close : .graceOnly
     }
 
-    /// A connection closed. A sharer that quits without an invalidate (the
-    /// Settings app exiting) leaves the surface to nobody once the acquirer
-    /// has left: close it. Returns whether it closed.
+    /// A connection closed. A preview host on it (the Settings app quitting
+    /// without an invalidate) is gone, and the surface closes when it was
+    /// the last host. Returns whether it closed.
     mutating func connectionsChanged(openConnections: Set<Int>) -> Bool {
         open && closeIfUnhosted(openConnections: openConnections)
     }
 
+    /// Whether any host may still show the surface. A preview host counts
+    /// while its connection is open. A live host counts until its own
+    /// invalidate, the agent's cleanup, or a reacquire replaces it, even
+    /// with its connection dropped: the agent can keep the desktop showing
+    /// the context across a reconnect.
+    private func hosted(openConnections: Set<Int>) -> Bool {
+        let ownerHosts = lastAcquirer.map { !ownerLeft && (!ownerIsPreview || openConnections.contains($0)) } ?? false
+        let sharersHost = ownerIsPreview ? !sharers.isEmpty : !sharers.isDisjoint(with: openConnections)
+        return ownerHosts || sharersHost
+    }
+
     private mutating func closeIfUnhosted(openConnections: Set<Int>) -> Bool {
-        guard ownerLeft, sharers.isDisjoint(with: openConnections) else { return false }
+        guard !hosted(openConnections: openConnections) else { return false }
         open = false
         return true
     }

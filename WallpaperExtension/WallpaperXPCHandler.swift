@@ -622,7 +622,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Install the persistent slot now (renderer added async) so a concurrent
         // acquire for the same display reuses this context instead of creating another.
         WallpaperState.shared.installContext(
-            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor, slot: SurfaceSlot(acquiredBy: connectionSerial)),
+            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor, slot: SurfaceSlot(acquiredBy: connectionSerial, ownerIsPreview: isPreview)),
             for: key,
         )
         extensionLog("  Created context \(contextId) for display \(key.displayID)")
