@@ -138,6 +138,32 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [.beginReset(.restart, generation: 1)])
     }
 
+    func testPreviewFreedWhileClosedRestartsWhenItRebuildsAfterWake() {
+        // Reopened while the displays slept: the rebuild waits for wake and
+        // must still restart, not resume from the loop-counting clock.
+        var life = playing()
+        _ = life.handle(.surfaceClosed)
+        _ = life.handle(.deepPauseFired)
+        _ = life.handle(.displaySleep)
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [])
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.beginReset(.restart, generation: 1)])
+    }
+
+    func testPreviewFreedWhileClosedRestartsWhenAPauseLifts() {
+        var life = playing()
+        _ = life.handle(.surfaceClosed)
+        _ = life.handle(.deepPauseFired)
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [])
+        XCTAssertEqual(life.handle(.policy(.full, animated: false)), [.beginReset(.restart, generation: 1)])
+        _ = life.handle(.resetFlushed(generation: 1))
+        _ = life.handle(.pipelineBuilt(true))
+        // Once rebuilt, a later deep pause on an open surface resumes as before.
+        _ = life.handle(.policy(.paused, animated: false))
+        _ = life.handle(.deepPauseFired)
+        XCTAssertEqual(life.handle(.policy(.full, animated: false)), [.beginReset(.resume, generation: 2)])
+    }
+
     func testResetFlushingWhileClosedBuildsOnReopen() {
         // Building decodes a frame into the held image; a closed surface waits.
         var life = playing()
