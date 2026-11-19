@@ -10,6 +10,10 @@ struct SurfaceSlot: Equatable {
     private(set) var open = true
     /// The connection that made the latest acquire, when known.
     private(set) var lastAcquirer: Int?
+    /// A request of the other role was handed this context without changing
+    /// it (the Settings picker reusing the live surface's id). The next
+    /// invalidate may be that host's, so it is ambiguous.
+    private(set) var sharedWithOtherRole = false
     /// The token of the renderer create in flight.
     private(set) var pendingCreate: Int?
     private(set) var hasRenderer = false
@@ -35,9 +39,15 @@ struct SurfaceSlot: Equatable {
     }
 
     /// An acquire from `connection` reached this context. Returns whether it
-    /// reopened.
-    mutating func acquired(by connection: Int?) -> Bool {
-        if let connection { lastAcquirer = connection }
+    /// reopened. A `replyOnly` reuse (the other role, handed the context
+    /// unchanged) reopens playback for its host but is not an acquisition:
+    /// its invalidate must not freeze the surface's real owner.
+    mutating func acquired(by connection: Int?, replyOnly: Bool) -> Bool {
+        if replyOnly {
+            sharedWithOtherRole = true
+        } else if let connection {
+            lastAcquirer = connection
+        }
         return setOpen(true)
     }
 
@@ -52,8 +62,13 @@ struct SurfaceSlot: Equatable {
     /// The protocol names only the surface, so the connection decides. An
     /// invalidate from the latest acquirer, or after the latest acquirer's
     /// connection dropped (the agent cleaning up on a new connection), is
-    /// unambiguous.
-    func invalidated(by connection: Int, openConnections: Set<Int>) -> InvalidateAction {
+    /// unambiguous, unless another role's host shares the surface: then this
+    /// invalidate may be that host's and takes the grace.
+    mutating func invalidated(by connection: Int, openConnections: Set<Int>) -> InvalidateAction {
+        if sharedWithOtherRole {
+            sharedWithOtherRole = false
+            return .graceOnly
+        }
         guard let lastAcquirer, lastAcquirer != connection, openConnections.contains(lastAcquirer) else { return .close }
         return .graceOnly
     }

@@ -180,12 +180,14 @@ final class WallpaperState: Sendable {
     }
 
     /// An acquire from connection `connection` reached an existing context:
-    /// record it and reopen the surface. Returns whether it reopened, or nil
+    /// record it and reopen the surface. A request of the other role is
+    /// handed the context unchanged (the reply-only reuse in acquire) and
+    /// doesn't count as an acquisition. Returns whether it reopened, or nil
     /// when the key has no context yet.
-    func noteAcquire(for key: DisplayKey, connection: Int) -> Bool? {
+    func noteAcquire(for key: DisplayKey, byPreview: Bool, connection: Int) -> Bool? {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
-            let reopened = context.slot.acquired(by: connection)
+            let reopened = context.slot.acquired(by: connection, replyOnly: byPreview != context.isPreview)
             state.contexts[key] = context
             if reopened { context.renderer?.setSurfaceOpen(true) }
             return reopened
@@ -207,10 +209,9 @@ final class WallpaperState: Sendable {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
             let action = context.slot.invalidated(by: serial, openConnections: state.openConnections)
-            if action == .close, context.slot.setOpen(false) {
-                state.contexts[key] = context
-                context.renderer?.setSurfaceOpen(false)
-            }
+            let closed = action == .close && context.slot.setOpen(false)
+            state.contexts[key] = context
+            if closed { context.renderer?.setSurfaceOpen(false) }
             return action
         }
     }
