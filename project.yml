@@ -125,6 +125,7 @@ targets:
       - path: WallpaperExtension/SurfaceSlot.swift
       - path: WallpaperExtension/RampMath.swift
       - path: WallpaperExtension/PowerPolling.swift
+      - path: WallpaperExtension/PrefsReload.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:
