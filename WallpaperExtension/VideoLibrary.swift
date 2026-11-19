@@ -22,8 +22,10 @@ final class VideoLibrary: Sendable {
     private let videosDir: URL
     private let indexURL: URL
     private let lock = OSAllocatedUnfairLock(initialState: [VideoEntry]())
-    /// When the last `scan` finished.
-    private let lastScan = OSAllocatedUnfairLock<Date?>(initialState: nil)
+    /// Orders overlapping scans. `NSLock` because publishing writes the
+    /// index file while holding it, so index writes land in scan order.
+    private let scanLock = NSLock()
+    private nonisolated(unsafe) var scanRecord = LibraryScanRecord()
     /// How long a scan stays fresh for `scanUnlessFresh`. The app posts a
     /// library-change notification, which rescans, after each change.
     private static let scanReuse: TimeInterval = 10
@@ -91,11 +93,12 @@ final class VideoLibrary: Sendable {
         return variantURL(for: id, variant: chosen)
     }
 
-    /// `scan`, unless one finished in the last `scanReuse` seconds.
+    /// `scan`, unless the listing in use comes from a scan that started in
+    /// the last `scanReuse` seconds.
     func scanUnlessFresh() {
-        let age = lastScan.withLock { $0.map { Date().timeIntervalSince($0) } }
-        if let age, age >= 0, age < Self.scanReuse {
-            traceLog("[VideoLibrary] Reusing the scan from \(String(format: "%.1f", age))s ago")
+        let fresh = scanLock.withLock { scanRecord.isFresh(now: Date(), maxAge: Self.scanReuse) }
+        if fresh {
+            traceLog("[VideoLibrary] Reusing a scan from the last \(Int(Self.scanReuse))s")
             return
         }
         scan()
@@ -106,13 +109,14 @@ final class VideoLibrary: Sendable {
     func scan() {
         migrateLegacyVideo()
 
+        let startedAt = Date()
+        let token = scanLock.withLock { scanRecord.begin() }
         var discovered = [VideoEntry]()
         let fm = FileManager.default
         guard let subdirs = try? fm.contentsOfDirectory(
             at: videosDir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles,
         ) else {
-            lock.withLock { $0 = [] }
-            saveIndex([])
+            publish([], token: token, startedAt: startedAt)
             return
         }
 
@@ -167,11 +171,21 @@ final class VideoLibrary: Sendable {
         }
 
         discovered.sort { $0.dateAdded < $1.dateAdded }
-        let sorted = discovered
-        lock.withLock { $0 = sorted }
-        saveIndex(sorted)
-        lastScan.withLock { $0 = Date() }
-        traceLog("[VideoLibrary] Scanned: \(sorted.count) video(s)")
+        publish(discovered, token: token, startedAt: startedAt)
+    }
+
+    /// Install a scan's listing unless a scan that started later already
+    /// published.
+    private func publish(_ listing: [VideoEntry], token: Int, startedAt: Date) {
+        scanLock.lock()
+        defer { scanLock.unlock() }
+        guard scanRecord.finish(token, startedAt: startedAt) else {
+            traceLog("[VideoLibrary] Dropped a scan superseded by a newer one")
+            return
+        }
+        lock.withLock { $0 = listing }
+        saveIndex(listing)
+        traceLog("[VideoLibrary] Scanned: \(listing.count) video(s)")
     }
 
     /// Add a video file to the library, copying it into the managed directory.
