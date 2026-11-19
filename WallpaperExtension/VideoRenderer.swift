@@ -854,15 +854,39 @@ final class VideoRenderer: @unchecked Sendable {
     /// Build an asset reader on the renderer queue and store it as the
     /// preloaded next reader. Must run on `queue`.
     private func installNextReader(asset: AVURLAsset, track: AVAssetTrack) {
-        guard let reader = try? AVAssetReader(asset: asset) else {
+        guard let (reader, output) = makeReader(asset: asset, track: track) else {
             traceLog("  [Renderer] Failed to create next reader")
             return
         }
+        nextReader = reader
+        nextOutput = output
+    }
+
+    private func makeReader(asset: AVURLAsset, track: AVAssetTrack) -> (AVAssetReader, AVAssetReaderTrackOutput)? {
+        guard let reader = try? AVAssetReader(asset: asset) else { return nil }
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
         output.alwaysCopiesSampleData = false
         reader.add(output)
-        nextReader = reader
-        nextOutput = output
+        return (reader, output)
+    }
+
+    /// A reader for one loop that has started reading.
+    private struct LoopReader {
+        let reader: AVAssetReader
+        let output: AVAssetReaderTrackOutput
+        let asset: AVURLAsset
+    }
+
+    private func startedLoopReader(_ built: (AVAssetReader, AVAssetReaderTrackOutput)?, asset: AVURLAsset, label: String) -> LoopReader? {
+        guard let (reader, output) = built else {
+            traceLog("  [Renderer] Failed to create \(label) reader for \(asset.url.lastPathComponent)")
+            return nil
+        }
+        guard reader.startReading() else {
+            traceLog("  [Renderer] \(label) reader for \(asset.url.lastPathComponent) won't start: \(reader.error?.localizedDescription ?? "unknown")")
+            return nil
+        }
+        return LoopReader(reader: reader, output: output, asset: asset)
     }
 
     /// Swap to the preloaded next reader at a loop boundary.
@@ -874,44 +898,42 @@ final class VideoRenderer: @unchecked Sendable {
         previousPtsOffset = ptsOffset
         ptsOffset = lastEnqueuedEnd
 
-        // The preload (or, with none, the current file) may predate a tier
-        // change; read the tier's copy from this loop on.
-        let preloaded = (nextReader?.asset as? AVURLAsset)?.url ?? asset.url
-        if let replacement = copy.loopReplacement(preloaded: preloaded, current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize),
-           let (newAsset, track) = loadBlocking(replacement) {
-            traceLog("  [Renderer] preload \(preloaded.lastPathComponent) is for an older tier, looping into \(replacement.lastPathComponent)")
-            nextReader = nil
-            nextOutput = nil
-            installNextReader(asset: newAsset, track: track)
-        }
-
-        if let nr = nextReader, let no = nextOutput {
-            if let nrAsset = nr.asset as? AVURLAsset, nrAsset.url != asset.url {
-                asset = nrAsset
-                videoTrack = no.track
-                traceLog("  [Renderer] Switched variant: \(nrAsset.url.lastPathComponent)")
+        let preload = nextReader.flatMap { reader in nextOutput.map { (reader, $0) } }
+        nextReader = nil
+        nextOutput = nil
+        let preloadAsset = preload?.0.asset as? AVURLAsset
+        // The preload may predate a tier change; read the tier's copy from
+        // this loop on, but keep the preload until that copy starts.
+        let picked = copy.loopReader(preloaded: preloadAsset?.url, current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize) { source -> LoopReader? in
+            switch source {
+            case let .replacement(url):
+                guard let (newAsset, track) = loadBlocking(url) else { return nil }
+                return startedLoopReader(makeReader(asset: newAsset, track: track), asset: newAsset, label: "replacement")
+            case .preload:
+                guard let preload, let preloadAsset else { return nil }
+                return startedLoopReader(preload, asset: preloadAsset, label: "preloaded")
+            case .current:
+                traceLog("  [Renderer] No usable next reader, creating one synchronously")
+                return startedLoopReader(makeReader(asset: asset, track: videoTrack), asset: asset, label: "fallback")
             }
-            currentReader = nr
-            currentOutput = no
-            nextReader = nil
-            nextOutput = nil
+        }
+        if picked?.source != .preload { preload?.0.cancelReading() }
+        if case let .replacement(url) = picked?.source {
+            traceLog("  [Renderer] preload \(preloadAsset?.url.lastPathComponent ?? "none") is for an older tier, looping into \(url.lastPathComponent)")
+        }
+        if let next = picked?.reader {
+            if next.asset.url != asset.url {
+                asset = next.asset
+                videoTrack = next.output.track
+                traceLog("  [Renderer] Switched variant: \(next.asset.url.lastPathComponent)")
+            }
+            currentReader = next.reader
+            currentOutput = next.output
         } else {
-            traceLog("  [Renderer] Next reader not ready, creating synchronously")
-            guard let reader = try? AVAssetReader(asset: asset) else {
-                traceLog("  [Renderer] Failed to create fallback reader")
-                // The feed reports the missing reader as a failure.
-                currentReader = nil
-                currentOutput = nil
-                return
-            }
-            let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
-            output.alwaysCopiesSampleData = false
-            reader.add(output)
-            currentReader = reader
-            currentOutput = output
+            // The feed reports the missing reader as a failure.
+            currentReader = nil
+            currentOutput = nil
         }
-
-        currentReader?.startReading()
 
         prepareNextReader()
     }
