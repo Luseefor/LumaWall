@@ -52,6 +52,29 @@ struct RendererCopy {
         return nil
     }
 
+    /// `opening`, then the seed for the file that opened, decided from the
+    /// same tier read: `seed` is told whether the renderer holds it. A
+    /// preview that opened the original, including after a copy with no
+    /// video track, holds its seed rather than decode a frame of the
+    /// original for a small tile (#35), so the seed mustn't decode one
+    /// either. Nil, with no seed, when nothing opens.
+    static func openingSeeded<Loaded, Seed>(
+        _ requested: URL,
+        selector: @escaping Selector,
+        tier: PlaybackPolicy,
+        displayPixels: CGSize,
+        isPreview: Bool,
+        open: (URL) async -> Loaded?,
+        seed: (_ holdsOriginal: Bool) async -> Seed,
+    ) async -> (loaded: Loaded, seed: Seed)? {
+        let copy = RendererCopy(original: requested, selector: selector)
+        for url in candidates(requested, selector: selector, tier: tier, displayPixels: displayPixels) {
+            guard let loaded = await open(url) else { continue }
+            return (loaded, await seed(isPreview && copy.isOriginal(url)))
+        }
+        return nil
+    }
+
     /// Switch to choice `url` (its original) picked by `selector`. With
     /// `hold` (the displays sleep or the surface is closed) the switch is
     /// held, and a later one replaces it.
@@ -156,26 +179,6 @@ struct RendererCopy {
     func liveKeepsSeed(seedOf: URL?, seedIsStill: Bool) -> Bool {
         guard seedIsStill, let seedOf else { return false }
         return isOriginal(seedOf)
-    }
-
-    /// Whether a new preview of `original` would open the original for
-    /// `tier`, the way `create` and `start` pick its file, so its seed
-    /// needn't decode a first frame (#35). `hasVideo` probes a copy: one
-    /// with no video track leaves the renderer on the original, holding.
-    static func previewHoldsOriginal(
-        _ original: URL,
-        selector: @escaping Selector,
-        tier: PlaybackPolicy,
-        displayPixels: CGSize,
-        hasVideo: (URL) async -> Bool,
-    ) async -> Bool {
-        let copy = RendererCopy(original: original, selector: selector)
-        let played = copy.previewTier(tier, displayPixels: displayPixels)
-        for url in candidates(original, selector: selector, tier: played, displayPixels: displayPixels) {
-            if copy.isOriginal(url) { return true }
-            if await hasVideo(url) { return false }
-        }
-        return true
     }
 
     /// Where the next loop's reader comes from.

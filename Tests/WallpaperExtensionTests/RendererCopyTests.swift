@@ -208,32 +208,52 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
     }
 
-    private func holdsOriginal(_ selector: @escaping RendererCopy.Selector, tier: PlaybackPolicy) async -> Bool {
-        await RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector, tier: tier, displayPixels: display) { self.open($0) != nil }
+    /// Create's open and seed: records the seed's hold decision in
+    /// `attempts` after the opens that led to it.
+    private func openSeeded(_ selector: @escaping RendererCopy.Selector, tier: PlaybackPolicy, isPreview: Bool = true) async -> (loaded: String, seed: Bool)? {
+        await RendererCopy.openingSeeded(url("a.mp4"), selector: selector, tier: tier, displayPixels: display, isPreview: isPreview) {
+            self.open($0)
+        } seed: { holds in
+            self.attempts.append("seed(holds: \(holds))")
+            return holds
+        }
     }
 
     func testPreviewThatOpensTheOriginalHoldsItWithoutDecoding() async {
         let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/a.mp4") }
-        let holdsWithNoCopy = await holdsOriginal(originalOnly, tier: .full)
-        XCTAssertTrue(holdsWithNoCopy)
-        XCTAssertEqual(attempts, [], "the original isn't probed")
-        let holdsWithCopy = await holdsOriginal(selector("a"), tier: .full)
-        XCTAssertFalse(holdsWithCopy)
+        let noCopy = await openSeeded(originalOnly, tier: .full)
+        XCTAssertEqual(noCopy?.loaded, "a.mp4")
+        XCTAssertEqual(noCopy?.seed, true)
+        let withCopy = await openSeeded(selector("a"), tier: .full)
+        XCTAssertEqual(withCopy?.loaded, "a.full.mov")
+        XCTAssertEqual(withCopy?.seed, false)
         // A paused preview opens the Full copy, which is cheap to decode.
-        let holdsPaused = await holdsOriginal(selector("a"), tier: .paused)
-        XCTAssertFalse(holdsPaused)
+        let paused = await openSeeded(selector("a"), tier: .paused)
+        XCTAssertEqual(paused?.seed, false)
+        let live = await openSeeded(originalOnly, tier: .full, isPreview: false)
+        XCTAssertEqual(live?.seed, false, "a live renderer plays the original")
         let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         XCTAssertTrue(copy.isOriginal(URL(fileURLWithPath: "/videos/./a.mp4")))
         XCTAssertFalse(copy.isOriginal(url("a.full.mov")))
     }
 
-    func testPreviewWhoseCopyHasNoVideoHoldsTheOriginal() async {
-        // The renderer falls back to the original and holds, so the seed
-        // must not decode the original either.
-        playable.remove("a.full.mov")
-        let holds = await holdsOriginal(selector("a"), tier: .full)
-        XCTAssertTrue(holds)
-        XCTAssertEqual(attempts, ["a.full.mov"])
+    func testPreviewSeedIsDecidedFromTheFileCreateOpened() async {
+        // The seed used to be decided from its own tier read before create
+        // read the tier again. Now it follows the open: a copy with no
+        // video leaves the renderer on the original, holding, so the seed
+        // mustn't decode the original's first frame.
+        playable.remove("a.reduced.mov")
+        let result = await openSeeded(selector("a"), tier: .reduced)
+        XCTAssertEqual(result?.loaded, "a.mp4")
+        XCTAssertEqual(result?.seed, true)
+        XCTAssertEqual(attempts, ["a.reduced.mov", "a.mp4", "seed(holds: true)"])
+    }
+
+    func testNothingOpensSeedsNothing() async {
+        playable.subtract(["a.full.mov", "a.mp4"])
+        let result = await openSeeded(selector("a"), tier: .full)
+        XCTAssertNil(result)
+        XCTAssertEqual(attempts, ["a.full.mov", "a.mp4"])
     }
 
     func testPreviewHoldsItsSeedOnlyWhileTheSeedIsOfTheChoiceItOpened() {

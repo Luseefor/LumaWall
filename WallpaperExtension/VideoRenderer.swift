@@ -89,6 +89,8 @@ final class VideoRenderer: @unchecked Sendable {
     private let fallbackStill: @Sendable (URL) -> CGImage?
     /// Whether init enqueued a still into the display layer. Set once there.
     private(set) var seededStill = false
+    /// What init was given to seed, for the acquire's log. Set once there.
+    let seedSource: String
     /// The original whose still init seeded, or nil. Set once there.
     private var seededOriginal: URL?
     /// The seed is a frame of that original, not the gradient. Set once in init.
@@ -97,15 +99,21 @@ final class VideoRenderer: @unchecked Sendable {
     /// before `onFirstFrameReady` runs.
     private(set) var showedFirstFrame = false
 
+    /// What init enqueues into the display layer before the first frame.
+    /// `source` names it for the log; `isStill`: a frame of the video, not
+    /// the gradient.
+    typealias Seed = (image: CGImage?, source: String, isStill: Bool)
+
     /// Opens the copy `variantSelector` picks for the root layer's pixel size
     /// and the tier from `tierSource`, falling back to `videoURL` when that
     /// copy has no video track, so the first frame is decoded from the file
-    /// the renderer plays.
+    /// the renderer plays. `seed` runs once that file is open, told whether
+    /// the preview holds it (see `RendererCopy.openingSeeded`), so the hold
+    /// and the file come from one tier read.
     static func create(
         rootLayer: CALayer,
         videoURL: URL,
-        stillImage: CGImage? = nil,
-        stillIsOfVideo: Bool = true,
+        seed: (_ holdsOriginal: Bool) async -> Seed,
         fallbackStill: @escaping @Sendable (URL) -> CGImage? = { _ in nil },
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
@@ -116,15 +124,17 @@ final class VideoRenderer: @unchecked Sendable {
             height: rootLayer.bounds.height * rootLayer.contentsScale
         )
         let policy = tierSource()
-        let opened = await RendererCopy.opening(videoURL, selector: variantSelector, tier: policy, displayPixels: pixels) { (url: URL) async -> (AVURLAsset, AVAssetTrack)? in
+        let opened = await RendererCopy.openingSeeded(videoURL, selector: variantSelector, tier: policy, displayPixels: pixels, isPreview: isPreview) { (url: URL) async -> (AVURLAsset, AVAssetTrack)? in
             let asset = AVURLAsset(url: url)
             guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
                 traceLog("  [Renderer] no video track in \(url.lastPathComponent)")
                 return nil
             }
             return (asset, track)
+        } seed: {
+            await seed($0)
         }
-        guard let (asset, track) = opened else {
+        guard let ((asset, track), seeded) = opened else {
             throw CocoaError(.fileReadCorruptFile, userInfo: [
                 NSLocalizedDescriptionKey: "No video track found in \(videoURL.lastPathComponent)",
             ])
@@ -153,8 +163,7 @@ final class VideoRenderer: @unchecked Sendable {
             displayLayer: displayLayer,
             asset: asset,
             videoTrack: track,
-            stillImage: stillImage,
-            stillIsOfVideo: stillIsOfVideo,
+            seed: seeded,
             fallbackStill: fallbackStill,
             nominalFrameRate: nominalFrameRate,
             originalURL: videoURL,
@@ -170,8 +179,7 @@ final class VideoRenderer: @unchecked Sendable {
         displayLayer: AVSampleBufferDisplayLayer,
         asset: AVURLAsset,
         videoTrack: AVAssetTrack,
-        stillImage: CGImage?,
-        stillIsOfVideo: Bool,
+        seed: Seed,
         fallbackStill: @escaping @Sendable (URL) -> CGImage?,
         nominalFrameRate: Double,
         originalURL: URL,
@@ -194,6 +202,8 @@ final class VideoRenderer: @unchecked Sendable {
         self.asset = asset
         self.videoTrack = videoTrack
         self.fallbackStill = fallbackStill
+        self.seedSource = seed.source
+        let stillImage = seed.image
         if nominalFrameRate.isFinite, nominalFrameRate > 0 {
             self.nominalFrameRate = nominalFrameRate
         }
@@ -244,7 +254,7 @@ final class VideoRenderer: @unchecked Sendable {
             renderer.enqueue(stillBuffer)
             seededStill = true
             seededOriginal = originalURL
-            seedIsOfVideo = stillIsOfVideo
+            seedIsOfVideo = seed.isStill
             traceLog("  [Renderer #\(debugID)] Seeded still into display layer (\(stillImage.width)x\(stillImage.height))")
         } else {
             traceLog("  [Renderer #\(debugID)] Seeded nothing (stillImage present: \(stillImage != nil)); the display layer is empty until the first frame")
