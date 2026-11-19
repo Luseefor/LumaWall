@@ -22,6 +22,10 @@ final class VideoLibrary: Sendable {
     private let videosDir: URL
     private let indexURL: URL
     private let lock = OSAllocatedUnfairLock(initialState: [VideoEntry]())
+    /// Orders overlapping scans. `NSLock` because publishing writes the
+    /// index file while holding it, so index writes land in scan order.
+    private let scanLock = NSLock()
+    private nonisolated(unsafe) var scanRecord = LibraryScanRecord()
 
     private init() {
         let docs = FileManager.default.homeDirectoryForCurrentUser
@@ -91,13 +95,13 @@ final class VideoLibrary: Sendable {
     func scan() {
         migrateLegacyVideo()
 
+        let token = scanLock.withLock { scanRecord.begin() }
         var discovered = [VideoEntry]()
         let fm = FileManager.default
         guard let subdirs = try? fm.contentsOfDirectory(
             at: videosDir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles,
         ) else {
-            lock.withLock { $0 = [] }
-            saveIndex([])
+            publish([], token: token)
             return
         }
 
@@ -152,10 +156,21 @@ final class VideoLibrary: Sendable {
         }
 
         discovered.sort { $0.dateAdded < $1.dateAdded }
-        let sorted = discovered
-        lock.withLock { $0 = sorted }
-        saveIndex(sorted)
-        traceLog("[VideoLibrary] Scanned: \(sorted.count) video(s)")
+        publish(discovered, token: token)
+    }
+
+    /// Install a scan's listing unless a scan that started later already
+    /// published.
+    private func publish(_ listing: [VideoEntry], token: Int) {
+        scanLock.lock()
+        defer { scanLock.unlock() }
+        guard scanRecord.finish(token) else {
+            traceLog("[VideoLibrary] Dropped a scan superseded by a newer one")
+            return
+        }
+        lock.withLock { $0 = listing }
+        saveIndex(listing)
+        traceLog("[VideoLibrary] Scanned: \(listing.count) video(s)")
     }
 
     /// Add a video file to the library, copying it into the managed directory.

@@ -6,7 +6,7 @@ import os
 final class PowerMonitor: Sendable {
     static let shared = PowerMonitor()
 
-    private let state = OSAllocatedUnfairLock(initialState: PowerState())
+    private let state = OSAllocatedUnfairLock(initialState: PowerSample())
     /// Smooths thermal flips so a one-second dip doesn't switch tiers.
     /// Confined to `thermalQueue` with `pendingRelease`.
     nonisolated(unsafe) private var thermalHold = ThermalHold(initial: ProcessInfo.processInfo.thermalState)
@@ -17,8 +17,14 @@ final class PowerMonitor: Sendable {
     /// critical notification and resume playback on a hot machine.
     private let thermalQueue = DispatchQueue(label: "app.lumawall.thermal")
     private let continuations = OSAllocatedUnfairLock(initialState: [UUID: AsyncStream<PowerState>.Continuation]())
-    private nonisolated(unsafe) var _batteryScheduler: NSBackgroundActivityScheduler?
+    /// Runs every battery and brightness read and owns the poll: `poller`
+    /// and `pollTimer` are touched only here. Never call `currentState` on it.
+    private let pollQueue = DispatchQueue(label: "app.lumawall.power-poll", qos: .utility)
+    private nonisolated(unsafe) var poller = PowerPoller()
+    private nonisolated(unsafe) var pollTimer: (any DispatchSourceTimer)?
+    private static let pollLeeway: DispatchTimeInterval = .seconds(15)
     private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
+    private let powerSourceToken = OSAllocatedUnfairLock(initialState: NOTIFY_TOKEN_INVALID)
 
     /// gamepolicyd's state-carrying Darwin notification for Game Mode sessions
     /// (name recovered from the gamepolicyd binary; posted with notify_set_state).
@@ -29,31 +35,39 @@ final class PowerMonitor: Sendable {
         "com.apple.gamepolicy.currentGameplayState",
     ]
 
-    struct PowerState: Equatable {
-        var thermalState: ProcessInfo.ThermalState = .nominal
-        var isOnBattery = false
-        var batteryLevel: Int = 100
-        var isGameModeActive: Bool = false
-        var isLowPowerModeEnabled = false
-        /// Backlight brightness of the built-in display, 0.0–1.0. Defaults to 1.0
-        /// when the value can't be read (external displays, headless, etc.).
-        var displayBrightness: Float = 1.0
-    }
+    typealias PowerState = PowerSnapshot
 
     private init() {}
 
-    /// Current power state snapshot.
+    /// Current power state, re-reading battery and brightness first when the
+    /// last reading is older than the poll interval (the poll stops while
+    /// nothing plays).
     var currentState: PowerState {
-        state.withLock { $0 }
+        let sample = state.withLock { $0 }
+        guard sample.batteryIsStale(now: Date()) else { return sample.state }
+        pollQueue.sync { if readIsStale() { readHardware() } }
+        return state.withLock { $0.state }
     }
 
     /// Re-read battery + brightness now and notify subscribers on change.
     /// The scheduled poll runs every ~30s, so without this a prefs change
     /// (e.g. the user picking Battery Saver right after unplugging) applies
     /// against stale power state and looks like "nothing changes".
-    func refreshNow() {
-        updateBatteryState()
-        updateBrightnessState()
+    @discardableResult
+    func refreshNow() -> PowerState {
+        pollQueue.sync { readHardware() }
+        return state.withLock { $0.state }
+    }
+
+    /// A renderer started or stopped wanting playback. The poll runs while
+    /// any renderer plays; the first one to start re-reads power at once,
+    /// since nothing was read while all were paused.
+    func notePlayback(renderer id: Int, playing isPlaying: Bool) {
+        pollQueue.async { [weak self] in
+            guard let self else { return }
+            apply(poller.playback(id, playing: isPlaying))
+            if poller.anyPlaying, readIsStale() { readHardware() }
+        }
     }
 
     /// AsyncStream that yields whenever any component of power state changes.
@@ -74,11 +88,10 @@ final class PowerMonitor: Sendable {
     /// Start monitoring power state. Call once at extension startup.
     func startMonitoring() {
         state.withLock {
-            $0.thermalState = ProcessInfo.processInfo.thermalState
-            $0.isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+            $0.state.thermalState = ProcessInfo.processInfo.thermalState
+            $0.state.isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
-        updateBatteryState()
-        updateBrightnessState()
+        pollQueue.sync { readHardware() }
 
         // Thermal state, event-driven via notification
         NotificationCenter.default.addObserver(
@@ -95,32 +108,24 @@ final class PowerMonitor: Sendable {
             self?.handleLowPowerModeChange()
         }
 
-        // Battery and brightness use an OS-managed periodic check.
+        // Battery and brightness are polled while it matters (`PowerPolling`).
         // Brightness needs polling because IODisplay doesn't broadcast a
         // notification when the user drags the slider, and `screensDidSleep`
         // doesn't fire when brightness is held at zero manually.
-        let scheduler = NSBackgroundActivityScheduler(
-            identifier: "app.lumawall.personal.powerCheck",
-        )
-        scheduler.interval = 30
-        scheduler.tolerance = 15
-        scheduler.repeats = true
-        scheduler.qualityOfService = .utility
-        nonisolated(unsafe) let capturedScheduler = scheduler
-        scheduler.schedule { [weak self] completion in
-            guard let self else {
-                completion(.finished)
-                return
-            }
-            if capturedScheduler.shouldDefer {
-                completion(.deferred)
-                return
-            }
-            updateBatteryState()
-            updateBrightnessState()
-            completion(.finished)
+        //
+        // An AC/battery flip is posted, so read at once instead of waiting
+        // for the poll or for the reading to go stale: a lock or wake right
+        // after unplugging would otherwise open the AC copy and ramp for 6 s.
+        var sourceToken = NOTIFY_TOKEN_INVALID
+        let sourceStatus = notify_register_dispatch(kIOPSNotifyPowerSource, &sourceToken, pollQueue) { [weak self] _ in
+            self?.readHardware()
         }
-        _batteryScheduler = scheduler
+        if sourceStatus == UInt32(NOTIFY_STATUS_OK) {
+            let registered = sourceToken
+            powerSourceToken.withLock { $0 = registered }
+        } else {
+            extensionLog("[PowerMonitor] Power source notify registration failed (status \(sourceStatus))")
+        }
 
         // Game Mode, event-driven via gamepolicyd's state-carrying notification.
         // Reaches the sandboxed extension: com.apple.* notify names aren't filtered.
@@ -147,6 +152,70 @@ final class PowerMonitor: Sendable {
 
     // MARK: - Private
 
+    /// Read battery (unless `battery` is false) and brightness, then bring
+    /// the poll in line with the reading. Every read goes through here, so a
+    /// read that finds a hardware pause starts the poll that can lift it.
+    /// `pollQueue` only.
+    private func readHardware(battery: Bool = true) {
+        dispatchPrecondition(condition: .onQueue(pollQueue))
+        let reading = battery ? Self.readBattery() : nil
+        let brightness = Self.readBuiltInBrightness() ?? 1.0
+        let (previous, changed, current) = state.withLock { sample in
+            let previous = sample.state
+            let changed = sample.merge(battery: reading, brightness: brightness, at: Date())
+            return (previous, changed, sample.state)
+        }
+        if changed {
+            if current.isOnBattery != previous.isOnBattery || current.batteryLevel != previous.batteryLevel {
+                extensionLog("[PowerMonitor] Battery → level=\(current.batteryLevel) onBattery=\(current.isOnBattery)")
+            }
+            if current.displayBrightness != previous.displayBrightness {
+                extensionLog("[PowerMonitor] Brightness → \(current.displayBrightness)")
+            }
+            yieldToSubscribers(current)
+        }
+        apply(poller.reading(batteryLevel: current.batteryLevel, displayBrightness: current.displayBrightness))
+    }
+
+    private func readIsStale() -> Bool {
+        state.withLock { $0.batteryIsStale(now: Date()) }
+    }
+
+    /// Apply `change` under the lock; the new state when it differs.
+    private func update(_ change: @Sendable (inout PowerState) -> Void) -> PowerState? {
+        state.withLock { sample in
+            let previous = sample.state
+            change(&sample.state)
+            return sample.state == previous ? nil : sample.state
+        }
+    }
+
+    /// `pollQueue` only.
+    private func apply(_ timer: PowerPoller.Timer) {
+        switch timer {
+        case .keep:
+            return
+        case .stop:
+            pollTimer?.cancel()
+            pollTimer = nil
+        case .start:
+            let source = DispatchSource.makeTimerSource(queue: pollQueue)
+            source.schedule(deadline: .now() + PowerPolling.interval, repeating: PowerPolling.interval, leeway: Self.pollLeeway)
+            source.setEventHandler { [weak self] in self?.poll() }
+            pollTimer = source
+            source.resume()
+        }
+        extensionLog("[PowerMonitor] Power poll → \(poller.mode)")
+    }
+
+    private func poll() {
+        switch poller.mode {
+        case .off: return
+        case .brightness: readHardware(battery: false)
+        case .all: readHardware()
+        }
+    }
+
     /// Runs on `thermalQueue` only.
     private func handleThermalChange() {
         dispatchPrecondition(condition: .onQueue(thermalQueue))
@@ -163,27 +232,24 @@ final class PowerMonitor: Sendable {
                 handleThermalChange()
             }
         }
-        let previous = state.withLock { $0 }
-        state.withLock { $0.thermalState = effective }
-        let current = state.withLock { $0 }
-        guard previous != current else { return }
+        guard let current = update({ $0.thermalState = effective }) else { return }
         extensionLog("[PowerMonitor] Thermal → \(current.thermalState.rawValue) (raw \(raw.rawValue))")
         yieldToSubscribers(current)
     }
 
     private func handleLowPowerModeChange() {
-        let previous = state.withLock { $0 }
-        state.withLock { $0.isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled }
-        let current = state.withLock { $0 }
-        guard previous != current else { return }
+        let enabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+        guard let current = update({ $0.isLowPowerModeEnabled = enabled }) else { return }
         extensionLog("[PowerMonitor] Low Power Mode → \(current.isLowPowerModeEnabled)")
         yieldToSubscribers(current)
     }
 
-    private func updateBatteryState() {
+    /// The power source and lowest battery percentage, or nil when IOKit
+    /// returns nothing.
+    private static func readBattery() -> (onBattery: Bool, level: Int)? {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
-        else { return }
+        else { return nil }
 
         // Walk EVERY source: the list mixes battery + AC adapter entries, and
         // the adapter entry carries no capacity and reports AC state. Reading
@@ -203,33 +269,12 @@ final class PowerMonitor: Sendable {
             }
         }
 
-        let resolved = (onBattery: onBattery, percent: percent)
-        let previous = state.withLock { $0 }
-        state.withLock { s in
-            s.isOnBattery = resolved.onBattery
-            s.batteryLevel = resolved.percent
-        }
-        let current = state.withLock { $0 }
-        guard previous != current else { return }
-        extensionLog("[PowerMonitor] Battery → level=\(current.batteryLevel) onBattery=\(current.isOnBattery)")
-        yieldToSubscribers(current)
-    }
-
-    /// Read the built-in display backlight via IORegistry. On systems without a
-    /// backlight (Mac mini, Mac Studio, external-only setups) this returns 1.0
-    /// so the policy never demotes to paused.
-    private func updateBrightnessState() {
-        let brightness = Self.readBuiltInBrightness() ?? 1.0
-        let previous = state.withLock { $0 }
-        state.withLock { $0.displayBrightness = brightness }
-        let current = state.withLock { $0 }
-        guard previous != current else { return }
-        extensionLog("[PowerMonitor] Brightness → \(brightness)")
-        yieldToSubscribers(current)
+        return (onBattery, percent)
     }
 
     /// Returns the built-in backlight brightness in 0.0–1.0, or nil if there is
-    /// no backlit display attached.
+    /// no backlit display attached (Mac mini, Mac Studio, external-only
+    /// setups); callers read that as 1.0 so the policy never demotes to paused.
     private static func readBuiltInBrightness() -> Float? {
         let matching = unsafe IOServiceMatching("AppleBacklightDisplay")
         var iter: io_iterator_t = 0
@@ -265,10 +310,7 @@ final class PowerMonitor: Sendable {
         var sessionState: UInt64 = 0
         guard notify_get_state(token, &sessionState) == UInt32(NOTIFY_STATUS_OK) else { return }
         let isActive = sessionState != 0
-        let previous = state.withLock { $0 }
-        state.withLock { $0.isGameModeActive = isActive }
-        let current = state.withLock { $0 }
-        guard previous != current else { return }
+        guard let current = update({ $0.isGameModeActive = isActive }) else { return }
         extensionLog("[PowerMonitor] Game Mode → \(isActive ? "active" : "inactive"), shouldPause via policy")
         yieldToSubscribers(current)
     }

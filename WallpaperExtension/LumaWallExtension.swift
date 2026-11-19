@@ -34,12 +34,18 @@ final class LumaWallExtension: NSObject, AppExtension {
             PowerMonitor.shared.startMonitoring()
             Task {
                 for await powerState in PowerMonitor.shared.stateChanges() {
-                    let state = WallpaperState.shared
-                    WallpaperPrefs.shared.applyPolicies(
-                        presentationMode: state.presentationMode,
-                        activityState: state.activityState,
-                        powerState: powerState,
-                    )
+                    // On the queue `updateBody` runs on. A read it takes during
+                    // a lock can post here; recomputing first, with the new
+                    // mode already stored, would play the lock screen without
+                    // the ramp and drop the animated update as a duplicate.
+                    Lifecycle.queue.async {
+                        let state = WallpaperState.shared
+                        WallpaperPrefs.shared.applyPolicies(
+                            presentationMode: state.presentationMode,
+                            activityState: state.activityState,
+                            powerState: powerState,
+                        )
+                    }
                 }
             }
         } else {
@@ -90,6 +96,8 @@ final class LumaWallExtension: NSObject, AppExtension {
             object: nil, queue: .main,
         ) { _ in
             WallpaperState.shared.noteDisplaySleepNotification(asleep: false)
+            // The Mac may have been unplugged while the displays slept.
+            PowerMonitor.shared.refreshNow()
             // Recompute first: renderers still asleep only record the new tiers,
             // so the wake below resumes on fresh policy instead of briefly
             // playing on the one from before sleep. Wake also reaches the

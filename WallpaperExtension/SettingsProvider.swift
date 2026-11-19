@@ -2,14 +2,16 @@ import AppKit
 import Foundation
 
 /// Build a fully-populated WallpaperSettingsViewModelsXPC using Codable shims.
-/// Creates one SettingsItem per video in the library.
-func buildSettingsViewModelsXPC() async -> AnyObject? {
+/// Creates one SettingsItem per video in the library. `rescan` false reuses
+/// the listing, for a push that follows the scan a library change just ran.
+func buildSettingsViewModelsXPC(rescan: Bool = true) async -> AnyObject? {
     let bundleID = Bundle.main.bundleIdentifier ?? "app.lumawall.personal.wallpaper"
     let library = VideoLibrary.shared
     let groupID = GroupID(id: "video-wallpapers")
 
-    // Always re-scan to pick up changes (deletions, new deployments)
-    library.scan()
+    // Pick up changes (deletions, new deployments), including any made
+    // before this process registered for library-change notifications.
+    if rescan { library.scan() }
 
     let entries = library.entries
 

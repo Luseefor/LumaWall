@@ -65,6 +65,97 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.rampFinished), [])
     }
 
+    func testHardPauseCutsARampDownShort() {
+        // Unlock started the ramp-down, then the Mac hit critical thermal: the
+        // policy is already Paused, so only the hard-pause event stops the
+        // seconds of decoding left.
+        var life = playing()
+        XCTAssertEqual(life.handle(.policy(.paused, animated: true)), [.ramp(to: 0)])
+        XCTAssertEqual(life.handle(.policy(.paused, animated: false)), [])
+        XCTAssertTrue(life.feeding)
+        XCTAssertEqual(life.handle(.hardPause), [.setRate(0), .stopFeeding, .armDeepPause])
+        assertStoppedAndIdle(life)
+        XCTAssertEqual(life.handle(.rampFinished), [])
+    }
+
+    func testHardPauseLeavesOtherClocksAlone() {
+        var life = playing()
+        XCTAssertEqual(life.handle(.hardPause), [], "playing: the policy event stops it")
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertEqual(life.handle(.hardPause), [])
+        _ = life.handle(.policy(.full, animated: true))
+        XCTAssertEqual(life.clock, .rampingUp)
+        XCTAssertEqual(life.handle(.hardPause), [])
+        XCTAssertEqual(life.clock, .rampingUp)
+    }
+
+    func testResumeAfterAHardPauseRampsUp() {
+        var life = playing()
+        _ = life.handle(.policy(.paused, animated: true))
+        _ = life.handle(.hardPause)
+        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.ramp(to: 1), .startFeeding(token: 2), .disarmDeepPause])
+        XCTAssertEqual(life.clock, .rampingUp)
+    }
+
+    func testResumeAfterAHardPauseAndDeepPauseRebuildsInPlace() {
+        var life = playing()
+        _ = life.handle(.policy(.paused, animated: true))
+        _ = life.handle(.hardPause)
+        XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
+        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.beginReset(.resume, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.resume)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
+    }
+
+    func testLockRevealAfterDeepPauseStillRamps() {
+        // The desktop sat paused past the deep-pause delay, then the lock
+        // screen asks for an animated resume: rebuild, then ramp up instead
+        // of jumping to full speed.
+        var life = playing()
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
+        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.beginReset(.resume, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.resume)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
+    }
+
+    // MARK: Activity (what keeps PowerMonitor polling)
+
+    func testActiveWhileTheClockRunsIncludingARampDown() {
+        var life = playing()
+        XCTAssertTrue(life.isActive)
+        _ = life.handle(.policy(.paused, animated: true))
+        XCTAssertTrue(life.isActive, "the unlock ramp-down still decodes")
+        _ = life.handle(.rampFinished)
+        XCTAssertFalse(life.isActive)
+    }
+
+    func testActiveThroughARebuildTowardPlayback() {
+        // A switch on one display must not stop and restart the poll.
+        var life = playing()
+        _ = life.handle(.assetChanged)
+        XCTAssertEqual(life.clock, .stopped)
+        XCTAssertTrue(life.isActive)
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertFalse(life.isActive, "a rebuild nobody will watch")
+    }
+
+    func testFallbackStillWaitingToRetryIsNotActive() {
+        var life = playing()
+        _ = failUntilFallback(&life)
+        XCTAssertTrue(life.wantsPlayback)
+        XCTAssertFalse(life.isActive)
+    }
+
+    func testGatedRendererIsNotActive() {
+        var life = playing()
+        _ = life.handle(.displaySleep)
+        XCTAssertFalse(life.isActive)
+        _ = life.handle(.displayWake(assetChanged: false))
+        _ = life.handle(.surfaceClosed)
+        XCTAssertFalse(life.isActive)
+    }
+
     func testAwakeRampsAreUnchanged() {
         var life = playing()
         XCTAssertEqual(life.handle(.policy(.paused, animated: true)), [.ramp(to: 0)])

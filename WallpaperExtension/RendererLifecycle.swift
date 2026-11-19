@@ -107,6 +107,9 @@ struct RendererLifecycle: Equatable {
         /// The renderer needs a flush to resume decoding.
         case decoderInterrupted(token: Int)
         case rampFinished
+        /// A pause that must stop decoding at once holds (`RampMath.cutsRampDown`):
+        /// end a ramp-down now instead of feeding it for seconds.
+        case hardPause
         case deepPauseFired
         case retryFired
     }
@@ -149,6 +152,14 @@ struct RendererLifecycle: Equatable {
 
     var wantsPlayback: Bool { wouldPlay(policy) }
 
+    /// Decoding, or rebuilding to decode: the clock runs (a ramp-down
+    /// included), or a reset or build is under way while playback is wanted.
+    /// A fallback still waiting to retry and a paused or gated renderer are
+    /// idle. `PowerMonitor` polls power while any renderer is active.
+    var isActive: Bool {
+        clock != .stopped || (wantsPlayback && (resetInFlight != nil || readers == .building))
+    }
+
     func wouldPlay(_ policy: PlaybackPolicy) -> Bool {
         policy != .paused && !displayAsleep && surfaceOpen
     }
@@ -182,7 +193,8 @@ struct RendererLifecycle: Equatable {
             guard requested != policy else { return [] }
             policy = requested
             animated = isAnimated && !displayAsleep
-            let rebuilding = resetInFlight != nil || readers == .building
+            // Freed readers rebuild in reconcile below before the clock can run.
+            let rebuilding = resetInFlight != nil || readers == .building || readers == .freed
             rampWhenReady = animated && rebuilding && wantsPlayback
         case .assetChanged:
             failures = 0
@@ -250,6 +262,10 @@ struct RendererLifecycle: Equatable {
             case .rampingDown: clock = .stopped
             case .playing, .stopped: return []
             }
+        case .hardPause:
+            guard clock == .rampingDown else { return [] }
+            clock = .stopped
+            effects.append(.setRate(0))
         case .retryFired:
             guard retryArmed else { return [] }
             retryArmed = false

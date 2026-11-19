@@ -42,6 +42,8 @@ final class VideoRenderer: @unchecked Sendable {
     /// so each event's effects run against the state that produced them.
     private var pendingEvents: [RendererLifecycle.Event] = []
     private var isDispatching = false
+    /// What `PowerMonitor` last heard about this renderer being active.
+    private var reportedPlayback = false
     private var rampTimer: (any DispatchSourceTimer)?
     private var deepPauseTimer: (any DispatchSourceTimer)?
     private var retryTimer: (any DispatchSourceTimer)?
@@ -424,6 +426,7 @@ final class VideoRenderer: @unchecked Sendable {
             cancelDeepPauseTimer()
             cancelRetryTimer()
             isRunning = false
+            reportPlayback()
             renderer.stopRequestingMediaData()
             dropReaders()
             CMTimebaseSetRate(timebase, rate: 0.0)
@@ -435,10 +438,13 @@ final class VideoRenderer: @unchecked Sendable {
 
     // MARK: - Playback control
 
-    func applyPolicy(_ policy: PlaybackPolicy, animated: Bool = false) {
+    /// `hardPause`: the pause must stop decoding at once
+    /// (`RampMath.cutsRampDown`), so it skips the ramp and ends one in flight.
+    func applyPolicy(_ policy: PlaybackPolicy, animated: Bool = false, hardPause: Bool = false) {
         queue.async { [weak self] in
             guard let self, isRunning else { return }
-            applyTier(policy, animated: animated)
+            applyTier(policy, animated: animated && !hardPause)
+            if hardPause { send(.hardPause) }
         }
     }
 
@@ -519,6 +525,17 @@ final class VideoRenderer: @unchecked Sendable {
             effects.forEach(perform)
         }
         isDispatching = false
+        reportPlayback()
+    }
+
+    /// Tell `PowerMonitor` when this renderer becomes active or idle
+    /// (`RendererLifecycle.isActive`), so it polls power only while something
+    /// decodes. Queue-only.
+    private func reportPlayback() {
+        let active = isRunning && lifecycle.isActive
+        guard active != reportedPlayback else { return }
+        reportedPlayback = active
+        PowerMonitor.shared.notePlayback(renderer: debugID, playing: active)
     }
 
     private func perform(_ effect: RendererLifecycle.Effect) {
@@ -527,7 +544,8 @@ final class VideoRenderer: @unchecked Sendable {
             cancelRamp()
             CMTimebaseSetRate(timebase, rate: rate)
         case let .ramp(target):
-            ramp(to: target, over: target > 0 ? Self.rampUpDuration : Self.rampDownDuration) { [weak self] in
+            let onBattery = PowerMonitor.shared.currentState.isOnBattery
+            ramp(to: target, over: RampMath.fullDuration(toward: target, onBattery: onBattery)) { [weak self] in
                 self?.send(.rampFinished)
             }
         case let .startFeeding(token):
@@ -678,13 +696,7 @@ final class VideoRenderer: @unchecked Sendable {
 
     // MARK: - Ramp (Apple-like lock screen transition)
 
-    /// Ramp durations in seconds and step interval aligned to display refresh rate.
-    /// Ramp-down (unlock → desktop pause) matches the ~6 s deceleration of Apple's
-    /// built-in wallpapers after unlock; ramp-up (→ lock screen) stays short so
-    /// playback reaches full speed while the lock reveal is still on screen.
-    private static let rampUpDuration: TimeInterval = 2.0
-    private static let rampDownDuration: TimeInterval = 6.0
-    private static let rampStepInterval: TimeInterval = 1.0 / 120.0
+    // Durations and step rate live in `RampMath`.
 
     /// Ease the timebase rate from its CURRENT value to `target`.
     ///
@@ -704,7 +716,7 @@ final class VideoRenderer: @unchecked Sendable {
             completion?()
             return
         }
-        let totalSteps = RampMath.steps(distance: distance, fullDuration: fullDuration, stepInterval: Self.rampStepInterval)
+        let totalSteps = RampMath.steps(distance: distance, fullDuration: fullDuration, stepInterval: RampMath.stepInterval)
         var step = 0
 
         // First step lands immediately so a resume never sits on a dead frame.
@@ -713,7 +725,11 @@ final class VideoRenderer: @unchecked Sendable {
         }
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + Self.rampStepInterval, repeating: Self.rampStepInterval)
+        timer.schedule(
+            deadline: .now() + RampMath.stepInterval,
+            repeating: RampMath.stepInterval,
+            leeway: .microseconds(Int(RampMath.stepLeeway * 1_000_000)),
+        )
         timer.setEventHandler { [weak self] in
             guard let self, isRunning else {
                 timer.cancel()

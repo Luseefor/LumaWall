@@ -742,10 +742,13 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             && activityState == "active"
             && modeChanged
 
+        // A lock or unlock picks the copy and the ramp length from this
+        // reading: take a new one rather than trust one from before an unplug.
+        let power = modeChanged ? PowerMonitor.shared.refreshNow() : PowerMonitor.shared.currentState
         prefs.applyPolicies(
             presentationMode: presentationMode,
             activityState: activityState,
-            powerState: PowerMonitor.shared.currentState,
+            powerState: power,
             animated: animated,
         )
 

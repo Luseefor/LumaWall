@@ -9,30 +9,6 @@ import os
 final class WallpaperPrefs: @unchecked Sendable {
     static let shared = WallpaperPrefs()
 
-    private struct PrefsFile: Codable {
-        var userPaused: Bool
-        var alwaysPauseDesktop: Bool
-        var pauseWhenOccluded: Bool
-        var desktopOccluded: Bool
-        var occludedDisplays: Set<UInt32>?
-        var fullscreenDisplays: Set<UInt32>?
-        var pausedDisplays: Set<UInt32>?
-        var screenSaverIsOurs: Bool?
-        var powerProfile: String?
-
-        init(userPaused: Bool = false, alwaysPauseDesktop: Bool = false, pauseWhenOccluded: Bool = false, desktopOccluded: Bool = false, occludedDisplays: Set<UInt32>? = nil, fullscreenDisplays: Set<UInt32>? = nil, pausedDisplays: Set<UInt32>? = nil, screenSaverIsOurs: Bool? = nil, powerProfile: String? = nil) {
-            self.userPaused = userPaused
-            self.alwaysPauseDesktop = alwaysPauseDesktop
-            self.pauseWhenOccluded = pauseWhenOccluded
-            self.desktopOccluded = desktopOccluded
-            self.occludedDisplays = occludedDisplays
-            self.fullscreenDisplays = fullscreenDisplays
-            self.pausedDisplays = pausedDisplays
-            self.screenSaverIsOurs = screenSaverIsOurs
-            self.powerProfile = powerProfile
-        }
-    }
-
     private struct ContextState: Codable {
         var displayID: UInt32
         var videoID: String?
@@ -46,7 +22,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         var contexts: [ContextState]?
     }
 
-    private let lock = OSAllocatedUnfairLock(initialState: PrefsFile())
+    private let lock = OSAllocatedUnfairLock(initialState: WallpaperPrefsFile())
 
     private static var docsURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -150,21 +126,46 @@ final class WallpaperPrefs: @unchecked Sendable {
 
     // MARK: - Reload
 
-    func reload() {
+    /// Re-read the prefs file and report what the change calls for.
+    @discardableResult
+    func reload() -> PrefsReload {
         let data: Data
         do {
             data = try Data(contentsOf: Self.prefsURL)
         } catch {
-            return // File doesn't exist yet, normal on first launch
+            return .none // File doesn't exist yet, normal on first launch
         }
         do {
-            let prefs = try JSONDecoder().decode(PrefsFile.self, from: data)
-            lock.withLock { state in
-                state = prefs
+            let prefs = try JSONDecoder().decode(WallpaperPrefsFile.self, from: data)
+            let old = lock.withLock { state in
+                defer { state = prefs }
+                return state
             }
             traceLog("[WallpaperPrefs] Loaded: userPaused=\(prefs.userPaused), alwaysPauseDesktop=\(prefs.alwaysPauseDesktop), pauseWhenOccluded=\(prefs.pauseWhenOccluded), desktopOccluded=\(prefs.desktopOccluded)")
+            return PrefsReload.between(old, prefs)
         } catch {
             extensionLog("[WallpaperPrefs] Failed to decode prefs: \(error)")
+            return .none
+        }
+    }
+
+    /// Serializes reloads; `coalescer` is touched only here.
+    private let reloadQueue = DispatchQueue(label: "app.lumawall.prefs-reload", qos: .userInitiated)
+    private var coalescer = ReloadCoalescer()
+    /// How long a reload waits for the rest of a burst (the app posts once per
+    /// occlusion update).
+    private static let reloadDelay: TimeInterval = 0.1
+
+    /// The app wrote the prefs file: reload once for the whole burst, and
+    /// recompute policies only when something changed.
+    func prefsDidChange() {
+        reloadQueue.async { [self] in
+            guard coalescer.request() else { return }
+            reloadQueue.asyncAfter(deadline: .now() + Self.reloadDelay) { [self] in
+                coalescer.begin()
+                guard case let .applyPolicies(refreshPower) = reload() else { return }
+                applyPauseState(refreshPower: refreshPower)
+            }
         }
     }
 
@@ -181,10 +182,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         CFNotificationCenterAddObserver(
             center,
             observer,
-            { _, _, _, _, _ in
-                WallpaperPrefs.shared.reload()
-                WallpaperPrefs.shared.applyPauseState()
-            },
+            { _, _, _, _, _ in WallpaperPrefs.shared.prefsDidChange() },
             "app.lumawall.personal.prefsChanged" as CFString,
             nil,
             .deliverImmediately,
@@ -210,12 +208,12 @@ final class WallpaperPrefs: @unchecked Sendable {
     /// ramp-down made covering/uncovering a window feel like broken slow-motion
     /// pause/resume. Ramps are reserved for desktop↔lock transitions, which pass
     /// animated explicitly from updateBody().
-    private func applyPauseState() {
+    private func applyPauseState(refreshPower: Bool) {
         let state = WallpaperState.shared
-        // Prefs just changed (profile switch, pause toggle, occlusion update):
-        // re-read power now instead of trusting the ~30s poll cache, or the new
-        // profile evaluates against stale battery state and appears to do nothing.
-        PowerMonitor.shared.refreshNow()
+        // A new power profile: re-read power now instead of trusting the poll
+        // (stopped while nothing plays), or the profile evaluates against
+        // stale battery state and appears to do nothing.
+        if refreshPower { PowerMonitor.shared.refreshNow() }
         applyPolicies(
             presentationMode: state.presentationMode,
             activityState: state.activityState,
@@ -244,10 +242,11 @@ final class WallpaperPrefs: @unchecked Sendable {
         // displays that have one: skipping them left one seeded Paused (a
         // fullscreen app on another display) stuck there. Live surfaces only;
         // previews are exempt (see forLiveRenderers).
+        let hardPause = RampMath.cutsRampDown(thermalState: powerState.thermalState, activityState: activityState)
         for displayID in displayIDs.map(Optional.some) + [nil] {
             let displayPolicy = policy(for: displayID)
             state.forLiveRenderers(displayID: displayID) { renderer in
-                renderer.applyPolicy(displayPolicy, animated: animated)
+                renderer.applyPolicy(displayPolicy, animated: animated, hardPause: hardPause && displayPolicy == .paused)
             }
         }
     }
