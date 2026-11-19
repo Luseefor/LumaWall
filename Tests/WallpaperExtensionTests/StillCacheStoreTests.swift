@@ -1,0 +1,194 @@
+import os
+import XCTest
+
+/// The still cache on disk, in a temp directory (#13 review).
+final class StillCacheStoreTests: XCTestCase {
+    private let hashA = String(repeating: "a", count: 64)
+    private let hashB = String(repeating: "b", count: 64)
+    private let fourK = StillSize(width: 3840, height: 2160)
+    private let qhd = StillSize(width: 2560, height: 1440)
+    private var dir: URL!
+
+    override func setUpWithError() throws {
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("StillCacheStoreTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    private static let red: [UInt8] = [0, 0, 255]
+    private static let blue: [UInt8] = [255, 0, 0]
+    private static let green: [UInt8] = [0, 255, 0]
+
+    /// A 4x2 still of one colour: 54 + 16 * 2 = 86 bytes.
+    private static func bmp(_ bgr: [UInt8]) -> Data? {
+        (try? stillTestImage(width: 4, height: 2) { _, _ in bgr }).flatMap(StillCache.encodeBMP)
+    }
+
+    private static let fileBytes = 86
+
+    /// A still at its final name, as an earlier write would have left it.
+    @discardableResult
+    private func place(_ hash: String, _ size: StillSize, version: String?, usedAgo: TimeInterval, data: Data? = bmp(blue)) throws -> URL {
+        let entry = StillCacheEntry(key: StillCacheKey(choiceHash: hash, width: size.width, height: size.height), written: 1)
+        let url = dir.appendingPathComponent(entry.fileName)
+        try XCTUnwrap(data).write(to: url)
+        if let version { XCTAssertTrue(setStillAttribute(url, StillCacheStore.versionAttribute, version)) }
+        let used = Date().addingTimeInterval(-usedAgo).timeIntervalSinceReferenceDate
+        XCTAssertTrue(setStillAttribute(url, StillCacheStore.usedAttribute, String(used)))
+        return url
+    }
+
+    private func names() -> Set<String> {
+        Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+    }
+
+    // MARK: Ordering
+
+    func testAnOlderVideoFinishingLastLeavesTheNewerOne() async throws {
+        // V1 starts decoding, the wallpaper's video changes, V2 is written,
+        // then V1's decode returns. V1 must not replace or evict V2.
+        let store = StillCacheStore()
+        let gate = StillTestGate()
+        let dir = dir!, hashA = hashA, qhd = qhd
+        let v1 = Task {
+            await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
+                await gate.pass()
+                return Self.bmp(Self.red)
+            }
+        }
+        guard await gate.reached() else { gate.open(); return XCTFail("V1 never started decoding") }
+        let v2 = await store.write(in: dir, choiceHash: hashA, version: "v2", size: qhd) { Self.bmp(Self.blue) }
+        XCTAssertEqual(v2.outcome, .created)
+        gate.open()
+        let late = await v1.value
+        XCTAssertEqual(late.outcome, .superseded)
+        XCTAssertEqual(StillCacheStore.scan(dir).map(\.version), ["v2"])
+        let seed = try XCTUnwrap(StillCacheStore.load(in: dir, choiceHash: hashA, version: "v2", size: qhd))
+        XCTAssertEqual(try stillTestPixel(seed, x: 0, y: 0), Self.blue)
+        XCTAssertNil(StillCacheStore.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+    }
+
+    // MARK: Interrupted writes
+
+    func testATruncatedStillIsNeitherAHitNorASeed() async throws {
+        try place(hashA, fourK, version: "v1", usedAgo: 10, data: Self.bmp(Self.blue))
+        let partial = try place(hashA, qhd, version: "v1", usedAgo: 0, data: Self.bmp(Self.red)?.prefix(70))
+        let seed = try XCTUnwrap(StillCacheStore.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        XCTAssertEqual(seed.width, 4)
+        XCTAssertEqual(try stillTestPixel(seed, x: 0, y: 0), Self.blue)
+
+        let report = await StillCacheStore().write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
+            XCTFail("the complete 4K still should be copied, not decoded")
+            return nil
+        }
+        XCTAssertEqual(report, .init(outcome: .created, created: 1))
+        XCTAssertFalse(names().contains(partial.lastPathComponent))
+        let files = StillCacheStore.scan(dir)
+        XCTAssertEqual(files.count, 2)
+        XCTAssertTrue(files.allSatisfy { $0.isComplete && $0.version == "v1" })
+    }
+
+    func testLeftoverTempFilesAreRemoved() async {
+        let leftover = dir.appendingPathComponent(".lumawall-\(UUID().uuidString).tmp")
+        FileManager.default.createFile(atPath: leftover.path, contents: Data(repeating: 1, count: 10))
+        _ = await StillCacheStore().write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { Self.bmp(Self.blue) }
+        XCTAssertEqual(names().filter { $0.hasSuffix(".tmp") }, [])
+    }
+
+    // MARK: Budget
+
+    func testAHitStillEnforcesTheBudget() async throws {
+        // A crash after a write can leave the folder over budget; the next
+        // write trims it even if it only hits.
+        let oldest = try place(hashB, fourK, version: "v1", usedAgo: 300)
+        try place(hashB, qhd, version: "v1", usedAgo: 200)
+        try place(hashA, qhd, version: "v1", usedAgo: 100)
+        let store = StillCacheStore(budget: 2 * Self.fileBytes)
+        let report = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { nil }
+        XCTAssertEqual(report.outcome, .hit)
+        XCTAssertEqual(names().count, 2)
+        XCTAssertFalse(names().contains(oldest.lastPathComponent))
+    }
+
+    func testALoadCountsAsAUse() async throws {
+        let read = try place(hashA, qhd, version: "v1", usedAgo: 300)
+        let unread = try place(hashB, qhd, version: "v1", usedAgo: 100)
+        XCTAssertNotNil(StillCacheStore.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        let store = StillCacheStore(budget: 2 * Self.fileBytes)
+        _ = await store.write(in: dir, choiceHash: hashB, version: "v1", size: fourK) { Self.bmp(Self.green) }
+        XCTAssertTrue(names().contains(read.lastPathComponent))
+        XCTAssertFalse(names().contains(unread.lastPathComponent))
+    }
+
+    // MARK: Reuse
+
+    func testTwoDisplaySizesDecodeOnceAndBothStay() async {
+        let store = StillCacheStore()
+        let decodes = OSAllocatedUnfairLock(initialState: 0)
+        let encode: @Sendable () async -> Data? = {
+            decodes.withLock { $0 += 1 }
+            return Self.bmp(Self.blue)
+        }
+        let a = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK, encode: encode)
+        let b = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd, encode: encode)
+        let c = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK, encode: encode)
+        XCTAssertEqual([a.outcome, b.outcome, c.outcome], [.created, .created, .hit])
+        XCTAssertEqual(decodes.withLock { $0 }, 1)
+        XCTAssertEqual(StillCacheStore.scan(dir).count, 2)
+    }
+
+    func testConcurrentMissesShareOneDecode() async {
+        let store = StillCacheStore()
+        let gate = StillTestGate()
+        let decodes = OSAllocatedUnfairLock(initialState: 0)
+        let dir = dir!, hashA = hashA, qhd = qhd
+        let leader = Task {
+            await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
+                decodes.withLock { $0 += 1 }
+                await gate.pass()
+                return Self.bmp(Self.blue)
+            }
+        }
+        guard await gate.reached() else { gate.open(); return XCTFail("the leader never started decoding") }
+        let follower = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK) {
+            decodes.withLock { $0 += 1 }
+            return Self.bmp(Self.blue)
+        }
+        XCTAssertEqual(follower.outcome, .joined)
+        gate.open()
+        let led = await leader.value
+        XCTAssertEqual(led, .init(outcome: .created, created: 2))
+        XCTAssertEqual(decodes.withLock { $0 }, 1)
+        XCTAssertEqual(Set(StillCacheStore.scan(dir).map(\.entry.key.width)), [2560, 3840])
+    }
+}
+
+/// Holds an encode until the test opens it.
+final class StillTestGate: Sendable {
+    private let arrived = AsyncStream<Void>.makeStream()
+    private let opened = AsyncStream<Void>.makeStream()
+
+    func pass() async {
+        arrived.continuation.yield()
+        for await _ in opened.stream { break }
+    }
+
+    /// True once an encode is waiting at the gate; false after 5 s, so a
+    /// store that never encodes fails the test instead of hanging it.
+    func reached() async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { for await _ in self.arrived.stream { return true }; return false }
+            group.addTask { try? await Task.sleep(for: .seconds(5)); return false }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+    }
+
+    func open() {
+        opened.continuation.finish()
+    }
+}

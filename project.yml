@@ -129,6 +129,7 @@ targets:
       - path: WallpaperExtension/PrefsReload.swift
       - path: WallpaperExtension/LibraryScanRecord.swift
       - path: WallpaperExtension/StillCache.swift
+      - path: WallpaperExtension/StillCacheStore.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:
