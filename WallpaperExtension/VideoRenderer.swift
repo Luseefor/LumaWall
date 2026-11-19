@@ -528,6 +528,15 @@ final class VideoRenderer: @unchecked Sendable {
         isPreview ? copy.previewTier(requested, displayPixels: displayPixelSize, playing: playing) : requested
     }
 
+    /// The library rescanned, maybe publishing a copy: a preview holding a
+    /// frame for want of one plays it now (`applyTier` asks the selector).
+    func libraryDidChange() {
+        queue.async { [weak self] in
+            guard let self, isRunning, isPreview else { return }
+            applyTier(requestedTier, animated: false)
+        }
+    }
+
     /// A live request was handed this preview's surface: stop holding frames
     /// for good, so the desktop never freezes on a preview rule.
     func playAsLive() {

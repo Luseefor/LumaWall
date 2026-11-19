@@ -1,4 +1,5 @@
 import Foundation
+import os
 import XCTest
 
 /// The files a renderer opens on create, switch, tier change, and wake. A
@@ -245,6 +246,20 @@ final class RendererCopyTests: XCTestCase {
         let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/b.mp4") }
         XCTAssertEqual(copy.switchTo(url("b.mp4"), selector: originalOnly, current: url("a.mp4"), tier: .full, displayPixels: display, hold: false, open: open), opened("b.mp4"))
         XCTAssertFalse(copy.previewHoldsSeed(playing: url("b.mp4"), seedOf: url("a.mp4")))
+    }
+
+    func testHeldPreviewPlaysACopyPublishedLater() {
+        // The selector reads the library each time, so the recheck after a
+        // rescan moves a held preview onto the new copy.
+        let published = OSAllocatedUnfairLock(initialState: false)
+        let library: RendererCopy.Selector = { _, tier in
+            URL(fileURLWithPath: published.withLock { $0 } ? "/videos/a.\(tier).mov" : "/videos/a.mp4")
+        }
+        var copy = RendererCopy(original: url("a.mp4"), selector: library)
+        XCTAssertEqual(copy.previewTier(.full, displayPixels: display, playing: url("a.mp4")), .paused)
+        published.withLock { $0 = true }
+        XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
+        XCTAssertEqual(copy.retier(current: url("a.mp4"), tier: .full, displayPixels: display, open: open), opened("a.full.mov"))
     }
 
     func testLiveTakeoverKeepsOnlyAStillOfTheActiveChoice() {
