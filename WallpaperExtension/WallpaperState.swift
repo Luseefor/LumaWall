@@ -32,6 +32,10 @@ struct ActiveWallpaper: @unchecked Sendable {
     /// preview) acquire can't add a duplicate renderer to the same root
     /// layer and a create for a torn-down context can't land in its successor.
     var slot = SurfaceSlot()
+
+    /// Plays and leases as a preview: a preview context no live request has
+    /// taken over (see `SurfaceSlot.playsAsPreview`).
+    var playsAsPreview: Bool { slot.playsAsPreview(contextIsPreview: isPreview) }
 }
 
 /// Identifies one hosted wallpaper SURFACE, a distinct `CAContext`/layer tree that
@@ -164,6 +168,8 @@ final class WallpaperState: Sendable {
             // Told under the lock so it can't land after a reopen that
             // `setSurfaceOpen` sends for the same surface.
             if closed { renderer.setSurfaceOpen(false) }
+            // Created for a preview that a live request took over meanwhile.
+            if context.isPreview, !context.playsAsPreview { renderer.promoteToLive() }
             context.videoID = videoID
             state.contexts[key] = context
             return .installed(previous: previous)
@@ -177,17 +183,25 @@ final class WallpaperState: Sendable {
         return result
     }
 
-    /// An acquire reached an existing context: reopen it, note a live
-    /// request, and say whether it still takes a preview lease. Nil when the
-    /// key has no context yet.
-    func noteAcquire(for key: DisplayKey, byPreview: Bool) -> (reopened: Bool, takesLease: Bool)? {
+    /// An acquire reached an existing context: reopen it, and promote a
+    /// preview context a live request takes over. `playsAsPreview` says
+    /// whether it still takes a preview lease. Nil when the key has no
+    /// context yet.
+    func noteAcquire(for key: DisplayKey, byPreview: Bool) -> (acquired: SurfaceSlot.Acquired, playsAsPreview: Bool)? {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
-            let reopened = context.slot.acquired(byPreview: byPreview)
+            let acquired = context.slot.acquired(byPreview: byPreview, contextIsPreview: context.isPreview)
             state.contexts[key] = context
-            if reopened { context.renderer?.setSurfaceOpen(true) }
-            return (reopened, context.slot.takesLease(contextIsPreview: context.isPreview))
+            if acquired.reopened { context.renderer?.setSurfaceOpen(true) }
+            if acquired.promoted { context.renderer?.promoteToLive() }
+            return (acquired, context.playsAsPreview)
         }
+    }
+
+    /// Whether `key`'s context plays as a preview, or nil without one. Read
+    /// by a renderer's tier source, so a promoted context takes live policy.
+    func playsAsPreview(_ key: DisplayKey) -> Bool? {
+        lock.withLock { $0.contexts[key]?.playsAsPreview }
     }
 
     /// Open or close a surface's playback and tell its renderer. Sent under
@@ -275,7 +289,7 @@ final class WallpaperState: Sendable {
     func forLiveRenderers(displayID: UInt32?, _ body: (VideoRenderer) -> Void) {
         let renderers = lock.withLock { state in
             state.contexts.values
-                .filter { $0.displayID == displayID && !$0.isPreview }
+                .filter { $0.displayID == displayID && !$0.playsAsPreview }
                 .compactMap(\.renderer)
         }
         for renderer in renderers {
@@ -287,7 +301,7 @@ final class WallpaperState: Sendable {
     /// `forLiveRenderers` leaves out.
     func forPreviewRenderers(_ body: (VideoRenderer) -> Void) {
         let renderers = lock.withLock { state in
-            state.contexts.values.filter(\.isPreview).compactMap(\.renderer)
+            state.contexts.values.filter(\.playsAsPreview).compactMap(\.renderer)
         }
         for renderer in renderers {
             body(renderer)
@@ -372,7 +386,7 @@ final class WallpaperState: Sendable {
     /// desktop surface to govern.
     func liveDisplayIDs() -> Set<UInt32> {
         lock.withLock { state in
-            Set(state.contexts.values.filter { !$0.isPreview }.compactMap(\.displayID))
+            Set(state.contexts.values.filter { !$0.playsAsPreview }.compactMap(\.displayID))
         }
     }
 

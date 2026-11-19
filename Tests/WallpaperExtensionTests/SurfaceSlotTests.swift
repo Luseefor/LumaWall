@@ -50,20 +50,29 @@ final class SurfaceSlotTests: XCTestCase {
     func testAcquireReopensAClosedSurface() {
         var slot = SurfaceSlot()
         slot.setOpen(false)
-        XCTAssertTrue(slot.acquired(byPreview: false))
-        XCTAssertFalse(slot.acquired(byPreview: false), "already open")
+        XCTAssertTrue(slot.acquired(byPreview: false, contextIsPreview: false).reopened)
+        XCTAssertFalse(slot.acquired(byPreview: false, contextIsPreview: false).reopened, "already open")
     }
 
-    func testAPreviewContextALiveRequestUsedNeverTakesALease() {
+    func testALiveRequestPromotesAPreviewContextForGood() {
         // A live request reusing a preview's key is handed the preview's
-        // context; a lease expiring on it would freeze that wallpaper.
+        // context. As a preview it would take a lease that freezes the
+        // wallpaper, and hold one frame when no copy fits; it plays as live.
         var slot = SurfaceSlot()
-        XCTAssertTrue(slot.takesLease(contextIsPreview: true))
-        _ = slot.acquired(byPreview: false)
-        XCTAssertFalse(slot.takesLease(contextIsPreview: true))
-        _ = slot.acquired(byPreview: true)
-        XCTAssertFalse(slot.takesLease(contextIsPreview: true), "a later preview acquire doesn't restore it")
-        XCTAssertFalse(SurfaceSlot().takesLease(contextIsPreview: false))
+        XCTAssertTrue(slot.playsAsPreview(contextIsPreview: true))
+        XCTAssertEqual(slot.acquired(byPreview: true, contextIsPreview: true), .init(reopened: false, promoted: false))
+        XCTAssertEqual(slot.acquired(byPreview: false, contextIsPreview: true), .init(reopened: false, promoted: true))
+        XCTAssertFalse(slot.playsAsPreview(contextIsPreview: true))
+        XCTAssertEqual(slot.acquired(byPreview: true, contextIsPreview: true), .init(reopened: false, promoted: false))
+        XCTAssertFalse(slot.playsAsPreview(contextIsPreview: true), "a later preview acquire doesn't demote it")
+        XCTAssertEqual(slot.acquired(byPreview: false, contextIsPreview: true).promoted, false, "promoted once")
+    }
+
+    func testALiveContextIsNeverAPreview() {
+        var slot = SurfaceSlot()
+        XCTAssertFalse(slot.playsAsPreview(contextIsPreview: false))
+        XCTAssertFalse(slot.acquired(byPreview: false, contextIsPreview: false).promoted)
+        XCTAssertFalse(slot.acquired(byPreview: true, contextIsPreview: false).promoted)
     }
 
     func testRenewalSupersedesTheEarlierTimer() {

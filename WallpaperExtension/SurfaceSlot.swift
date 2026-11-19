@@ -31,15 +31,24 @@ struct SurfaceSlot: Equatable {
         return true
     }
 
-    /// An acquire reached this context. Returns whether it reopened.
-    mutating func acquired(byPreview: Bool) -> Bool {
-        if !byPreview { servedLive = true }
-        return setOpen(true)
+    struct Acquired: Equatable {
+        var reopened: Bool
+        /// A live request took over a preview context: its renderer drops
+        /// the preview role and takes live policy from now on.
+        var promoted: Bool
     }
 
-    /// A preview context takes a lease until a live request uses it; the
-    /// lease expiring on a context a live wallpaper shows would freeze it.
-    func takesLease(contextIsPreview: Bool) -> Bool {
+    /// An acquire reached this context.
+    mutating func acquired(byPreview: Bool, contextIsPreview: Bool) -> Acquired {
+        let wasPreview = playsAsPreview(contextIsPreview: contextIsPreview)
+        if !byPreview { servedLive = true }
+        return Acquired(reopened: setOpen(true), promoted: wasPreview && !playsAsPreview(contextIsPreview: contextIsPreview))
+    }
+
+    /// A preview context plays and leases as a preview until a live request
+    /// uses it. Left a preview, a live wallpaper on it would freeze when the
+    /// lease ran out, or hold one frame when no copy fits.
+    func playsAsPreview(contextIsPreview: Bool) -> Bool {
         contextIsPreview && !servedLive
     }
 

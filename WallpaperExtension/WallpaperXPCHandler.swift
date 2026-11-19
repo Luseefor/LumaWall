@@ -389,13 +389,17 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // pending teardown so a brief invalidate→re-acquire flicker doesn't drop it,
         // and resumes the playback the invalidate stopped.
         cancelTeardown(for: key)
-        if let acquired = WallpaperState.shared.noteAcquire(for: key, byPreview: isPreview) {
+        if let (acquired, playsAsPreview) = WallpaperState.shared.noteAcquire(for: key, byPreview: isPreview) {
             if acquired.reopened {
                 extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
             }
             // A live request handed a preview's context (role mismatch below)
-            // ends its lease for good, so expiry can't freeze that wallpaper.
-            if acquired.takesLease { renewPreviewLease(for: key) } else { endPreviewLease(for: key) }
+            // promotes it for good: no lease to freeze it, and live policy.
+            if playsAsPreview { renewPreviewLease(for: key) } else { endPreviewLease(for: key) }
+            if acquired.promoted {
+                extensionLog("  [acquire] live request took over preview surface on display \(key.displayID) → live policy")
+                LumaWallExtension.recomputeAndApplyPolicy()
+            }
         }
         let videoURL = findVideoURL(forChoice: renderChoice)
         let cachedStill = loadCachedSnapshotImage(forChoice: choiceConfiguration)
@@ -484,7 +488,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     do {
                         renderer = try await VideoRenderer.create(
                             rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
-                            tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
+                            tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: WallpaperState.shared.playsAsPreview(key) ?? isPreview) },
                             isPreview: isPreview,
                         )
                     } catch {
@@ -612,7 +616,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 do {
                     renderer = try await VideoRenderer.create(
                         rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
-                        tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
+                        tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: WallpaperState.shared.playsAsPreview(key) ?? isPreview) },
                         isPreview: isPreview,
                     )
                 } catch {
