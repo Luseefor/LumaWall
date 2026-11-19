@@ -57,6 +57,11 @@ struct SurfaceSlot: Equatable {
         /// It may belong to an earlier acquisition that another, still open
         /// connection has since replaced: keep playing through the grace.
         case graceOnly
+
+        /// Whether the invalidate retires the surface's WallpaperID. A
+        /// grace-only one keeps it, so the owner's own invalidate during the
+        /// grace still finds the surface; teardown retires it otherwise.
+        var retiresWallpaperID: Bool { self == .close }
     }
 
     /// The protocol names only the surface, so the connection decides. An

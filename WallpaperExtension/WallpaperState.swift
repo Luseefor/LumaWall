@@ -345,12 +345,14 @@ final class WallpaperState: Sendable {
 
     /// Drop a WallpaperID mapping once its instance is invalidated.
     func forgetWallpaperID(_ uuid: UUID) {
-        lock.withLock { state in
-            _ = state.keyForWallpaperUUID.removeValue(forKey: uuid)
-            state.recentlyForgotten.append(uuid)
-            if state.recentlyForgotten.count > 32 {
-                state.recentlyForgotten.removeFirst(state.recentlyForgotten.count - 32)
-            }
+        lock.withLock { Self.forget(uuid, in: &$0) }
+    }
+
+    private static func forget(_ uuid: UUID, in state: inout State) {
+        _ = state.keyForWallpaperUUID.removeValue(forKey: uuid)
+        state.recentlyForgotten.append(uuid)
+        if state.recentlyForgotten.count > 32 {
+            state.recentlyForgotten.removeFirst(state.recentlyForgotten.count - 32)
         }
     }
 
@@ -369,7 +371,11 @@ final class WallpaperState: Sendable {
     @discardableResult
     func tearDownContext(for key: DisplayKey) -> Bool {
         let removed = lock.withLock { state -> ActiveWallpaper? in
-            state.contexts.removeValue(forKey: key)
+            // Ids kept through an ambiguous invalidate's grace retire here.
+            for (uuid, mapped) in state.keyForWallpaperUUID where mapped == key {
+                Self.forget(uuid, in: &state)
+            }
+            return state.contexts.removeValue(forKey: key)
         }
         guard let removed else { return false }
         removed.renderer?.stop()

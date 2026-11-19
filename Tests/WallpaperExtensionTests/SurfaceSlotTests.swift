@@ -106,6 +106,19 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertEqual(slot.lastAcquirer, 1)
     }
 
+    func testOnlyAClosingInvalidateRetiresTheWallpaperID() {
+        // A grace-only invalidate used to drop the id, so the owner's own
+        // invalidate during the grace resolved nothing and the surface
+        // decoded until teardown.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        let ambiguous = slot.invalidated(by: 2, openConnections: [1, 2])
+        XCTAssertFalse(ambiguous.retiresWallpaperID)
+        let owners = slot.invalidated(by: 1, openConnections: [1, 2])
+        XCTAssertEqual(owners, .close)
+        XCTAssertTrue(owners.retiresWallpaperID)
+    }
+
     func testInvalidateWithNoKnownAcquirerCloses() {
         var slot = SurfaceSlot()
         XCTAssertEqual(slot.invalidated(by: 3, openConnections: [3]), .close)
