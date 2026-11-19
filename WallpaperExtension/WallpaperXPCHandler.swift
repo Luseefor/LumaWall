@@ -861,6 +861,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             powerState: power,
             animated: animated,
         )
+        LumaWallExtension.notePowerApplied(power)
 
         previousPresentationMode = presentationMode
         extensionLog("=== UPDATE (desktop pid \(connectionPID)) === mode: \(presentationMode), activity: \(activityState)")

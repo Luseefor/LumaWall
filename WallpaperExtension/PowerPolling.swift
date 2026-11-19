@@ -117,3 +117,35 @@ struct PowerSample {
         PowerPolling.readIsStale(lastRead: batteryReadAt, now: now)
     }
 }
+
+/// Power notifications as signals, not values: each queues one read of the
+/// latest snapshot on `Lifecycle.queue` (where lock and unlock read power
+/// too), so a notification that waited behind a transition can't apply a
+/// sample older than the transition's. Redundant notifications coalesce
+/// into the queued read, and a snapshot already applied isn't applied again.
+/// `Lifecycle.queue` only.
+struct PowerSignal {
+    private var queued = false
+    private var applied: PowerSnapshot?
+
+    /// A notification arrived. True when the caller must queue a read;
+    /// false when one is already queued.
+    mutating func notified() -> Bool {
+        guard !queued else { return false }
+        queued = true
+        return true
+    }
+
+    /// The queued read runs: the snapshot to apply, or nil when it already is.
+    mutating func take(latest: PowerSnapshot) -> PowerSnapshot? {
+        queued = false
+        guard latest != applied else { return nil }
+        applied = latest
+        return latest
+    }
+
+    /// A transition applied `snapshot` itself.
+    mutating func applied(_ snapshot: PowerSnapshot) {
+        applied = snapshot
+    }
+}

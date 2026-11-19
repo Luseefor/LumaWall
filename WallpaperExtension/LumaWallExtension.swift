@@ -1,6 +1,7 @@
 import AppKit
 import ExtensionFoundation
 import Foundation
+import os
 
 @main
 final class LumaWallExtension: NSObject, AppExtension {
@@ -33,19 +34,13 @@ final class LumaWallExtension: NSObject, AppExtension {
             WallpaperXPCHandler.startGeometryAudit()
             PowerMonitor.shared.startMonitoring()
             Task {
-                for await powerState in PowerMonitor.shared.stateChanges() {
-                    // On the queue `updateBody` runs on. A read it takes during
-                    // a lock can post here; recomputing first, with the new
-                    // mode already stored, would play the lock screen without
-                    // the ramp and drop the animated update as a duplicate.
-                    Lifecycle.queue.async {
-                        let state = WallpaperState.shared
-                        WallpaperPrefs.shared.applyPolicies(
-                            presentationMode: state.presentationMode,
-                            activityState: state.activityState,
-                            powerState: powerState,
-                        )
-                    }
+                for await _ in PowerMonitor.shared.stateChanges() {
+                    // A signal, not a value: the queued read applies the latest
+                    // snapshot. On the queue `updateBody` runs on, so a
+                    // notification that waits behind a lock or unlock can't
+                    // reapply a sample older than the one that update read.
+                    guard Self.powerSignal.withLock({ $0.notified() }) else { continue }
+                    Lifecycle.queue.async { Self.applyLatestPower() }
                 }
             }
         } else {
@@ -152,6 +147,27 @@ final class LumaWallExtension: NSObject, AppExtension {
             ShuffleController.shared.noteWake()
             extensionLog("[Extension] Screen unlocked, recomputed policy")
         }
+    }
+
+    /// Power notifications waiting to be applied (`PowerSignal`). Notified
+    /// from the subscriber task, taken and applied on `Lifecycle.queue`.
+    private static let powerSignal = OSAllocatedUnfairLock(initialState: PowerSignal())
+
+    /// `Lifecycle.queue` only.
+    private static func applyLatestPower() {
+        guard let power = powerSignal.withLock({ $0.take(latest: PowerMonitor.shared.latestState) }) else { return }
+        let state = WallpaperState.shared
+        WallpaperPrefs.shared.applyPolicies(
+            presentationMode: state.presentationMode,
+            activityState: state.activityState,
+            powerState: power,
+        )
+    }
+
+    /// `updateBody` applied `power` itself; a notification queued behind it
+    /// for the same snapshot applies nothing. `Lifecycle.queue` only.
+    static func notePowerApplied(_ power: PowerMonitor.PowerState) {
+        powerSignal.withLock { $0.applied(power) }
     }
 
     /// Recompute playback policy from current state and apply to all renderers.

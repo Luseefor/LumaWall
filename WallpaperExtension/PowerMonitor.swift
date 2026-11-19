@@ -59,6 +59,11 @@ final class PowerMonitor: Sendable {
         return state.withLock { $0.state }
     }
 
+    /// The latest reading, with no I/O.
+    var latestState: PowerState {
+        state.withLock { $0.state }
+    }
+
     /// A renderer started or stopped wanting playback. The poll runs while
     /// any renderer plays; the first one to start re-reads power at once,
     /// since nothing was read while all were paused.
