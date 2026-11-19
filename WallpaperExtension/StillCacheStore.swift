@@ -45,6 +45,8 @@ actor StillCacheStore {
     private let tag: @Sendable (URL, String, String) -> Int32
     /// Test seam: runs between eviction's scan and its deletes.
     private let onEvictionScan: @Sendable () -> Void
+    /// Test seam: runs when a seed finds the lock held, before it waits.
+    private let onSeedBlocked: @Sendable () -> Void
     /// Test seam: runs after a seed picks its file, before it decodes.
     private let onSeedPicked: @Sendable () -> Void
     /// Directories that refused the attributes, by path, with the errno.
@@ -62,11 +64,13 @@ actor StillCacheStore {
         budget: Int = StillCache.byteBudget,
         tag: @escaping @Sendable (URL, String, String) -> Int32 = setStillAttribute,
         onEvictionScan: @escaping @Sendable () -> Void = {},
+        onSeedBlocked: @escaping @Sendable () -> Void = {},
         onSeedPicked: @escaping @Sendable () -> Void = {},
     ) {
         self.budget = budget
         self.tag = tag
         self.onEvictionScan = onEvictionScan
+        self.onSeedBlocked = onSeedBlocked
         self.onSeedPicked = onSeedPicked
     }
 
@@ -116,7 +120,9 @@ actor StillCacheStore {
         guard let kept else { return Report(outcome: first ?? .failed, created: created) }
         let current = latest[wallpaper].map { (choiceHash: choiceHash, version: $0) }
         let budget = budget, onEvictionScan = onEvictionScan
-        refusals.withLock { _ in
+        refusals.withLock { refused in
+            // A seed can refuse the directory while this write runs.
+            guard refused[scope] == nil else { return }
             let files = Self.scan(dir)
             onEvictionScan()
             for stale in StillCache.evictions(files, current: current, keeping: kept, budget: budget) {
@@ -135,8 +141,13 @@ actor StillCacheStore {
         guard latest[wallpaper] == version else { return (.superseded, nil) }
         switch StillCache.source(for: key, version: version, in: Self.scan(dir)) {
         case let .existing(entry):
-            _ = tag(dir.appendingPathComponent(entry.fileName), Self.usedAttribute, Self.nowString())
-            return (.hit, entry)
+            // A refused touch is a refused publish: the caller marks the
+            // directory. Any other failure evicts nothing, like a failed publish.
+            switch tag(dir.appendingPathComponent(entry.fileName), Self.usedAttribute, Self.nowString()) {
+            case 0: return (.hit, entry)
+            case let error where Self.permanentRefusals.contains(error): return (.refused(errno: error), nil)
+            default: return (.failed, nil)
+            }
         case let .copy(from: sibling):
             let source = dir.appendingPathComponent(sibling.fileName)
             switch publish(key: key, version: version, in: dir, fill: { try FileManager.default.copyItem(at: source, to: $0) }) {
@@ -158,7 +169,7 @@ actor StillCacheStore {
         }
     }
 
-    private enum Published {
+    private enum Published: Sendable {
         case entry(StillCacheEntry)
         case refused(Int32)
         case failed
@@ -176,10 +187,15 @@ actor StillCacheStore {
             result = Self.permanentRefusals.contains(error) ? .refused(error) : .failed
         } else if case let error = tag(temp, Self.usedAttribute, String(now)), error != 0 {
             result = Self.permanentRefusals.contains(error) ? .refused(error) : .failed
-        } else if rename(temp.path, dir.appendingPathComponent(entry.fileName).path) != 0 {
-            result = .failed
         } else {
-            return .entry(entry)
+            // Renamed under the lock: a seed may have found the directory
+            // refused since this write last checked.
+            let scope = dir.standardizedFileURL.path, final = dir.appendingPathComponent(entry.fileName).path
+            result = refusals.withLock { refused -> Published in
+                if let errno = refused[scope] { return .refused(errno) }
+                return rename(temp.path, final) == 0 ? .entry(entry) : .failed
+            }
+            if case .entry = result { return result }
         }
         try? FileManager.default.removeItem(at: temp)
         return result
@@ -207,14 +223,24 @@ actor StillCacheStore {
             let excluded = tried, tag = tag
             // Mapped under the lock: the mapping keeps the bytes readable if
             // an eviction deletes the file before the decode below.
-            let pick: (entry: StillCacheEntry, bytes: Data?)? = refusals.withLock { refused in
+            let choose: @Sendable (inout [String: Int32]) -> (entry: StillCacheEntry, bytes: Data?)? = { refused in
                 guard refused[scope] == nil,
                       let file = StillCache.candidates(Self.scan(dir), choiceHash: choiceHash, version: version, size: size)
                           .first(where: { !excluded.contains($0.entry) }) else { return nil }
                 let url = dir.appendingPathComponent(file.entry.fileName)
-                _ = tag(url, Self.usedAttribute, Self.nowString())
+                // A refused touch marks the directory as a refused publish
+                // does, so writes stop too. A transient failure still seeds.
+                let error = tag(url, Self.usedAttribute, Self.nowString())
+                if Self.permanentRefusals.contains(error) {
+                    refused[scope] = error
+                    return nil
+                }
                 return (file.entry, try? Data(contentsOf: url, options: .alwaysMapped))
             }
+            let pick = refusals.withLockIfAvailable(choose) ?? {
+                onSeedBlocked()
+                return refusals.withLock(choose)
+            }()
             guard let pick else { return nil }
             tried.insert(pick.entry)
             onSeedPicked()

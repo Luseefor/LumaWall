@@ -96,3 +96,43 @@ struct SurfaceSlot: Equatable {
         if pendingCreate == token { pendingCreate = nil }
     }
 }
+
+/// Acquire replies waiting for a surface's layer to show something. A
+/// renderer create that replies once its layer is seeded opens the gate for
+/// its token with its own reply; acquires that reuse the surface meanwhile,
+/// of either role, wait behind it. Waiters belong to the token, so a create
+/// whose context was torn down can't release the replies of the create that
+/// replaced it, and teardown answers them at once. Touched only on
+/// `Lifecycle.queue`.
+struct ReplyGate<Key: Hashable, Waiter> {
+    private var pending: [Key: (token: Int, waiters: [Waiter])] = [:]
+
+    /// `token`'s create replies with `reply` once its layer can show
+    /// something. Returns the waiters of an earlier create on `key` whose
+    /// context went away without `close`.
+    mutating func open(_ key: Key, token: Int, reply: Waiter) -> [Waiter] {
+        let displaced = pending[key]?.waiters ?? []
+        pending[key] = (token, [reply])
+        return displaced
+    }
+
+    /// Hold `waiter` behind the create seeding `key`. False when none is,
+    /// so the caller replies now.
+    mutating func hold(_ waiter: Waiter, for key: Key) -> Bool {
+        guard pending[key] != nil else { return false }
+        pending[key]?.waiters.append(waiter)
+        return true
+    }
+
+    /// `token`'s layer can show something: its reply and the held ones, in
+    /// order. Empty when another create owns the key.
+    mutating func ready(_ key: Key, token: Int) -> [Waiter] {
+        guard pending[key]?.token == token else { return [] }
+        return pending.removeValue(forKey: key)?.waiters ?? []
+    }
+
+    /// The surface was torn down: every reply still waiting on it.
+    mutating func close(_ key: Key) -> [Waiter] {
+        pending.removeValue(forKey: key)?.waiters ?? []
+    }
+}

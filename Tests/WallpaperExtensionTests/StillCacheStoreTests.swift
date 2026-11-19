@@ -84,27 +84,27 @@ final class StillCacheStoreTests: XCTestCase {
         try place(hashB, qhd, version: "v1", usedAgo: 100)
         let dir = dir!, hashA = hashA, qhd = qhd
         let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
-        let seedReturned = DispatchSemaphore(value: 0)
+        let seedBlocked = DispatchSemaphore(value: 0)
         let seedFound = OSAllocatedUnfairLock<Bool?>(initialState: nil)
-        let seedWaited = OSAllocatedUnfairLock<Bool?>(initialState: nil)
+        let seedWasBlocked = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let seedDone = expectation(description: "seed returned")
         let store = StillCacheStore(budget: 2 * stillFixtureBytes, onEvictionScan: {
             DispatchQueue.global().async {
                 let image = shared.withLock { $0 }?.load(in: dir, choiceHash: hashA, version: "v1", size: qhd)
                 seedFound.withLock { $0 = image != nil }
-                seedReturned.signal()
                 seedDone.fulfill()
             }
-            // An unblocked load of an 86-byte file returns well within this.
-            let waited = seedReturned.wait(timeout: .now() + 1) == .timedOut
-            seedWaited.withLock { $0 = waited }
-        })
+            // Hold the scan until the seed has found the lock taken, however
+            // late it is scheduled. Without the lock it never blocks.
+            let blocked = seedBlocked.wait(timeout: .now() + 5) == .success
+            seedWasBlocked.withLock { $0 = blocked }
+        }, onSeedBlocked: { seedBlocked.signal() })
         shared.withLock { $0 = store }
         let writeDone = expectation(description: "write returned")
         let hashB = hashB, fourK = fourK
         startWrite(store, in: dir, choiceHash: hashB, version: "v1", size: fourK, bgr: stillGreen) { writeDone.fulfill() }
         wait(for: [writeDone, seedDone], timeout: 10)
-        XCTAssertEqual(seedWaited.withLock { $0 }, true, "the seed ran while eviction held its scan")
+        XCTAssertEqual(seedWasBlocked.withLock { $0 }, true, "the seed didn't wait on the lock eviction held through its scan")
         XCTAssertEqual(seedFound.withLock { $0 }, false, "the seed's only candidate was evicted before it could pick it")
         XCTAssertFalse(FileManager.default.fileExists(atPath: seeded.path))
     }
@@ -115,14 +115,17 @@ final class StillCacheStoreTests: XCTestCase {
         try place(hashA, qhd, version: "v1", usedAgo: 10, data: stillFixture(stillBlue))
         let dir = dir!, hashA = hashA, qhd = qhd
         let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
+        let writeFinished = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let store = StillCacheStore(onSeedPicked: {
             guard let store = shared.withLock({ $0 }) else { return }
             let written = DispatchSemaphore(value: 0)
             startWrite(store, in: dir, choiceHash: hashA, version: "v2", size: qhd, bgr: stillRed) { written.signal() }
-            written.wait()
+            let finished = written.wait(timeout: .now() + 10) == .success
+            writeFinished.withLock { $0 = finished }
         })
         shared.withLock { $0 = store }
         let image = try XCTUnwrap(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        XCTAssertEqual(writeFinished.withLock { $0 }, true, "the write after the pick never returned")
         XCTAssertEqual(try stillTestPixel(image, x: 0, y: 0), stillBlue)
         XCTAssertEqual(StillCacheStore.scan(dir).map(\.version), ["v2"])
     }
@@ -185,6 +188,73 @@ final class StillCacheStoreTests: XCTestCase {
         XCTAssertEqual(late.outcome, .refused(errno: EPERM))
         XCTAssertEqual(tags.withLock { $0 }, 1, "the suspended write tried to publish into a refused directory")
         XCTAssertEqual(names(), [])
+    }
+
+    func testARefusedTouchOnLoadMarksTheDirectory() async throws {
+        try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let decodes = OSAllocatedUnfairLock(initialState: 0)
+        let store = StillCacheStore(tag: { _, name, _ in name == StillCacheStore.usedAttribute ? EACCES : 0 })
+        XCTAssertNil(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd), "a still whose touch was refused was served")
+        let report = await store.write(in: dir, choiceHash: hashB, version: "v1", size: qhd) {
+            decodes.withLock { $0 += 1 }
+            return stillFixture(stillBlue)
+        }
+        XCTAssertEqual(report.outcome, .refused(errno: EACCES))
+        XCTAssertEqual(decodes.withLock { $0 }, 0)
+    }
+
+    func testARefusedTouchOnAHitEvictsNothing() async throws {
+        let other = try place(hashB, fourK, version: "v1", usedAgo: 300)
+        let hit = try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let store = StillCacheStore(budget: stillFixtureBytes, tag: { _, _, _ in ENOTSUP })
+        let report = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { nil }
+        XCTAssertEqual(report.outcome, .refused(errno: ENOTSUP))
+        XCTAssertEqual(names(), [other.lastPathComponent, hit.lastPathComponent])
+    }
+
+    func testAFailedTouchOnAHitEvictsNothing() async throws {
+        // A transient error, like one while publishing: nothing changes.
+        let other = try place(hashB, fourK, version: "v1", usedAgo: 300)
+        let hit = try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let store = StillCacheStore(budget: stillFixtureBytes, tag: { _, _, _ in EIO })
+        let report = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { nil }
+        XCTAssertEqual(report.outcome, .failed)
+        XCTAssertEqual(names(), [other.lastPathComponent, hit.lastPathComponent])
+    }
+
+    func testAWriteDecodingWhenALoadsTouchIsRefusedDoesntPublish() async throws {
+        try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let tags = OSAllocatedUnfairLock(initialState: 0)
+        let store = StillCacheStore(tag: { _, _, _ in
+            tags.withLock { $0 += 1 }
+            return EPERM
+        })
+        let gate = StillTestGate()
+        let dir = dir!, hashB = hashB, qhd = qhd
+        let suspended = startHeldWrite(store, in: dir, choiceHash: hashB, version: "v1", size: qhd, gate: gate, bgr: stillRed)
+        guard await gate.reached() else { gate.open(); return XCTFail("the write never started decoding") }
+        XCTAssertNil(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        gate.open()
+        let late = await suspended.value
+        XCTAssertEqual(late.outcome, .refused(errno: EPERM))
+        XCTAssertEqual(tags.withLock { $0 }, 1, "the suspended write tried to publish after the load's touch was refused")
+    }
+
+    func testASeedRefusedWhileAWritePublishesStopsThePublish() async throws {
+        // The write passed its refusal checks; a seed records the refusal
+        // while the write tags its temp file. The rename must not happen.
+        let placed = try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
+        let dir = dir!, hashA = hashA, qhd = qhd
+        let store = StillCacheStore(tag: { url, _, _ in
+            guard url.lastPathComponent.hasPrefix(".lumawall-") else { return EACCES }
+            _ = shared.withLock { $0 }?.load(in: dir, choiceHash: hashA, version: "v1", size: qhd)
+            return 0
+        })
+        shared.withLock { $0 = store }
+        let report = await store.write(in: dir, choiceHash: hashB, version: "v1", size: qhd) { stillFixture(stillBlue) }
+        XCTAssertEqual(report.outcome, .refused(errno: EACCES))
+        XCTAssertEqual(names(), [placed.lastPathComponent])
     }
 
     // MARK: Interrupted writes

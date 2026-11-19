@@ -45,6 +45,61 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertFalse(slot.claimCreate(token: 4), "the slot has its renderer")
     }
 
+    // MARK: Acquire replies
+
+    func testAReuseWhileTheCreateSeedsWaitsForIt() {
+        // A preview sharing the desktop's key, or a same-role reuse after
+        // the renderer is installed but before the gradient is flushed: both
+        // reply only once the create's layer can show something.
+        var gate = ReplyGate<String, String>()
+        XCTAssertEqual(gate.open("desktop", token: 1, reply: "create"), [])
+        XCTAssertTrue(gate.hold("preview", for: "desktop"))
+        XCTAssertTrue(gate.hold("reuse", for: "desktop"))
+        XCTAssertEqual(gate.ready("desktop", token: 1), ["create", "preview", "reuse"])
+        XCTAssertFalse(gate.hold("later", for: "desktop"), "a ready surface replies at once")
+        XCTAssertEqual(gate.ready("desktop", token: 1), [], "each reply goes out once")
+    }
+
+    func testAReuseOfASurfaceWithNoCreateRepliesAtOnce() {
+        var gate = ReplyGate<String, String>()
+        XCTAssertFalse(gate.hold("reuse", for: "desktop"))
+        _ = gate.open("other", token: 1, reply: "create")
+        XCTAssertFalse(gate.hold("reuse", for: "desktop"), "another surface's create doesn't hold this one")
+    }
+
+    func testAStaleCreateDoesntReleaseItsReplacementsReplies() {
+        // Teardown removed context A; B is creating under the same key when
+        // A's create finishes. B's replies wait for B's seed.
+        var gate = ReplyGate<String, String>()
+        _ = gate.open("desktop", token: 1, reply: "A")
+        XCTAssertTrue(gate.hold("reuse A", for: "desktop"))
+        XCTAssertEqual(gate.close("desktop"), ["A", "reuse A"], "teardown answers A's replies")
+        XCTAssertEqual(gate.open("desktop", token: 2, reply: "B"), [])
+        XCTAssertTrue(gate.hold("reuse B", for: "desktop"))
+        XCTAssertEqual(gate.ready("desktop", token: 1), [])
+        XCTAssertTrue(gate.hold("reuse B later", for: "desktop"), "B is still seeding")
+        XCTAssertEqual(gate.ready("desktop", token: 2), ["B", "reuse B", "reuse B later"])
+    }
+
+    func testACreateOverAnUnclosedOneHandsBackItsReplies() {
+        // The context went away without passing through teardown: the new
+        // create takes the key, and the old replies are answered (as failed,
+        // their context is gone) rather than left hanging.
+        var gate = ReplyGate<String, String>()
+        _ = gate.open("desktop", token: 1, reply: "A")
+        XCTAssertTrue(gate.hold("reuse A", for: "desktop"))
+        XCTAssertEqual(gate.open("desktop", token: 2, reply: "B"), ["A", "reuse A"])
+        XCTAssertEqual(gate.ready("desktop", token: 1), [])
+        XCTAssertEqual(gate.ready("desktop", token: 2), ["B"])
+    }
+
+    func testTeardownAfterTheSeedHasNothingToAnswer() {
+        var gate = ReplyGate<String, String>()
+        _ = gate.open("desktop", token: 1, reply: "create")
+        XCTAssertEqual(gate.ready("desktop", token: 1), ["create"])
+        XCTAssertEqual(gate.close("desktop"), [])
+    }
+
     // MARK: Acquire
 
     func testAcquireReopensAClosedSurface() {
