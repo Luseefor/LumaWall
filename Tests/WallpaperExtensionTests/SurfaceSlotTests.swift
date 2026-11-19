@@ -346,6 +346,26 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertFalse(slot.holdsPreviewFrame(contextIsPreview: true), "for good")
     }
 
+    func testAPickerJoiningAClosedLiveSurfaceDoesNotRestartIt() {
+        // The desktop left; the picker handed that live context restarted
+        // full-resolution decoding for a tile. It keeps the held frame.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .close)
+        XCTAssertFalse(slot.acquired(by: 2, replyOnly: true, reopens: false))
+        XCTAssertFalse(slot.open)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .close, "its dismissal arms teardown")
+    }
+
+    func testAPickerQuittingFromAClosedLiveSurfaceArmsTeardown() {
+        // Teardown was cancelled by the picker's acquire; Settings quit
+        // without an invalidate, so nothing armed it again.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.invalidated(by: 1, openConnections: [1, 2])
+        _ = slot.acquired(by: 2, replyOnly: true, reopens: false)
+        XCTAssertTrue(slot.connectionsChanged(openConnections: [1]))
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [1]), "once")
+    }
+
     func testInvalidateWithNoKnownAcquirerCloses() {
         var slot = SurfaceSlot()
         XCTAssertEqual(slot.invalidated(by: 3, openConnections: [3]), .close)

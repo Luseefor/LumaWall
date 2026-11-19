@@ -189,7 +189,8 @@ final class WallpaperState: Sendable {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
             let held = context.slot.holdsPreviewFrame(contextIsPreview: context.isPreview)
-            let reopened = context.slot.acquired(by: connection, replyOnly: byPreview != context.isPreview)
+            // A preview handed a closed live surface keeps its frame.
+            let reopened = context.slot.acquired(by: connection, replyOnly: byPreview != context.isPreview, reopens: !(byPreview && !context.isPreview))
             state.contexts[key] = context
             if reopened { context.renderer?.setSurfaceOpen(true) }
             if held, !context.slot.holdsPreviewFrame(contextIsPreview: context.isPreview) { context.renderer?.playAsLive() }
@@ -205,14 +206,16 @@ final class WallpaperState: Sendable {
         lock.withLock { _ = $0.openConnections.remove(serial) }
     }
 
-    /// Close every open surface whose hosts have all gone, after a
-    /// connection closed (`SurfaceSlot.connectionsChanged`). Returns their
-    /// keys so the caller can arm their teardown.
+    /// Close every surface whose hosts have all gone, after a connection
+    /// closed (`SurfaceSlot.connectionsChanged`). Returns their keys so the
+    /// caller can arm their teardown.
     func closeUnhostedSurfaces() -> [DisplayKey] {
         lock.withLock { state in
             var closed: [DisplayKey] = []
-            for (key, var context) in state.contexts where context.slot.connectionsChanged(openConnections: state.openConnections) {
+            for (key, var context) in state.contexts {
+                let lastHostGone = context.slot.connectionsChanged(openConnections: state.openConnections)
                 state.contexts[key] = context
+                guard lastHostGone else { continue }
                 context.renderer?.setSurfaceOpen(false)
                 closed.append(key)
             }

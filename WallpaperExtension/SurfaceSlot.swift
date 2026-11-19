@@ -51,9 +51,11 @@ struct SurfaceSlot: Equatable {
 
     /// An acquire from `connection` reached this context. Returns whether it
     /// reopened. A `replyOnly` reuse (the other role, handed the context
-    /// unchanged) reopens playback for its host but is not an acquisition:
-    /// its invalidate must not freeze the surface's real owner.
-    mutating func acquired(by connection: Int?, replyOnly: Bool) -> Bool {
+    /// unchanged) is not an acquisition: its invalidate must not freeze the
+    /// surface's real owner. It reopens playback for its host unless
+    /// `reopens` is false: a preview handed a closed live surface keeps its
+    /// held frame rather than restart full-size decoding for a tile.
+    mutating func acquired(by connection: Int?, replyOnly: Bool, reopens: Bool = true) -> Bool {
         if replyOnly {
             everShared = true
             // A live request reacquiring on a new connection replaces the
@@ -67,7 +69,7 @@ struct SurfaceSlot: Equatable {
         } else {
             ownerLeft = false
         }
-        return setOpen(true)
+        return reopens && setOpen(true)
     }
 
     enum InvalidateAction: Equatable {
@@ -109,9 +111,16 @@ struct SurfaceSlot: Equatable {
 
     /// A connection closed. A preview host on it (the Settings app quitting
     /// without an invalidate) is gone, and the surface closes when it was
-    /// the last host. Returns whether it closed.
+    /// the last host. An already closed surface that loses its last host
+    /// this way is reported too, so its teardown (which the sharer's acquire
+    /// cancelled) is armed again. Returns whether it closed or lost its last
+    /// host.
     mutating func connectionsChanged(openConnections: Set<Int>) -> Bool {
-        open && closeIfUnhosted(openConnections: openConnections)
+        // Sharers of a live context are previews; a live sharer may reconnect.
+        let dropped = ownerIsPreview ? [] : sharers.subtracting(openConnections)
+        sharers.subtract(dropped)
+        guard open || !dropped.isEmpty else { return false }
+        return closeIfUnhosted(openConnections: openConnections)
     }
 
     /// Whether any host may still show the surface. A preview host counts

@@ -144,7 +144,7 @@ func closeSurfacesLeftUnhosted() {
     Lifecycle.queue.async {
         for key in WallpaperState.shared.closeUnhostedSurfaces() {
             scheduleTeardown(for: key)
-            extensionLog("  [teardown] last host of display \(key.displayID)'s surface quit without an invalidate, stopped playback")
+            extensionLog("  [teardown] last host of display \(key.displayID)'s surface quit without an invalidate, closed it and armed its teardown")
         }
     }
 }
