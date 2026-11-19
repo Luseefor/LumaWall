@@ -193,7 +193,8 @@ struct RendererLifecycle: Equatable {
             guard requested != policy else { return [] }
             policy = requested
             animated = isAnimated && !displayAsleep
-            let rebuilding = resetInFlight != nil || readers == .building
+            // Freed readers rebuild in reconcile below before the clock can run.
+            let rebuilding = resetInFlight != nil || readers == .building || readers == .freed
             rampWhenReady = animated && rebuilding && wantsPlayback
         case .assetChanged:
             failures = 0

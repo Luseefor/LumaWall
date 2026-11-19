@@ -97,6 +97,28 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.clock, .rampingUp)
     }
 
+    func testResumeAfterAHardPauseAndDeepPauseRebuildsInPlace() {
+        var life = playing()
+        _ = life.handle(.policy(.paused, animated: true))
+        _ = life.handle(.hardPause)
+        XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
+        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.beginReset(.resume, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.resume)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
+    }
+
+    func testLockRevealAfterDeepPauseStillRamps() {
+        // The desktop sat paused past the deep-pause delay, then the lock
+        // screen asks for an animated resume: rebuild, then ramp up instead
+        // of jumping to full speed.
+        var life = playing()
+        _ = life.handle(.policy(.paused, animated: false))
+        XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
+        XCTAssertEqual(life.handle(.policy(.full, animated: true)), [.beginReset(.resume, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.resume)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
+    }
+
     // MARK: Activity (what keeps PowerMonitor polling)
 
     func testActiveWhileTheClockRunsIncludingARampDown() {
