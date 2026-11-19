@@ -553,6 +553,83 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
     }
 
+    // MARK: Retry gates and counters (#30)
+
+    /// A playing renderer that fell back to the still and whose retry has
+    /// started its flush. Returns the flush's generation.
+    private func retryFlushing(_ life: inout RendererLifecycle) -> Int {
+        _ = failUntilFallback(&life)
+        guard case let .beginReset(.restart, generation)? = life.handle(.retryFired).last else {
+            XCTFail("retry did not reset")
+            return 0
+        }
+        return generation
+    }
+
+    func testRetryFlushCompletingWhilePausedWaitsForPlayback() {
+        var life = playing()
+        let generation = retryFlushing(&life)
+        XCTAssertEqual(life.handle(.policy(.paused, animated: false)), [])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: generation)), [])
+        XCTAssertEqual(life.readers, .awaitingBuild(.restart))
+        XCTAssertFalse(life.isActive)
+        // Sleep and wake while paused don't build it either.
+        XCTAssertEqual(life.handle(.displaySleep), [])
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [])
+        XCTAssertEqual(life.handle(.policy(.full, animated: false)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 2)])
+    }
+
+    func testRetryBatchStopsBetweenAttemptsWhilePaused() {
+        var life = playing()
+        let generation = retryFlushing(&life)
+        XCTAssertEqual(life.handle(.resetFlushed(generation: generation)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(false)), [.beginReset(.restart, generation: generation + 1)])
+        XCTAssertEqual(life.handle(.policy(.paused, animated: false)), [])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: generation + 1)), [])
+        XCTAssertEqual(life.readers, .awaitingBuild(.restart))
+        XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [.buildPipeline(.restart)])
+    }
+
+    func testSwitchWhileARetryWaitsShowsTheNewVideo() {
+        // A switch while paused shows the new video's first frame, as it does
+        // without a pending retry.
+        var life = playing()
+        let generation = retryFlushing(&life)
+        _ = life.handle(.policy(.paused, animated: false))
+        _ = life.handle(.resetFlushed(generation: generation))
+        XCTAssertEqual(life.handle(.assetChanged), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
+    }
+
+    func testDifferentAssetOnWakeOrReopenStartsFreshCounters() {
+        for reopen in [false, true] {
+            var life = playing()
+            _ = failUntilFallback(&life)
+            XCTAssertEqual(life.failedRounds, 1)
+            if reopen {
+                _ = life.handle(.surfaceClosed)
+                _ = life.handle(.surfaceReopened(assetChanged: true))
+            } else {
+                _ = life.handle(.displaySleep)
+                _ = life.handle(.displayWake(assetChanged: true))
+            }
+            XCTAssertEqual(life.failures, 0, "reopen: \(reopen)")
+            XCTAssertEqual(life.failedRounds, 0, "reopen: \(reopen)")
+        }
+    }
+
+    func testRampSurvivesATierChangeDuringARetry() {
+        var life = playing()
+        let generation = retryFlushing(&life)
+        _ = life.handle(.policy(.paused, animated: false))
+        _ = life.handle(.policy(.full, animated: true))
+        XCTAssertEqual(life.handle(.policy(.reduced, animated: false)), [])
+        XCTAssertTrue(life.rampWhenReady)
+        XCTAssertEqual(life.handle(.resetFlushed(generation: generation)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.ramp(to: 1), .startFeeding(token: 2)])
+    }
+
     func testFeedFaultClassification() {
         // Apple sets requiresFlushToResumeDecoding alongside .failed; that case
         // resumes behind the frame instead of clearing it.
