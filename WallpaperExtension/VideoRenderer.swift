@@ -69,6 +69,8 @@ final class VideoRenderer: @unchecked Sendable {
     /// queue when a switch or the first frame picks a copy, so a recompute
     /// still on its way can't make it open the wrong one.
     private let tierSource: @Sendable () -> PlaybackPolicy
+    /// A Settings preview: it holds one frame at a tier no copy serves.
+    private let isPreview: Bool
     /// The creation still, shown again when the video can't be rebuilt.
     private let fallbackStill: CGImage?
 
@@ -82,6 +84,7 @@ final class VideoRenderer: @unchecked Sendable {
         stillImage: CGImage? = nil,
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
+        isPreview: Bool = false,
     ) async throws -> VideoRenderer {
         let pixels = CGSize(
             width: rootLayer.bounds.width * rootLayer.contentsScale,
@@ -130,6 +133,7 @@ final class VideoRenderer: @unchecked Sendable {
             originalURL: videoURL,
             variantSelector: variantSelector,
             tierSource: tierSource,
+            isPreview: isPreview,
             policy: policy,
         )
     }
@@ -144,11 +148,13 @@ final class VideoRenderer: @unchecked Sendable {
         originalURL: URL,
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
+        isPreview: Bool,
         policy: PlaybackPolicy,
     ) {
         self.displayLayer = displayLayer
         self.copy = RendererCopy(original: originalURL, selector: variantSelector)
         self.tierSource = tierSource
+        self.isPreview = isPreview
         self.lifecycle = RendererLifecycle(policy: policy)
         self.pixelSize = OSAllocatedUnfairLock(initialState: CGSize(
             width: rootLayer.bounds.width * rootLayer.contentsScale,
@@ -238,7 +244,7 @@ final class VideoRenderer: @unchecked Sendable {
             // The tier can change while `create` loads the track, and a
             // policy recorded before this job doesn't pick a copy when it
             // pauses. Pick the first frame's copy for the tier now.
-            let tier = tierSource()
+            let tier = playedTier(tierSource())
             if case let .opened(loaded) = copy.retier(current: asset.url, tier: tier, displayPixels: displayPixelSize, open: loadBlocking) {
                 traceLog("  [start #\(debugID)] tier \(tier) opens a different file than create")
                 adopt(loaded)
@@ -444,7 +450,8 @@ final class VideoRenderer: @unchecked Sendable {
 
     /// Queue-only body of `applyPolicy`, also run by a switch for the tier it
     /// opened.
-    private func applyTier(_ policy: PlaybackPolicy, animated: Bool) {
+    private func applyTier(_ requested: PlaybackPolicy, animated: Bool) {
+        let policy = playedTier(requested)
         guard policy != lifecycle.policy else { return }
         extensionLog("  [applyPolicy #\(debugID)] \(lifecycle.policy) → \(policy) animated=\(animated) asleep=\(lifecycle.displayAsleep) asset=\(asset.url.lastPathComponent)")
         // Battery tiers resolve to downscaled siblings via the selector,
@@ -459,6 +466,12 @@ final class VideoRenderer: @unchecked Sendable {
             send(.assetChanged)
         }
         send(.policy(policy, animated: animated))
+    }
+
+    /// The tier to play for `requested`: a preview with no copy for it holds
+    /// a frame instead of decoding the original. Queue-only.
+    private func playedTier(_ requested: PlaybackPolicy) -> PlaybackPolicy {
+        isPreview ? copy.previewTier(requested, displayPixels: displayPixelSize) : requested
     }
 
     /// The displays went to sleep: stop the clock, the feed, and any ramp, and

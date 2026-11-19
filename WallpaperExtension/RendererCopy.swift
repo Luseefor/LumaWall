@@ -119,6 +119,15 @@ struct RendererCopy {
         return wanted == preloaded ? nil : wanted
     }
 
+    /// The tier a preview plays when `tier` is requested: `tier` when a copy
+    /// serves it, else paused, showing one frame. A Settings preview has no
+    /// reason to decode the choice's full-resolution original (#12).
+    func previewTier(_ tier: PlaybackPolicy, displayPixels: CGSize) -> PlaybackPolicy {
+        guard tier != .paused else { return .paused }
+        let file = active.selector(displayPixels, tier)
+        return file.standardizedFileURL == active.original.standardizedFileURL ? .paused : tier
+    }
+
     func preloadURL(current: URL, tier: PlaybackPolicy, displayPixels: CGSize) -> URL {
         VariantSelection.preloadURL(current: current, tier: tier, displayPixels: displayPixels, selector: active.selector)
     }

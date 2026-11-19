@@ -123,6 +123,26 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertNil(copy.loopReplacement(preloaded: url("a.full.mov"), current: url("a.full.mov"), tier: .paused, displayPixels: display), "paused keeps the current copy")
     }
 
+    // MARK: Previews
+
+    func testPreviewWithoutACopyForItsTierHoldsAFrame() {
+        // The Settings picker played a full-resolution original for its
+        // whole lease when no copy fit its viewport (#12).
+        let onlyReduced: RendererCopy.Selector = { _, tier in
+            URL(fileURLWithPath: tier == .reduced ? "/videos/a.reduced.mov" : "/videos/a.mp4")
+        }
+        let copy = RendererCopy(original: url("a.mp4"), selector: onlyReduced)
+        XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .paused)
+        XCTAssertEqual(copy.previewTier(.minimal, displayPixels: display), .paused)
+        XCTAssertEqual(copy.previewTier(.reduced, displayPixels: display), .reduced)
+        XCTAssertEqual(copy.previewTier(.paused, displayPixels: display), .paused)
+    }
+
+    func testPreviewWithAViewportCopyPlaysIt() {
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
+    }
+
     // MARK: Tier changes
 
     func testPausedRendererResumingOnBatteryMovesToTheBatteryCopy() async {
