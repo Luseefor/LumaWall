@@ -125,6 +125,7 @@ targets:
       - path: WallpaperExtension/DisplaySleep.swift
       - path: WallpaperExtension/SurfaceSlot.swift
       - path: WallpaperExtension/RampMath.swift
+      - path: WallpaperExtension/LoopTiming.swift
       - path: WallpaperExtension/PowerPolling.swift
       - path: WallpaperExtension/PrefsReload.swift
       - path: WallpaperExtension/LibraryScanRecord.swift

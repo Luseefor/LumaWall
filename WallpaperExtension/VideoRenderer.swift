@@ -60,6 +60,8 @@ final class VideoRenderer: @unchecked Sendable {
     // ptsOffset accumulates across loops so both DTS and PTS are monotonically increasing.
     // lastEnqueuedEnd tracks the highest sample end time (max, not last, handles B-frames).
     private var ptsOffset: CMTime = .zero
+    /// The loop before `ptsOffset`'s, whose tail may still be on screen.
+    private var previousPtsOffset: CMTime = .zero
     private var lastEnqueuedEnd: CMTime = .zero
     private var nominalFrameRate: Double = 60
 
@@ -663,13 +665,16 @@ final class VideoRenderer: @unchecked Sendable {
     private func buildPipeline(_ kind: RendererLifecycle.ResetKind) -> Bool {
         let resumeTime = CMTimebaseGetTime(timebase)
         let continuing = kind == .resume && resumeTime.isNumeric && resumeTime > .zero
+        // The timeline counts every loop; seek within the loop on screen and
+        // keep its offset so the timeline stays continuous.
+        let resumePoint = LoopTiming.resumePoint(timeline: resumeTime, loopStart: ptsOffset, previousLoopStart: previousPtsOffset)
         guard let reader = try? AVAssetReader(asset: asset) else {
             extensionLog("  [reset #\(debugID)] FAILED to create AVAssetReader for \(asset.url.lastPathComponent)")
             return false
         }
         if continuing {
             // AVAssetReader seeks to the enclosing keyframe and emits from here.
-            reader.timeRange = CMTimeRange(start: resumeTime, duration: .positiveInfinity)
+            reader.timeRange = CMTimeRange(start: resumePoint.assetTime, duration: .positiveInfinity)
         }
         let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
         output.alwaysCopiesSampleData = false
@@ -681,7 +686,8 @@ final class VideoRenderer: @unchecked Sendable {
         currentReader = reader
         currentOutput = output
 
-        ptsOffset = .zero
+        ptsOffset = continuing ? resumePoint.loopStart : .zero
+        previousPtsOffset = ptsOffset
         lastEnqueuedEnd = continuing ? resumeTime : .zero
         if !continuing {
             CMTimebaseSetTime(timebase, time: .zero)
@@ -689,7 +695,8 @@ final class VideoRenderer: @unchecked Sendable {
 
         // Enqueue the first frame while the clock is still frozen, tagged
         // DisplayImmediately so it replaces the held frame the moment it decodes.
-        if let first = output.copyNextSampleBuffer() {
+        if let sample = output.copyNextSampleBuffer() {
+            let first = offsetTimingForLoop(sample)
             Self.setDisplayImmediately(first)
             renderer.enqueue(first)
             let pts = CMSampleBufferGetPresentationTimeStamp(first)
@@ -860,6 +867,7 @@ final class VideoRenderer: @unchecked Sendable {
     /// after it.
     private func swapToNextReader() {
         // Advance offset so the next loop's DTS/PTS continue the timeline.
+        previousPtsOffset = ptsOffset
         ptsOffset = lastEnqueuedEnd
 
         // The preload (or, with none, the current file) may predate a tier
