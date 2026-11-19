@@ -76,13 +76,13 @@ final class StillCacheStoreTests: XCTestCase {
 
     // MARK: Seeds and eviction
 
-    func testASeedWaitsForAnEvictionThatHasScanned() throws {
-        // Eviction picks the least recently used from its scan. A seed
-        // started between that scan and the delete must wait for the
-        // delete, not touch a file the eviction already chose.
-        let seeded = try place(hashA, qhd, version: "v1", usedAgo: 300)
+    /// Runs a write that must evict the oldest of two stills (A, then B) and
+    /// starts a seed for `seedHash` once the eviction has scanned, holding the
+    /// scan until the seed found the lock taken.
+    private func seedDuringEvictionScan(seedHash: String) throws -> (blocked: Bool?, found: Bool?, evicted: URL) {
+        let evicted = try place(hashA, qhd, version: "v1", usedAgo: 300)
         try place(hashB, qhd, version: "v1", usedAgo: 100)
-        let dir = dir!, hashA = hashA, qhd = qhd
+        let dir = dir!, qhd = qhd
         let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
         let seedBlocked = DispatchSemaphore(value: 0)
         let seedFound = OSAllocatedUnfairLock<Bool?>(initialState: nil)
@@ -90,7 +90,7 @@ final class StillCacheStoreTests: XCTestCase {
         let seedDone = expectation(description: "seed returned")
         let store = StillCacheStore(budget: 2 * stillFixtureBytes, onEvictionScan: {
             DispatchQueue.global().async {
-                let image = shared.withLock { $0 }?.load(in: dir, choiceHash: hashA, version: "v1", size: qhd)
+                let image = shared.withLock { $0 }?.load(in: dir, choiceHash: seedHash, version: "v1", size: qhd)
                 seedFound.withLock { $0 = image != nil }
                 seedDone.fulfill()
             }
@@ -104,9 +104,26 @@ final class StillCacheStoreTests: XCTestCase {
         let hashB = hashB, fourK = fourK
         startWrite(store, in: dir, choiceHash: hashB, version: "v1", size: fourK, bgr: stillGreen) { writeDone.fulfill() }
         wait(for: [writeDone, seedDone], timeout: 10)
-        XCTAssertEqual(seedWasBlocked.withLock { $0 }, true, "the seed didn't wait on the lock eviction held through its scan")
-        XCTAssertEqual(seedFound.withLock { $0 }, false, "the seed's only candidate was evicted before it could pick it")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: seeded.path))
+        return (seedWasBlocked.withLock { $0 }, seedFound.withLock { $0 }, evicted)
+    }
+
+    func testASeedWaitsForAnEvictionThatHasScanned() throws {
+        // Eviction picks the least recently used from its scan. A seed
+        // started between that scan and the delete must wait for the
+        // delete, not touch a file the eviction already chose.
+        let result = try seedDuringEvictionScan(seedHash: hashA)
+        XCTAssertEqual(result.blocked, true, "the seed didn't wait on the lock eviction held through its scan")
+        XCTAssertEqual(result.found, false, "the seed's only candidate was evicted before it could pick it")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: result.evicted.path))
+    }
+
+    func testASeedThatFoundTheLockTakenStillPicksWhatSurvivesTheEviction() throws {
+        // Finding the lock taken must mean waiting for it, not giving up: the
+        // seed's still isn't the one eviction removes.
+        let result = try seedDuringEvictionScan(seedHash: hashB)
+        XCTAssertEqual(result.blocked, true, "the seed didn't wait on the lock eviction held through its scan")
+        XCTAssertEqual(result.found, true, "the seed gave up instead of waiting for the lock")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: result.evicted.path))
     }
 
     func testASeedOutlivesAnEvictionAfterItsPick() throws {
