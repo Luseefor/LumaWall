@@ -76,6 +76,8 @@ final class VideoRenderer: @unchecked Sendable {
     /// including ones held until wake or reopen, move it), so a playing
     /// renderer doesn't hold a decoded frame; nil shows the gradient.
     private let fallbackStill: @Sendable (URL) -> CGImage?
+    /// Whether init enqueued a still into the display layer. Set once there.
+    private(set) var seededStill = false
 
     /// Opens the copy `variantSelector` picks for the root layer's pixel size
     /// and the tier from `tierSource`, falling back to `videoURL` when that
@@ -214,6 +216,7 @@ final class VideoRenderer: @unchecked Sendable {
             // Without this the frame can sit undisplayed → the layer reads empty → black.
             Self.setDisplayImmediately(stillBuffer)
             renderer.enqueue(stillBuffer)
+            seededStill = true
             traceLog("  [Renderer #\(debugID)] Seeded still into display layer (\(stillImage.width)x\(stillImage.height))")
         } else {
             traceLog("  [Renderer #\(debugID)] Seeded nothing (stillImage present: \(stillImage != nil)); the display layer is empty until the first frame")
