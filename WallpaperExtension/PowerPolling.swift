@@ -79,3 +79,41 @@ struct PowerPoller {
         return mode == .off ? .start : .keep
     }
 }
+
+/// What `PowerMonitor` knows about the Mac's power and thermal state.
+struct PowerSnapshot: Equatable {
+    var thermalState: ProcessInfo.ThermalState = .nominal
+    var isOnBattery = false
+    var batteryLevel: Int = 100
+    var isGameModeActive: Bool = false
+    var isLowPowerModeEnabled = false
+    /// Backlight brightness of the built-in display, 0.0–1.0. Defaults to 1.0
+    /// when the value can't be read (external displays, headless, etc.).
+    var displayBrightness: Float = 1.0
+}
+
+/// The power state with when its battery fields were read. One hardware read
+/// merges in one step, so a reader never sees battery from one read and
+/// brightness from another, or a fresh time on an old battery reading.
+struct PowerSample {
+    var state = PowerSnapshot()
+    private(set) var batteryReadAt: Date?
+
+    /// Merge one read. `battery` nil (the read failed, or only brightness was
+    /// read) keeps the old battery fields and their time. True when `state`
+    /// changed.
+    mutating func merge(battery: (onBattery: Bool, level: Int)?, brightness: Float, at now: Date) -> Bool {
+        let before = state
+        if let battery {
+            state.isOnBattery = battery.onBattery
+            state.batteryLevel = battery.level
+            batteryReadAt = now
+        }
+        state.displayBrightness = brightness
+        return state != before
+    }
+
+    func batteryIsStale(now: Date) -> Bool {
+        PowerPolling.readIsStale(lastRead: batteryReadAt, now: now)
+    }
+}

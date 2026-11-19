@@ -76,6 +76,31 @@ final class PowerPollingTests: XCTestCase {
         XCTAssertEqual(poller.reading(batteryLevel: 80, displayBrightness: 1), .stop)
     }
 
+    func testAReadPublishesBatteryBrightnessAndItsTimeTogether() {
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+        var sample = PowerSample()
+        XCTAssertTrue(sample.merge(battery: (onBattery: true, level: 40), brightness: 0.5, at: now))
+        XCTAssertEqual(sample.state.isOnBattery, true)
+        XCTAssertEqual(sample.state.batteryLevel, 40)
+        XCTAssertEqual(sample.state.displayBrightness, 0.5)
+        XCTAssertEqual(sample.batteryReadAt, now)
+        XCTAssertFalse(sample.merge(battery: (onBattery: true, level: 40), brightness: 0.5, at: now + 30), "same values")
+        XCTAssertEqual(sample.batteryReadAt, now + 30, "still a fresh battery reading")
+    }
+
+    func testAFailedBatteryReadKeepsTheOldReadingAndItsTime() {
+        // IOKit returned nothing: the old battery state is as stale as before,
+        // so the next policy computation must still re-read it.
+        let now = Date(timeIntervalSinceReferenceDate: 1_000)
+        var sample = PowerSample()
+        _ = sample.merge(battery: (onBattery: false, level: 90), brightness: 1, at: now)
+        XCTAssertTrue(sample.merge(battery: nil, brightness: 0.2, at: now + 40))
+        XCTAssertEqual(sample.state.batteryLevel, 90)
+        XCTAssertEqual(sample.state.displayBrightness, 0.2)
+        XCTAssertEqual(sample.batteryReadAt, now)
+        XCTAssertTrue(sample.batteryIsStale(now: now + 40))
+    }
+
     func testPlayingRenderersReportOnlyTheFirstAndLast() {
         var playing = PlayingRenderers()
         XCTAssertTrue(playing.set(1, playing: true))
