@@ -70,8 +70,7 @@ final class VideoRenderer: @unchecked Sendable {
     /// still on its way can't make it open the wrong one.
     private let tierSource: @Sendable () -> PlaybackPolicy
     /// A Settings preview: it holds one frame at a tier no copy serves.
-    /// Cleared when a live request takes the context over. Queue-only.
-    private var isPreview: Bool
+    private let isPreview: Bool
     /// The tier last asked of this renderer; `lifecycle.policy` is what it
     /// plays, which differs on a preview holding a frame. Queue-only.
     private var requestedTier: PlaybackPolicy
@@ -481,16 +480,6 @@ final class VideoRenderer: @unchecked Sendable {
     /// a frame instead of decoding the original. Queue-only.
     private func playedTier(_ requested: PlaybackPolicy, playing: URL? = nil) -> PlaybackPolicy {
         isPreview ? copy.previewTier(requested, displayPixels: displayPixelSize, playing: playing) : requested
-    }
-
-    /// A live request took over this preview's context: play by live policy
-    /// from the next tier the fan-out applies.
-    func promoteToLive() {
-        queue.async { [weak self] in
-            guard let self, isRunning, isPreview else { return }
-            isPreview = false
-            extensionLog("  [Renderer #\(debugID)] promoted from preview to live")
-        }
     }
 
     /// The displays went to sleep: stop the clock, the feed, and any ramp, and

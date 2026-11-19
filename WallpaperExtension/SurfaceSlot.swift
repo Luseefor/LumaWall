@@ -2,15 +2,12 @@ import Foundation
 
 /// Bookkeeping for one surface's context beside its `CAContext` and
 /// renderer: whether playback is open, which renderer create owns the slot,
-/// and whether a live request has used it. Pure so the acquire, invalidate,
-/// create, and lease orderings run as tests; `WallpaperState` keeps one per
-/// context and acts on its answers under its lock.
+/// and which connection acquired it last. Pure so the acquire, invalidate,
+/// and create orderings run as tests; `WallpaperState` keeps one per context
+/// and acts on its answers under its lock.
 struct SurfaceSlot: Equatable {
-    /// False from an invalidate until the next acquire, or once a preview's
-    /// lease runs out.
+    /// False from an invalidate until the next acquire.
     private(set) var open = true
-    /// A desktop or lock-screen request acquired this context.
-    private(set) var servedLive = false
     /// The connection that made the latest acquire, when known.
     private(set) var lastAcquirer: Int?
     /// The token of the renderer create in flight.
@@ -37,26 +34,11 @@ struct SurfaceSlot: Equatable {
         return true
     }
 
-    struct Acquired: Equatable {
-        var reopened: Bool
-        /// A live request took over a preview context: its renderer drops
-        /// the preview role and takes live policy from now on.
-        var promoted: Bool
-    }
-
-    /// An acquire reached this context.
-    mutating func acquired(byPreview: Bool, contextIsPreview: Bool, by connection: Int?) -> Acquired {
-        let wasPreview = playsAsPreview(contextIsPreview: contextIsPreview)
-        if !byPreview { servedLive = true }
+    /// An acquire from `connection` reached this context. Returns whether it
+    /// reopened.
+    mutating func acquired(by connection: Int?) -> Bool {
         if let connection { lastAcquirer = connection }
-        return Acquired(reopened: setOpen(true), promoted: wasPreview && !playsAsPreview(contextIsPreview: contextIsPreview))
-    }
-
-    /// A preview context plays and leases as a preview until a live request
-    /// uses it. Left a preview, a live wallpaper on it would freeze when the
-    /// lease ran out, or hold one frame when no copy fits.
-    func playsAsPreview(contextIsPreview: Bool) -> Bool {
-        contextIsPreview && !servedLive
+        return setOpen(true)
     }
 
     enum InvalidateAction: Equatable {
@@ -92,31 +74,5 @@ struct SurfaceSlot: Equatable {
 
     mutating func failCreate(token: Int) {
         if pendingCreate == token { pendingCreate = nil }
-    }
-}
-
-/// Preview leases by surface. Each renewal supersedes the timer armed
-/// before it, so only the latest lease's expiry acts, and ending one
-/// disarms whatever timer is still pending.
-struct LeaseBook<Key: Hashable> {
-    private var current: [Key: Int] = [:]
-    private var counter = 0
-
-    /// Start or renew `key`'s lease; arm its timer with the returned id.
-    mutating func renew(_ key: Key) -> Int {
-        counter += 1
-        current[key] = counter
-        return counter
-    }
-
-    mutating func end(_ key: Key) {
-        current[key] = nil
-    }
-
-    /// A lease timer fired. True when it is `key`'s current lease, which ends.
-    mutating func expire(_ key: Key, lease: Int) -> Bool {
-        guard current[key] == lease else { return false }
-        current[key] = nil
-        return true
     }
 }

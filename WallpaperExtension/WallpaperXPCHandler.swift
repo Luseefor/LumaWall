@@ -49,27 +49,6 @@ enum Lifecycle {
     /// gone (asleep/removed) lets it fire. Short enough to save power promptly, long enough
     /// to ride out a brief sleep/wake flicker.
     static let teardownGrace: TimeInterval = 15.0
-
-    /// Current preview lease per surface. Touched ONLY on `queue`.
-    nonisolated(unsafe) static var previewLeases = LeaseBook<DisplayKey>()
-
-    /// How long a preview surface plays after its last acquire. The agent
-    /// doesn't always invalidate a Settings preview, and one left open kept
-    /// decoding for minutes. Expiry closes the surface (its frame stays, so
-    /// the picker never goes blank) and the next acquire reopens it.
-    static let previewLease: TimeInterval = 120.0
-}
-
-/// Start (or restart) a preview surface's lease. A timer from an earlier
-/// lease finds itself superseded and does nothing. MUST be called on `Lifecycle.queue`.
-private func renewPreviewLease(for key: DisplayKey) {
-    let lease = Lifecycle.previewLeases.renew(key)
-    Lifecycle.queue.asyncAfter(deadline: .now() + Lifecycle.previewLease) {
-        guard Lifecycle.previewLeases.expire(key, lease: lease) else { return }
-        if WallpaperState.shared.setSurfaceOpen(false, for: key) {
-            extensionLog("  [lease] preview on display \(key.displayID) not re-acquired in \(Lifecycle.previewLease)s → stopped playback, frame held")
-        }
-    }
 }
 
 /// Reply to a deferred acquire with `contextId`, or fail it when teardown
@@ -88,12 +67,6 @@ private func replyIfContextLive<Reply>(
         }
         reply(boxedReply.value, nil)
     }
-}
-
-/// Drop a surface's lease: it was invalidated or removed, or a live request
-/// now uses it. MUST be called on `Lifecycle.queue`.
-private func endPreviewLease(for key: DisplayKey) {
-    Lifecycle.previewLeases.end(key)
 }
 
 /// Arm (or re-arm) the teardown timer for a display whose live wallpaper was invalidated.
@@ -412,17 +385,8 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // pending teardown so a brief invalidate→re-acquire flicker doesn't drop it,
         // and resumes the playback the invalidate stopped.
         cancelTeardown(for: key)
-        if let (acquired, playsAsPreview) = WallpaperState.shared.noteAcquire(for: key, byPreview: isPreview, connection: connectionSerial) {
-            if acquired.reopened {
-                extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
-            }
-            // A live request handed a preview's context (role mismatch below)
-            // promotes it for good: no lease to freeze it, and live policy.
-            if playsAsPreview { renewPreviewLease(for: key) } else { endPreviewLease(for: key) }
-            if acquired.promoted {
-                extensionLog("  [acquire] live request took over preview surface on display \(key.displayID) → live policy")
-                LumaWallExtension.recomputeAndApplyPolicy()
-            }
+        if WallpaperState.shared.noteAcquire(for: key, connection: connectionSerial) == true {
+            extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
         }
         let videoURL = findVideoURL(forChoice: renderChoice)
         let cachedStill = loadCachedSnapshotImage(forChoice: choiceConfiguration)
@@ -511,7 +475,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     do {
                         renderer = try await VideoRenderer.create(
                             rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
-                            tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: WallpaperState.shared.playsAsPreview(key) ?? isPreview) },
+                            tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                             isPreview: isPreview,
                         )
                     } catch {
@@ -573,7 +537,6 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             for: key,
         )
         extensionLog("  Created context \(contextId) for display \(key.displayID)")
-        if isPreview { renewPreviewLease(for: key) }
 
         // NB: the XPC reply is DEFERRED until the new context is actually displaying
         // video (in the render Task below). WallpaperAgent hosts a context only after it
@@ -639,7 +602,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 do {
                     renderer = try await VideoRenderer.create(
                         rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
-                        tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: WallpaperState.shared.playsAsPreview(key) ?? isPreview) },
+                        tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         isPreview: isPreview,
                     )
                 } catch {
@@ -826,7 +789,6 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // An invalidate that may predate a reacquire on another open
         // connection keeps playing through the grace, as before #12.
         let action = WallpaperState.shared.invalidate(key, by: connectionSerial)
-        if action != .graceOnly { endPreviewLease(for: key) }
         scheduleTeardown(for: key)
         let stopped = action == .graceOnly ? "reacquired on another open connection, keeps playing" : "stopped playback"
         extensionLog("=== INVALIDATE === UUID \(uuid) → \(stopped), tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
@@ -918,7 +880,6 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         let removedKeys = WallpaperState.shared.removeContexts(forVideoID: videoID)
         for key in removedKeys {
             cancelTeardown(for: key)
-            endPreviewLease(for: key)
         }
         if !removedKeys.isEmpty {
             if WallpaperState.shared.currentVideoID == videoID {
