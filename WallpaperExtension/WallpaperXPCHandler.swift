@@ -883,16 +883,16 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         }
         // Nobody hosts the surface now: stop decoding at once, but keep the
         // context and its frame so a re-acquire within the grace is seamless.
-        // An ambiguous invalidate (another open connection reacquired since,
-        // or the picker shares the surface) keeps playing, keeps the id so
-        // the owner's invalidate still lands, and survives the grace: the
-        // owner may still host the context.
+        // An invalidate that leaves a host (another open connection
+        // reacquired since, or another role shares the surface) keeps
+        // playing, keeps the id so the last host's invalidate still lands,
+        // and survives the grace.
         let action = WallpaperState.shared.invalidate(key, by: connectionSerial)
         if action?.retiresWallpaperID ?? true {
             WallpaperState.shared.forgetWallpaperID(uuid)
         }
         scheduleTeardown(for: key)
-        let stopped = action == .graceOnly ? "ambiguous (reacquired elsewhere or shared with the picker), keeps playing and survives the grace" : "stopped playback"
+        let stopped = action == .graceOnly ? "another host may still show it (reacquired elsewhere or shared by the other role), keeps playing and survives the grace" : "stopped playback"
         extensionLog("=== INVALIDATE === UUID \(uuid) → \(stopped), tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
         reply(nil)
     }

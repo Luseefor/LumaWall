@@ -201,16 +201,43 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertFalse(slot.tearsDownAtGraceEnd, "connection 2 hosts it")
     }
 
-    func testTheOwnersInvalidateClosesWhileThePickerSharesFromAnotherConnection() {
-        // The picker on connection 2 can't send connection 1's invalidate.
-        // Taking the grace here would keep an unhosted surface decoding
-        // now that an open slot is never torn down.
+    func testTheOwnersInvalidateKeepsPlayingForAPickerStillSharing() {
+        // The owner leaves first; the picker on connection 2 still hosts the
+        // context, and its own invalidate then closes it.
         var slot = SurfaceSlot(acquiredBy: 1)
         _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .graceOnly)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .close)
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+    }
+
+    func testPickerDismissalLeavesTheDesktopHostingAPickerMadeContext() {
+        // The picker created the context, then the desktop was handed it on
+        // another connection. The picker's dismissal closed it at once and
+        // teardown destroyed what the desktop hosted.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .graceOnly)
+        XCTAssertTrue(slot.open)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+    }
+
+    func testAPickerJoiningDuringTheOwnersGraceClosesWhenItLeaves() {
+        // The desktop left, the picker reopened the surface during the
+        // grace and cancelled teardown. With the picker gone too nobody
+        // hosts it, so it must close rather than decode on.
+        var slot = SurfaceSlot(acquiredBy: 1)
         XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .close)
+        XCTAssertTrue(slot.acquired(by: 2, replyOnly: true), "reopened for the picker")
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .close)
         XCTAssertTrue(slot.tearsDownAtGraceEnd)
-        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .graceOnly, "the picker leaving changes nothing")
-        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+    }
+
+    func testASharerWhoseConnectionDroppedDoesNotKeepTheSurface() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .close)
     }
 
     func testAReopenedSurfaceIsNotTornDown() {

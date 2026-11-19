@@ -14,6 +14,8 @@ struct SurfaceSlot: Equatable {
     /// without changing it (the Settings picker reusing the live surface's
     /// id). That host's invalidate comes on its own connection.
     private(set) var sharers: Set<Int> = []
+    /// The latest acquirer sent its invalidate; an acquire clears it.
+    private(set) var ownerLeft = false
     /// The token of the renderer create in flight.
     private(set) var pendingCreate: Int?
     private(set) var hasRenderer = false
@@ -47,6 +49,9 @@ struct SurfaceSlot: Equatable {
             if let connection { sharers.insert(connection) }
         } else if let connection {
             lastAcquirer = connection
+            ownerLeft = false
+        } else {
+            ownerLeft = false
         }
         return setOpen(true)
     }
@@ -54,9 +59,9 @@ struct SurfaceSlot: Equatable {
     enum InvalidateAction: Equatable {
         /// The invalidate belongs to the latest acquisition: stop playback now.
         case close
-        /// It may belong to an earlier acquisition that another, still open
-        /// connection has since replaced, or to a host sharing the surface:
-        /// keep playing, and keep the context past the grace.
+        /// It belongs to an earlier acquisition another open connection has
+        /// since replaced, or another host still shows the surface: keep
+        /// playing, and keep the context past the grace.
         case graceOnly
 
         /// Whether the invalidate retires the surface's WallpaperID. A
@@ -65,21 +70,25 @@ struct SurfaceSlot: Equatable {
         var retiresWallpaperID: Bool { self == .close }
     }
 
-    /// The protocol names only the surface, so the connection decides. An
-    /// invalidate from the latest acquirer, or after the latest acquirer's
-    /// connection dropped (the agent cleaning up on a new connection), is
-    /// unambiguous, unless another role's host shares the surface on the
-    /// same connection: then this invalidate may be that host's and takes
-    /// the grace. A sharer on another connection takes the grace for its own
-    /// invalidate and never for the owner's.
-    /// A closing invalidate closes the slot.
+    /// The protocol names only the surface, so the connection decides which
+    /// host left: a sharer's connection, the latest acquirer's (or any, once
+    /// the acquirer's connection dropped: the agent cleaning up on a new
+    /// connection), or an older connection a reacquire elsewhere replaced,
+    /// which changes nothing. On a connection that is both the acquirer's and
+    /// a sharer's, the first invalidate counts as the sharer's. The surface
+    /// closes, and the slot with it, once the acquirer has left and no sharer
+    /// on an open connection is left to host it.
     mutating func invalidated(by connection: Int, openConnections: Set<Int>) -> InvalidateAction {
-        if sharers.remove(connection) != nil { return .graceOnly }
-        guard let lastAcquirer, lastAcquirer != connection, openConnections.contains(lastAcquirer) else {
-            open = false
-            return .close
+        if sharers.remove(connection) == nil {
+            if let lastAcquirer, lastAcquirer != connection, openConnections.contains(lastAcquirer) {
+                return .graceOnly
+            }
+            ownerLeft = true
         }
-        return .graceOnly
+        let ownerGone = ownerLeft || lastAcquirer.map { !openConnections.contains($0) } ?? true
+        guard ownerGone, sharers.isDisjoint(with: openConnections) else { return .graceOnly }
+        open = false
+        return .close
     }
 
     /// The grace after an invalidate ran out with no reacquire. Only a closed
