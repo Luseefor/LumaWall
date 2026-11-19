@@ -8,13 +8,12 @@ import Foundation
 ///
 /// Display sleep is held apart from the policy. Sleep stops the clock, the
 /// feed, and any rebuild without overwriting the requested tier, so wake
-/// resumes whatever the latest policy asks for. Because sleep and wake
-/// arrive as events on the same queue as policy updates, an update decided
-/// before sleep is undone by the sleep event and one decided after it sees
-/// the gate.
+/// resumes whatever the latest policy asks for, including on previews that no
+/// policy recompute reaches. Because sleep and wake arrive as events on the
+/// same queue as policy updates, an update decided before sleep is undone by
+/// the sleep event and one decided after it sees the gate.
 ///
-/// A closed surface (invalidated by the agent, or a preview past its lease)
-/// is a second gate beside sleep. It stops the clock and feed but keeps the
+/// A closed surface (invalidated by the agent) is a second gate beside sleep. It stops the clock and feed but keeps the
 /// readers and the displayed frame, so a re-acquire resumes in place with no
 /// flush and no blank frame. While either gate is shut a flushed reset waits
 /// to build, and the renderer holds switches, so nothing decodes into the
@@ -91,7 +90,7 @@ struct RendererLifecycle: Equatable {
         /// The renderer loaded a different asset (switch or battery-tier copy).
         case assetChanged
         case displaySleep
-        /// The agent invalidated the surface, or a preview's lease ran out.
+        /// The agent invalidated the surface.
         case surfaceClosed
         /// The surface was acquired again. `assetChanged`: the renderer
         /// opened a switch it held while the surface was closed.
@@ -137,9 +136,9 @@ struct RendererLifecycle: Equatable {
     private(set) var retryArmed = false
     /// Bumped whenever a reset starts, so a stale flush completion is dropped.
     private(set) var generation = 0
-    /// Readers were freed while the surface was closed (a preview past its
-    /// lease). Its clock counts every loop, so resuming from it can seek past
-    /// the clip (#27); the next rebuild restarts instead, whenever it runs.
+    /// Readers were freed while the surface was closed. Its clock counts every
+    /// loop, so resuming from it can seek past the clip (#27); the next
+    /// rebuild restarts instead, whenever it runs.
     private(set) var restartFreedReaders = false
 
     /// `policy` is the tier the renderer was created for, so the recompute

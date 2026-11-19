@@ -69,11 +69,6 @@ final class VideoRenderer: @unchecked Sendable {
     /// queue when a switch or the first frame picks a copy, so a recompute
     /// still on its way can't make it open the wrong one.
     private let tierSource: @Sendable () -> PlaybackPolicy
-    /// A Settings preview: it holds one frame at a tier no copy serves.
-    private let isPreview: Bool
-    /// The tier last asked of this renderer; `lifecycle.policy` is what it
-    /// plays, which differs on a preview holding a frame. Queue-only.
-    private var requestedTier: PlaybackPolicy
     /// The creation still, shown again when the video can't be rebuilt.
     private let fallbackStill: CGImage?
 
@@ -87,7 +82,6 @@ final class VideoRenderer: @unchecked Sendable {
         stillImage: CGImage? = nil,
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
-        isPreview: Bool = false,
     ) async throws -> VideoRenderer {
         let pixels = CGSize(
             width: rootLayer.bounds.width * rootLayer.contentsScale,
@@ -136,7 +130,6 @@ final class VideoRenderer: @unchecked Sendable {
             originalURL: videoURL,
             variantSelector: variantSelector,
             tierSource: tierSource,
-            isPreview: isPreview,
             policy: policy,
         )
     }
@@ -151,14 +144,11 @@ final class VideoRenderer: @unchecked Sendable {
         originalURL: URL,
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
-        isPreview: Bool,
         policy: PlaybackPolicy,
     ) {
         self.displayLayer = displayLayer
         self.copy = RendererCopy(original: originalURL, selector: variantSelector)
         self.tierSource = tierSource
-        self.isPreview = isPreview
-        self.requestedTier = policy
         self.lifecycle = RendererLifecycle(policy: policy)
         self.pixelSize = OSAllocatedUnfairLock(initialState: CGSize(
             width: rootLayer.bounds.width * rootLayer.contentsScale,
@@ -248,13 +238,12 @@ final class VideoRenderer: @unchecked Sendable {
             // The tier can change while `create` loads the track, and a
             // policy recorded before this job doesn't pick a copy when it
             // pauses. Pick the first frame's copy for the tier now.
-            requestedTier = tierSource()
-            let tier = playedTier(requestedTier)
+            let tier = tierSource()
             if case let .opened(loaded) = copy.retier(current: asset.url, tier: tier, displayPixels: displayPixelSize, open: loadBlocking) {
                 traceLog("  [start #\(debugID)] tier \(tier) opens a different file than create")
                 adopt(loaded)
             }
-            send(.policy(playedTier(requestedTier, playing: asset.url), animated: false))
+            send(.policy(tier, animated: false))
             // Starts the clock and the feed once the pipeline reports built,
             // unless the displays sleep or a pause was applied before this ran.
             // The global flag is read here, on the queue: sleep sets it before
@@ -455,12 +444,8 @@ final class VideoRenderer: @unchecked Sendable {
 
     /// Queue-only body of `applyPolicy`, also run by a switch for the tier it
     /// opened.
-    private func applyTier(_ requested: PlaybackPolicy, animated: Bool) {
-        requestedTier = requested
-        let policy = playedTier(requested)
-        // The second check catches a preview whose copy didn't open (a held
-        // switch fell back to the original) at an unchanged tier.
-        guard policy != lifecycle.policy || playedTier(requested, playing: asset.url) != lifecycle.policy else { return }
+    private func applyTier(_ policy: PlaybackPolicy, animated: Bool) {
+        guard policy != lifecycle.policy else { return }
         extensionLog("  [applyPolicy #\(debugID)] \(lifecycle.policy) → \(policy) animated=\(animated) asleep=\(lifecycle.displayAsleep) asset=\(asset.url.lastPathComponent)")
         // Battery tiers resolve to downscaled siblings via the selector,
         // but the selector is otherwise consulted only at loop boundaries,
@@ -473,13 +458,7 @@ final class VideoRenderer: @unchecked Sendable {
             adopt(loaded)
             send(.assetChanged)
         }
-        send(.policy(playedTier(requested, playing: asset.url), animated: animated))
-    }
-
-    /// The tier to play for `requested`: a preview with no copy for it holds
-    /// a frame instead of decoding the original. Queue-only.
-    private func playedTier(_ requested: PlaybackPolicy, playing: URL? = nil) -> PlaybackPolicy {
-        isPreview ? copy.previewTier(requested, displayPixels: displayPixelSize, playing: playing) : requested
+        send(.policy(policy, animated: animated))
     }
 
     /// The displays went to sleep: stop the clock, the feed, and any ramp, and
@@ -501,11 +480,9 @@ final class VideoRenderer: @unchecked Sendable {
             guard open else { send(.surfaceClosed); return }
             var changed = false
             if !lifecycle.displayAsleep,
-               case let .opened(loaded) = copy.reopen(current: asset.url, tier: requestedTier, displayPixels: displayPixelSize, open: loadBlocking) {
+               case let .opened(loaded) = copy.reopen(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, open: loadBlocking) {
                 adopt(loaded)
                 changed = true
-                // The new choice sets what a preview plays.
-                applyTier(requestedTier, animated: false)
             }
             send(.surfaceReopened(assetChanged: changed))
         }
@@ -520,10 +497,9 @@ final class VideoRenderer: @unchecked Sendable {
             var changed = false
             // A closed surface keeps its held switch and copy for the reopen.
             if lifecycle.surfaceOpen,
-               case let .opened(loaded) = copy.wake(current: asset.url, tier: requestedTier, displayPixels: displayPixelSize, open: loadBlocking) {
+               case let .opened(loaded) = copy.wake(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, open: loadBlocking) {
                 adopt(loaded)
                 changed = true
-                applyTier(requestedTier, animated: false)
             }
             send(.displayWake(assetChanged: changed))
         }

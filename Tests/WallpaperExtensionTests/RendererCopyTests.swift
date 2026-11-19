@@ -123,44 +123,6 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertNil(copy.loopReplacement(preloaded: url("a.full.mov"), current: url("a.full.mov"), tier: .paused, displayPixels: display), "paused keeps the current copy")
     }
 
-    // MARK: Previews
-
-    func testPreviewWithoutACopyForItsTierHoldsAFrame() {
-        // The Settings picker played a full-resolution original for its
-        // whole lease when no copy fit its viewport (#12).
-        let onlyReduced: RendererCopy.Selector = { _, tier in
-            URL(fileURLWithPath: tier == .reduced ? "/videos/a.reduced.mov" : "/videos/a.mp4")
-        }
-        let copy = RendererCopy(original: url("a.mp4"), selector: onlyReduced)
-        XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .paused)
-        XCTAssertEqual(copy.previewTier(.minimal, displayPixels: display), .paused)
-        XCTAssertEqual(copy.previewTier(.reduced, displayPixels: display), .reduced)
-        XCTAssertEqual(copy.previewTier(.paused, displayPixels: display), .paused)
-    }
-
-    func testPreviewPlayingTheOriginalBecauseItsCopyFailedHoldsAFrame() {
-        // The selector names a copy, but it had no video and the original
-        // opened instead: judge the file that is actually playing.
-        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
-        XCTAssertEqual(copy.previewTier(.full, displayPixels: display, playing: url("a.mp4")), .paused)
-        XCTAssertEqual(copy.previewTier(.full, displayPixels: display, playing: url("a.full.mov")), .full)
-    }
-
-    func testPreviewTierFollowsTheChoiceAHeldSwitchOpened() {
-        // A playing preview reopened onto a queued choice that has no copy.
-        let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/b.mp4") }
-        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
-        XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
-        _ = copy.switchTo(url("b.mp4"), selector: originalOnly, current: url("a.full.mov"), tier: .full, displayPixels: display, hold: true, open: open)
-        XCTAssertEqual(copy.reopen(current: url("a.full.mov"), tier: .full, displayPixels: display, open: open), opened("b.mp4"))
-        XCTAssertEqual(copy.previewTier(.full, displayPixels: display, playing: url("b.mp4")), .paused)
-    }
-
-    func testPreviewWithAViewportCopyPlaysIt() {
-        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
-        XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
-    }
-
     // MARK: Tier changes
 
     func testPausedRendererResumingOnBatteryMovesToTheBatteryCopy() async {

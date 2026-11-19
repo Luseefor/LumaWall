@@ -293,8 +293,7 @@ final class WallpaperState: Sendable {
     /// display, or on surfaces without a display ID when `displayID` is nil.
     /// Playback policy (pause, battery tiers, occlusion) governs desktop
     /// surfaces. Preview surfaces (Settings picker, prewarm) keep playing
-    /// what the user is looking at instead of freezing with desktop policy;
-    /// they take `PlaybackPolicy.preview` through `forPreviewRenderers`.
+    /// what the user is looking at instead of freezing with desktop policy.
     /// Sleep and teardown paths deliberately keep using `forEachRenderer`
     /// (nothing should decode while displays sleep).
     func forLiveRenderers(displayID: UInt32?, _ body: (VideoRenderer) -> Void) {
@@ -302,17 +301,6 @@ final class WallpaperState: Sendable {
             state.contexts.values
                 .filter { $0.displayID == displayID && !$0.isPreview }
                 .compactMap(\.renderer)
-        }
-        for renderer in renderers {
-            body(renderer)
-        }
-    }
-
-    /// Execute a closure for renderers on preview surfaces, the ones
-    /// `forLiveRenderers` leaves out.
-    func forPreviewRenderers(_ body: (VideoRenderer) -> Void) {
-        let renderers = lock.withLock { state in
-            state.contexts.values.filter(\.isPreview).compactMap(\.renderer)
         }
         for renderer in renderers {
             body(renderer)

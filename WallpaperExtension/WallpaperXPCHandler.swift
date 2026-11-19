@@ -476,7 +476,6 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                         renderer = try await VideoRenderer.create(
                             rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
-                            isPreview: isPreview,
                         )
                     } catch {
                         extensionLog("  [Renderer] swap create failed: \(error)")
@@ -603,7 +602,6 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     renderer = try await VideoRenderer.create(
                         rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
-                        isPreview: isPreview,
                     )
                 } catch {
                     extensionLog("  [Renderer] Failed to create: \(error)")

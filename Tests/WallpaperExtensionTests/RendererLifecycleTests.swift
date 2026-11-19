@@ -41,7 +41,7 @@ final class RendererLifecycleTests: XCTestCase {
     }
 
     func testWakeResumesTheLatestTierWithoutARecompute() {
-        // No recompute is needed: wake resumes the tier recorded before sleep.
+        // Previews get no policy recompute on wake; their tier never changed.
         var life = playing()
         _ = life.handle(.displaySleep)
         XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
@@ -129,16 +129,16 @@ final class RendererLifecycleTests: XCTestCase {
     }
 
     func testDeepPausedClosedSurfaceRestartsOnReopenHoldingItsFrame() {
-        // A preview past its lease frees its readers after 30 s. Its clock
-        // counts every loop, so resuming from it can seek past the clip (#27);
-        // it restarts instead, and a restart's flush keeps the frame up.
+        // A closed surface frees its readers after 30 s. Its clock counts
+        // every loop, so resuming from it can seek past the clip (#27); it
+        // restarts instead, and a restart's flush keeps the frame up.
         var life = playing()
         _ = life.handle(.surfaceClosed)
         XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
         XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [.beginReset(.restart, generation: 1)])
     }
 
-    func testPreviewFreedWhileClosedRestartsWhenItRebuildsAfterWake() {
+    func testSurfaceFreedWhileClosedRestartsWhenItRebuildsAfterWake() {
         // Reopened while the displays slept: the rebuild waits for wake and
         // must still restart, not resume from the loop-counting clock.
         var life = playing()
@@ -149,7 +149,7 @@ final class RendererLifecycleTests: XCTestCase {
         XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.beginReset(.restart, generation: 1)])
     }
 
-    func testPreviewFreedWhileClosedRestartsWhenAPauseLifts() {
+    func testSurfaceFreedWhileClosedRestartsWhenAPauseLifts() {
         var life = playing()
         _ = life.handle(.surfaceClosed)
         _ = life.handle(.deepPauseFired)
