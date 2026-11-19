@@ -106,6 +106,26 @@ struct RendererCopy {
         openFirst(active, tier: tier, displayPixels: displayPixels, current: current, open: open)
     }
 
+    /// `retier` for `start()`, which reads the tier again after `create`.
+    /// A preview that create left on a copy stays off the original: create
+    /// seeded it as a renderer that plays, which may have decoded a frame
+    /// of the original, so holding the original now would waste that
+    /// decode. It stays on its copy at the held tier instead, as
+    /// `applyTier` leaves a preview whose tier loses its copy.
+    mutating func retierAtStart<Loaded>(
+        current: URL,
+        tier: PlaybackPolicy,
+        displayPixels: CGSize,
+        isPreview: Bool,
+        open: (URL) -> Loaded?,
+    ) -> Opened<Loaded> {
+        let original = active.original.standardizedFileURL
+        let keepsCopy = isPreview && current.standardizedFileURL != original
+        return retier(current: current, tier: tier, displayPixels: displayPixels) { url in
+            keepsCopy && url.standardizedFileURL == original ? nil : open(url)
+        }
+    }
+
     /// The displays woke: open the held switch, or the copy for a tier that
     /// changed during sleep. Paused with nothing held keeps the current file
     /// (see `VariantSelection.preloadURL`).

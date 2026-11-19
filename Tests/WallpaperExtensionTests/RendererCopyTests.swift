@@ -256,6 +256,23 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertEqual(attempts, ["a.full.mov", "a.mp4"])
     }
 
+    func testStartKeepsAPreviewThatCreateLeftOnACopyOffTheOriginal() {
+        // Create opened the Reduced copy and seeded with no hold. The tier
+        // moved before start to one with no copy: moving to the original
+        // would hold a frame of it the seed had just decoded.
+        let reducedOnly: RendererCopy.Selector = { _, tier in
+            URL(fileURLWithPath: tier == .reduced ? "/videos/a.reduced.mov" : "/videos/a.mp4")
+        }
+        var preview = RendererCopy(original: url("a.mp4"), selector: reducedOnly)
+        XCTAssertEqual(preview.retierAtStart(current: url("a.reduced.mov"), tier: .full, displayPixels: display, isPreview: true, open: open), .failed)
+        XCTAssertEqual(attempts, [], "the original isn't opened")
+        var live = RendererCopy(original: url("a.mp4"), selector: reducedOnly)
+        XCTAssertEqual(live.retierAtStart(current: url("a.reduced.mov"), tier: .full, displayPixels: display, isPreview: false, open: open), opened("a.mp4"))
+        // A preview create left on the original still moves to a copy.
+        var held = RendererCopy(original: url("a.mp4"), selector: reducedOnly)
+        XCTAssertEqual(held.retierAtStart(current: url("a.mp4"), tier: .reduced, displayPixels: display, isPreview: true, open: open), opened("a.reduced.mov"))
+    }
+
     func testPreviewHoldsItsSeedOnlyWhileTheSeedIsOfTheChoiceItOpened() {
         // A switch before start() leaves the previous choice's still in the
         // layer; holding it would show the wrong wallpaper.

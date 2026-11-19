@@ -289,7 +289,7 @@ final class VideoRenderer: @unchecked Sendable {
             // pauses. Pick the first frame's copy for the tier now.
             requestedTier = tierSource()
             let tier = playedTier(requestedTier)
-            if case let .opened(loaded) = copy.retier(current: asset.url, tier: tier, displayPixels: displayPixelSize, open: loadBlocking) {
+            if case let .opened(loaded) = copy.retierAtStart(current: asset.url, tier: tier, displayPixels: displayPixelSize, isPreview: isPreview, open: loadBlocking) {
                 traceLog("  [start #\(debugID)] tier \(tier) opens a different file than create")
                 adopt(loaded)
             }
