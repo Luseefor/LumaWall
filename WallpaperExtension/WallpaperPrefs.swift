@@ -241,7 +241,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         // Surfaces without a display ID take the global policy, also beside
         // displays that have one: skipping them left one seeded Paused (a
         // fullscreen app on another display) stuck there. Live surfaces only;
-        // previews are exempt (see forLiveRenderers).
+        // previews take their own tier below (see forLiveRenderers).
         let hardPause = RampMath.cutsRampDown(thermalState: powerState.thermalState, activityState: activityState)
         for displayID in displayIDs.map(Optional.some) + [nil] {
             let displayPolicy = policy(for: displayID)
@@ -249,6 +249,25 @@ final class WallpaperPrefs: @unchecked Sendable {
                 renderer.applyPolicy(displayPolicy, animated: animated, hardPause: hardPause && displayPolicy == .paused)
             }
         }
+        let previewTier = previewPolicy(powerState: powerState)
+        state.forPreviewRenderers { renderer in
+            renderer.applyPolicy(previewTier, animated: false, hardPause: hardPause && previewTier == .paused)
+        }
+    }
+
+    /// The tier `applyPolicies` gives preview renderers: the hard pauses and
+    /// power tiers, none of the desktop rules.
+    func previewPolicy(powerState: PowerMonitor.PowerState) -> PlaybackPolicy {
+        PlaybackPolicy.preview(
+            userPaused: userPaused,
+            thermalState: powerState.thermalState,
+            isOnBattery: powerState.isOnBattery,
+            batteryLevel: powerState.batteryLevel,
+            isGameModeActive: powerState.isGameModeActive,
+            isLowPowerModeEnabled: powerState.isLowPowerModeEnabled,
+            displayBrightness: powerState.displayBrightness,
+            powerProfile: powerProfile,
+        )
     }
 
     /// The tier `applyPolicies` gives live renderers on `displayID`, or every

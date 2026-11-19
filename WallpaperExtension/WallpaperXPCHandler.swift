@@ -144,7 +144,7 @@ func closeSurfacesLeftUnhosted() {
     Lifecycle.queue.async {
         for key in WallpaperState.shared.closeUnhostedSurfaces() {
             scheduleTeardown(for: key)
-            extensionLog("  [teardown] last host of display \(key.displayID)'s surface quit without an invalidate, stopped playback")
+            extensionLog("  [teardown] last host of display \(key.displayID)'s surface quit without an invalidate, closed it and armed its teardown")
         }
     }
 }
@@ -563,6 +563,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                             rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
                             fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
+                            isPreview: isPreview,
                         )
                     } catch {
                         extensionLog("  [Renderer] swap create failed: \(error)")
@@ -689,6 +690,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                         rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
                         fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
+                        isPreview: isPreview,
                     )
                 } catch {
                     extensionLog("  [Renderer] Failed to create: \(error); seeded the gradient layer")

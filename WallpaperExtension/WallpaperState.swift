@@ -166,6 +166,7 @@ final class WallpaperState: Sendable {
             // Told under the lock so it can't land after a reopen that
             // `setSurfaceOpen` sends for the same surface.
             if closed { renderer.setSurfaceOpen(false) }
+            if context.isPreview, !context.slot.holdsPreviewFrame(contextIsPreview: true) { renderer.playAsLive() }
             context.videoID = videoID
             state.contexts[key] = context
             return .installed(previous: previous)
@@ -187,9 +188,12 @@ final class WallpaperState: Sendable {
     func noteAcquire(for key: DisplayKey, byPreview: Bool, connection: Int) -> Bool? {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
-            let reopened = context.slot.acquired(by: connection, replyOnly: byPreview != context.isPreview)
+            let held = context.slot.holdsPreviewFrame(contextIsPreview: context.isPreview)
+            // A preview handed a closed live surface keeps its frame.
+            let reopened = context.slot.acquired(by: connection, replyOnly: byPreview != context.isPreview, reopens: !(byPreview && !context.isPreview))
             state.contexts[key] = context
             if reopened { context.renderer?.setSurfaceOpen(true) }
+            if held, !context.slot.holdsPreviewFrame(contextIsPreview: context.isPreview) { context.renderer?.playAsLive() }
             return reopened
         }
     }
@@ -202,14 +206,16 @@ final class WallpaperState: Sendable {
         lock.withLock { _ = $0.openConnections.remove(serial) }
     }
 
-    /// Close every open surface whose hosts have all gone, after a
-    /// connection closed (`SurfaceSlot.connectionsChanged`). Returns their
-    /// keys so the caller can arm their teardown.
+    /// Close every surface whose hosts have all gone, after a connection
+    /// closed (`SurfaceSlot.connectionsChanged`). Returns their keys so the
+    /// caller can arm their teardown.
     func closeUnhostedSurfaces() -> [DisplayKey] {
         lock.withLock { state in
             var closed: [DisplayKey] = []
-            for (key, var context) in state.contexts where context.slot.connectionsChanged(openConnections: state.openConnections) {
+            for (key, var context) in state.contexts {
+                let lastHostGone = context.slot.connectionsChanged(openConnections: state.openConnections)
                 state.contexts[key] = context
+                guard lastHostGone else { continue }
                 context.renderer?.setSurfaceOpen(false)
                 closed.append(key)
             }
@@ -310,7 +316,8 @@ final class WallpaperState: Sendable {
     /// display, or on surfaces without a display ID when `displayID` is nil.
     /// Playback policy (pause, battery tiers, occlusion) governs desktop
     /// surfaces. Preview surfaces (Settings picker, prewarm) keep playing
-    /// what the user is looking at instead of freezing with desktop policy.
+    /// what the user is looking at instead of freezing with desktop policy;
+    /// they take `PlaybackPolicy.preview` through `forPreviewRenderers`.
     /// Sleep and teardown paths deliberately keep using `forEachRenderer`
     /// (nothing should decode while displays sleep).
     func forLiveRenderers(displayID: UInt32?, _ body: (VideoRenderer) -> Void) {
@@ -318,6 +325,18 @@ final class WallpaperState: Sendable {
             state.contexts.values
                 .filter { $0.displayID == displayID && !$0.isPreview }
                 .compactMap(\.renderer)
+        }
+        for renderer in renderers {
+            body(renderer)
+        }
+    }
+
+    /// Execute a closure for renderers on preview surfaces, the ones
+    /// `forLiveRenderers` leaves out. A live surface the picker shares is
+    /// not one of them.
+    func forPreviewRenderers(_ body: (VideoRenderer) -> Void) {
+        let renderers = lock.withLock { state in
+            state.contexts.values.filter(\.isPreview).compactMap(\.renderer)
         }
         for renderer in renderers {
             body(renderer)
