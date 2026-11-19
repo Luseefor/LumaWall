@@ -26,4 +26,34 @@ final class DisplaySleepTests: XCTestCase {
         XCTAssertFalse(DisplaySleep.missedSleep(flagAsleep: true, displays: [false]))
         XCTAssertFalse(DisplaySleep.missedSleep(flagAsleep: false, displays: [false, true]))
     }
+
+    // MARK: Ordering against notifications
+
+    func testCatchUpSampledBeforeAWakeDoesNotUndoIt() {
+        // Acquire sampled every display asleep, then screensDidWake cleared
+        // the flag before the catch-up wrote it: playback stayed gated.
+        var gate = SleepGate()
+        let sampled = gate.epoch
+        XCTAssertTrue(gate.notified(asleep: true))
+        XCTAssertTrue(gate.notified(asleep: false))
+        XCTAssertFalse(gate.catchUp(sampledAt: sampled, displays: [true, true]))
+        XCTAssertFalse(gate.asleep)
+    }
+
+    func testCatchUpWithNoNotificationSinceItsSampleCloses() {
+        var gate = SleepGate()
+        XCTAssertTrue(gate.catchUp(sampledAt: gate.epoch, displays: [true]))
+        XCTAssertTrue(gate.asleep)
+        let sampled = gate.epoch
+        XCTAssertFalse(gate.catchUp(sampledAt: sampled, displays: [true]), "already gated")
+        XCTAssertTrue(gate.notified(asleep: false), "the wake still opens it")
+        XCTAssertFalse(gate.asleep)
+    }
+
+    func testRepeatedNotificationStillOrdersLaterCatchUps() {
+        var gate = SleepGate()
+        let sampled = gate.epoch
+        XCTAssertFalse(gate.notified(asleep: false), "no change")
+        XCTAssertFalse(gate.catchUp(sampledAt: sampled, displays: [true]), "the wake is newer than the sample")
+    }
 }

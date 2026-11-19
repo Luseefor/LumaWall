@@ -75,7 +75,7 @@ final class WallpaperState: Sendable {
         var currentVideoID: String? = UserDefaults.standard.string(forKey: WallpaperState.selectedVideoKey)
         var presentationMode: String = "active"
         var activityState: String = "active"
-        var isDisplayAsleep: Bool = false
+        var sleepGate = SleepGate()
         var isScreenLocked: Bool = false
         /// Identifies each renderer create, across contexts.
         var lastCreateToken = 0
@@ -485,8 +485,31 @@ final class WallpaperState: Sendable {
 
     /// Whether all displays are currently asleep.
     var isDisplayAsleep: Bool {
-        get { lock.withLock { $0.isDisplayAsleep } }
-        set { lock.withLock { $0.isDisplayAsleep = newValue } }
+        lock.withLock { $0.sleepGate.asleep }
+    }
+
+    /// Record `screensDidSleep` or `screensDidWake`. Set before the caller
+    /// tells the renderers, so a renderer starting meanwhile reads it.
+    func noteDisplaySleepNotification(asleep: Bool) {
+        lock.withLock { _ = $0.sleepGate.notified(asleep: asleep) }
+    }
+
+    /// The sleep gate's epoch, read before sampling the displays.
+    var displaySleepEpoch: Int {
+        lock.withLock { $0.sleepGate.epoch }
+    }
+
+    /// Close the sleep gate for displays sampled at `epoch` (see
+    /// `SleepGate.catchUp`) and pause every renderer. Renderers are told
+    /// under the lock, so a wake noted after this reaches them after it.
+    func catchUpDisplaySleep(sampledAt epoch: Int, displays: [Bool]) -> Bool {
+        lock.withLock { state in
+            guard state.sleepGate.catchUp(sampledAt: epoch, displays: displays) else { return false }
+            for renderer in state.contexts.values.compactMap(\.renderer) {
+                renderer.displayDidSleep()
+            }
+            return true
+        }
     }
 
     /// Whether the screen is currently locked (lock screen showing).

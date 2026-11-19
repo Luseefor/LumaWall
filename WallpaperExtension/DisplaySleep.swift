@@ -27,3 +27,30 @@ enum DisplaySleep {
         return ids.prefix(Int(count)).map { CGDisplayIsAsleep($0) != 0 }
     }
 }
+
+/// The extension's display-sleep flag and the order of its transitions.
+/// A catch-up samples the displays off the main queue while sleep and wake
+/// notifications land on it; the epoch lets a catch-up sampled before a
+/// notification lose to it instead of undoing a wake.
+struct SleepGate: Equatable {
+    private(set) var asleep = false
+    /// Bumped by every notification and catch-up.
+    private(set) var epoch = 0
+
+    /// `screensDidSleep` or `screensDidWake`. Returns whether the flag changed.
+    mutating func notified(asleep: Bool) -> Bool {
+        epoch += 1
+        guard self.asleep != asleep else { return false }
+        self.asleep = asleep
+        return true
+    }
+
+    /// Close the gate for displays sampled at `sampledAt`, when they all
+    /// sleep, the flag missed it, and no notification landed since.
+    mutating func catchUp(sampledAt: Int, displays: [Bool]) -> Bool {
+        guard sampledAt == epoch, DisplaySleep.missedSleep(flagAsleep: asleep, displays: displays) else { return false }
+        asleep = true
+        epoch += 1
+        return true
+    }
+}
