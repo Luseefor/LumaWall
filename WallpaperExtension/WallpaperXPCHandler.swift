@@ -480,7 +480,8 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     let renderer: VideoRenderer
                     do {
                         renderer = try await VideoRenderer.create(
-                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: loadStill(videoURL), variantSelector: selector,
+                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: loadStill(videoURL),
+                            fallbackStill: { loadStill(videoURL) }, variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         )
                     } catch {
@@ -604,11 +605,12 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             // The reply object is non-Sendable; box it to cross into the render Task.
             let boxedReply = SendableBox(value: replyObj)
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
-            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
+            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, loadStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
                 let renderer: VideoRenderer
                 do {
                     renderer = try await VideoRenderer.create(
-                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
+                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill,
+                        fallbackStill: { loadStill(videoURL) }, variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                     )
                 } catch {

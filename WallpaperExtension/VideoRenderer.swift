@@ -71,8 +71,10 @@ final class VideoRenderer: @unchecked Sendable {
     /// queue when a switch or the first frame picks a copy, so a recompute
     /// still on its way can't make it open the wrong one.
     private let tierSource: @Sendable () -> PlaybackPolicy
-    /// The creation still, shown again when the video can't be rebuilt.
-    private let fallbackStill: CGImage?
+    /// Loads the still shown when the video can't be rebuilt. Read only
+    /// then, so a playing renderer doesn't hold a decoded frame for it; nil
+    /// (nothing cached any more) shows the gradient.
+    private let fallbackStill: @Sendable () -> CGImage?
 
     /// Opens the copy `variantSelector` picks for the root layer's pixel size
     /// and the tier from `tierSource`, falling back to `videoURL` when that
@@ -82,6 +84,7 @@ final class VideoRenderer: @unchecked Sendable {
         rootLayer: CALayer,
         videoURL: URL,
         stillImage: CGImage? = nil,
+        fallbackStill: @escaping @Sendable () -> CGImage? = { nil },
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
     ) async throws -> VideoRenderer {
@@ -128,6 +131,7 @@ final class VideoRenderer: @unchecked Sendable {
             asset: asset,
             videoTrack: track,
             stillImage: stillImage,
+            fallbackStill: fallbackStill,
             nominalFrameRate: nominalFrameRate,
             originalURL: videoURL,
             variantSelector: variantSelector,
@@ -142,6 +146,7 @@ final class VideoRenderer: @unchecked Sendable {
         asset: AVURLAsset,
         videoTrack: AVAssetTrack,
         stillImage: CGImage?,
+        fallbackStill: @escaping @Sendable () -> CGImage?,
         nominalFrameRate: Double,
         originalURL: URL,
         variantSelector: @escaping RendererCopy.Selector,
@@ -159,7 +164,7 @@ final class VideoRenderer: @unchecked Sendable {
         self.renderer = LWSampleBufferRenderer(displayLayer)
         self.asset = asset
         self.videoTrack = videoTrack
-        self.fallbackStill = stillImage
+        self.fallbackStill = fallbackStill
         if nominalFrameRate.isFinite, nominalFrameRate > 0 {
             self.nominalFrameRate = nominalFrameRate
         }
@@ -580,8 +585,9 @@ final class VideoRenderer: @unchecked Sendable {
     /// gradient when there is none, rather than a frozen or cleared frame. The
     /// reset before this flushed the renderer, so it accepts the buffer.
     private func showFallbackStill() {
-        extensionLog("  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing \(fallbackStill == nil ? "the gradient" : "the still")")
-        guard let image = fallbackStill ?? Self.makeGradientStill(),
+        let still = fallbackStill()
+        extensionLog("  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing \(still == nil ? "the gradient" : "the still")")
+        guard let image = still ?? Self.makeGradientStill(),
               let buffer = makeStillSampleBuffer(from: image) else { return }
         Self.setDisplayImmediately(buffer)
         renderer.enqueue(buffer)
