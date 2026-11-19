@@ -36,6 +36,7 @@
 		27703CD32431238C74879E64 /* WallpaperModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E5F5F74F457F8FAF282073 /* WallpaperModels.swift */; };
 		28F246B976D22406C3E0D38E /* SharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59DC962B533FD75165C56C4 /* SharedComponents.swift */; };
 		29376B54DAA52AD3D4DEFDBD /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE978B3E3944AB95BCDB11E2 /* Logging.swift */; };
+		2941CC11C83F73A81DC712E7 /* StillCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB14BA4E3A2A682C926AA33C /* StillCache.swift */; };
 		2A1E8DD63C0A6010100B42E8 /* NativeWallpaperDeployment+Preview.swift in Sources */ = {isa = PBXBuildFile; fileRef = C890D0ECF91CB2C2FEA38A16 /* NativeWallpaperDeployment+Preview.swift */; };
 		2C562986A43830A14F700F8F /* SetLumaWallWallpaperIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CF12B9E3E2FCE2FADFDA7E2 /* SetLumaWallWallpaperIntent.swift */; };
 		30115431203486479D82276E /* RampMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A869D1AC50AA925F7CF42F0E /* RampMath.swift */; };
@@ -74,6 +75,7 @@
 		6C5BA8063B4DB3A7AD58A60A /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 1DDC47C398B0AFE7A2B6FABE /* AppIcon.icns */; };
 		6F898A5700FBE9BD29C6F3E4 /* CodableShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A643467ECEEFF2A13F77F82 /* CodableShims.swift */; };
 		711792427B0487BB41AD746E /* MediaImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4307418F872C77E79530286 /* MediaImporter.swift */; };
+		727CACA43944BD23656996EC /* StillCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592BC1C66CB8972441CF97D3 /* StillCacheTests.swift */; };
 		740A6ED30480733835D4E43F /* GameModeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59368D7B8218613EA17D09B0 /* GameModeMonitor.swift */; };
 		75C46C08A6DBEA592E04ADBA /* NativeWallpaperPrefsBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1574B693E71CFA6AC6A56F4D /* NativeWallpaperPrefsBridge.swift */; };
 		76ED3ACD78036167A072C349 /* RendererCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B901457AE4B1AF53C7C9AC6E /* RendererCopyTests.swift */; };
@@ -100,6 +102,7 @@
 		A0515B2E9CCB91FD497753DC /* NativeWallpaperDeploymentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */; };
 		A1F36111D42A6D1C69393839 /* PlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C82E4B5715D67331F66B3 /* PlaybackPolicy.swift */; };
 		A2C0AF588475CFAED60E1E09 /* DisplayCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 580BF5B18E21C3C2F1E7A962 /* DisplayCoordinator.swift */; };
+		A3D42D4545A0B76FE8BD3B75 /* StillCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB14BA4E3A2A682C926AA33C /* StillCache.swift */; };
 		A912E971E5CC0F7E72D2EF46 /* QHDFitFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA84D2FA80712CAC64877115 /* QHDFitFixtures.swift */; };
 		AB633A03CB77A18D37A2D0EB /* VariantSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29310CD5FF9A5DCEFFF01BB /* VariantSelection.swift */; };
 		ABE21D4A0AABC3D636B9992F /* LibraryScanRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB9D5FEF065DD45D4091BF5 /* LibraryScanRecord.swift */; };
@@ -264,6 +267,7 @@
 		54C6731C377E9CD3FA6FDBF8 /* AppModel+Playback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Playback.swift"; sourceTree = "<group>"; };
 		5521AC1A8196EE62B0D65EB0 /* SolarSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolarSchedule.swift; sourceTree = "<group>"; };
 		580BF5B18E21C3C2F1E7A962 /* DisplayCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayCoordinator.swift; sourceTree = "<group>"; };
+		592BC1C66CB8972441CF97D3 /* StillCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StillCacheTests.swift; sourceTree = "<group>"; };
 		59368D7B8218613EA17D09B0 /* GameModeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameModeMonitor.swift; sourceTree = "<group>"; };
 		5CE0B943653B35FEFE4EF4AE /* SpanningGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpanningGeometry.swift; sourceTree = "<group>"; };
 		5D2D700161F54D7AE38C0A54 /* LumaWallCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = LumaWallCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -344,6 +348,7 @@
 		E754FFABC4851272B5B28410 /* NativeWallpaperAssignmentStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperAssignmentStoreTests.swift; sourceTree = "<group>"; };
 		E7D41E3DDB0DA66D1B616C3A /* AppIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = AppIcon.png; sourceTree = "<group>"; };
 		EA84D2FA80712CAC64877115 /* QHDFitFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QHDFitFixtures.swift; sourceTree = "<group>"; };
+		EB14BA4E3A2A682C926AA33C /* StillCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StillCache.swift; sourceTree = "<group>"; };
 		ED5A5E5D56C16592448825FD /* AppModel+Assignment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Assignment.swift"; sourceTree = "<group>"; };
 		EDCB9B96D2A6A4DE581A711D /* LoopingVideoViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopingVideoViewTests.swift; sourceTree = "<group>"; };
 		EE978B3E3944AB95BCDB11E2 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
@@ -528,6 +533,7 @@
 				21D3898AF2316DE78202486F /* RampMathTests.swift */,
 				B901457AE4B1AF53C7C9AC6E /* RendererCopyTests.swift */,
 				0E0F66C01671F7D5343B87A2 /* RendererLifecycleTests.swift */,
+				592BC1C66CB8972441CF97D3 /* StillCacheTests.swift */,
 				25998C816C697DD62EB2C898 /* SurfaceSlotTests.swift */,
 				50AC3950C30CCB658EF253D0 /* ThermalHoldTests.swift */,
 				AD81E985B85F9C197EEEADEF /* VariantSelectionTests.swift */,
@@ -564,6 +570,7 @@
 				6B49861145EBB96C948C50C8 /* SnapshotCreation.swift */,
 				32DFB08F9FEC701E681168B2 /* SpiralRecovery.swift */,
 				18E44026EDDCE2C7E0EABEEE /* StillBisect.swift */,
+				EB14BA4E3A2A682C926AA33C /* StillCache.swift */,
 				FBF8BF08C2B580120BF639E0 /* StillFrame.swift */,
 				C35E00FD97E3EBEDDBF43278 /* SurfaceSlot.swift */,
 				10009BD2ED9A420EC55D7090 /* ThermalHold.swift */,
@@ -829,6 +836,8 @@
 				76ED3ACD78036167A072C349 /* RendererCopyTests.swift in Sources */,
 				793B7459B1336EF40654A09B /* RendererLifecycle.swift in Sources */,
 				D934B4A4007054C0E00703EF /* RendererLifecycleTests.swift in Sources */,
+				2941CC11C83F73A81DC712E7 /* StillCache.swift in Sources */,
+				727CACA43944BD23656996EC /* StillCacheTests.swift in Sources */,
 				FFF162AFA203A09AB4D6ABC1 /* SurfaceSlot.swift in Sources */,
 				A021F8CEE02D169DD27B7771 /* SurfaceSlotTests.swift in Sources */,
 				96483EE8B97895AE3A2E7092 /* ThermalHold.swift in Sources */,
@@ -919,6 +928,7 @@
 				C01C0E4D14C8355A1D5C8166 /* SnapshotCreation.swift in Sources */,
 				AE589C34D91A4831C452DA6A /* SpiralRecovery.swift in Sources */,
 				40FE8E9A025D712B8404EB07 /* StillBisect.swift in Sources */,
+				A3D42D4545A0B76FE8BD3B75 /* StillCache.swift in Sources */,
 				B8CA5E4E4989FF8D7D465D03 /* StillFrame.swift in Sources */,
 				B6BC69F8BC30188A7266E325 /* SurfaceSlot.swift in Sources */,
 				B7C362587997DA171CA39055 /* ThermalHold.swift in Sources */,
