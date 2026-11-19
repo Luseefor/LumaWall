@@ -49,7 +49,7 @@ final class RendererCopyTests: XCTestCase {
         // with the new wallpaper's selector installed.
         playable.remove("b.full.mov")
         var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
-        let result = copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: false, open: open)
+        let result = copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, hold: false, open: open)
         XCTAssertEqual(result, opened("b.mp4"))
         XCTAssertEqual(copy.preloadURL(current: url("b.mp4"), tier: .full, displayPixels: display).lastPathComponent, "b.full.mov")
     }
@@ -57,14 +57,14 @@ final class RendererCopyTests: XCTestCase {
     func testSwitchThatOpensNothingKeepsTheCurrentChoice() {
         playable.subtract(["b.full.mov", "b.mp4"])
         var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
-        let result = copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: false, open: open)
+        let result = copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, hold: false, open: open)
         XCTAssertEqual(result, .failed)
         XCTAssertEqual(copy.preloadURL(current: url("a.full.mov"), tier: .reduced, displayPixels: display).lastPathComponent, "a.reduced.mov")
     }
 
     func testSwitchToTheFilePlayingAdoptsTheSelectorWithoutReopening() {
         var copy = RendererCopy(original: url("old.mp4"), selector: selector("old"))
-        let result = copy.switchTo(url("a.mp4"), selector: selector("a"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: false, open: open)
+        let result = copy.switchTo(url("a.mp4"), selector: selector("a"), current: url("a.full.mov"), tier: .full, displayPixels: display, hold: false, open: open)
         XCTAssertEqual(result, .unchanged)
         XCTAssertEqual(attempts, [])
         XCTAssertEqual(copy.preloadURL(current: url("a.full.mov"), tier: .reduced, displayPixels: display).lastPathComponent, "a.reduced.mov")
@@ -75,7 +75,7 @@ final class RendererCopyTests: XCTestCase {
     func testLatestSwitchHeldThroughSleepOpensOnWakeForTheWakeTier() {
         var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         for id in ["b", "c"] {
-            let result = copy.switchTo(url("\(id).mp4"), selector: selector(id), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: true, open: open)
+            let result = copy.switchTo(url("\(id).mp4"), selector: selector(id), current: url("a.full.mov"), tier: .full, displayPixels: display, hold: true, open: open)
             XCTAssertEqual(result, .held)
         }
         XCTAssertEqual(attempts, [], "nothing opens while the displays sleep")
@@ -85,7 +85,7 @@ final class RendererCopyTests: XCTestCase {
 
     func testHeldSwitchFallsBackToTheOriginalOnWake() {
         var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
-        _ = copy.switchTo(url("c.mp4"), selector: selector("c"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: true, open: open)
+        _ = copy.switchTo(url("c.mp4"), selector: selector("c"), current: url("a.full.mov"), tier: .full, displayPixels: display, hold: true, open: open)
         XCTAssertEqual(copy.wake(current: url("a.full.mov"), tier: .full, displayPixels: display, open: open), opened("c.mp4"))
         XCTAssertEqual(attempts, ["c.full.mov", "c.mp4"])
     }
@@ -93,6 +93,24 @@ final class RendererCopyTests: XCTestCase {
     func testPausedWakeWithNothingHeldKeepsTheCurrentCopy() {
         var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         XCTAssertEqual(copy.wake(current: url("a.reduced.mov"), tier: .paused, displayPixels: display, open: open), .unchanged)
+        XCTAssertEqual(attempts, [])
+    }
+
+    // MARK: Closed surfaces
+
+    func testSwitchHeldWhileClosedOpensOnReopen() {
+        // A shuffle or automation switch reaching an invalidated surface
+        // used to decode the new video's first frame into the held image.
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, hold: true, open: open), .held)
+        XCTAssertEqual(attempts, [])
+        XCTAssertEqual(copy.reopen(current: url("a.full.mov"), tier: .full, displayPixels: display, open: open), opened("b.full.mov"))
+    }
+
+    func testReopenWithNothingHeldKeepsTheCurrentCopyThroughATierChange() {
+        // Reopening resumes in place; the tier's copy waits for the loop.
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(copy.reopen(current: url("a.full.mov"), tier: .reduced, displayPixels: display, open: open), .unchanged)
         XCTAssertEqual(attempts, [])
     }
 
@@ -130,7 +148,7 @@ final class RendererCopyTests: XCTestCase {
 
     func testTierChangeAfterASwitchFallsBackToTheNewChoicesOriginal() {
         var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
-        XCTAssertEqual(copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, asleep: false, open: open), opened("b.full.mov"))
+        XCTAssertEqual(copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("a.full.mov"), tier: .full, displayPixels: display, hold: false, open: open), opened("b.full.mov"))
         XCTAssertEqual(copy.retier(current: url("b.full.mov"), tier: .reduced, displayPixels: display, open: open), opened("b.mp4"))
     }
 }

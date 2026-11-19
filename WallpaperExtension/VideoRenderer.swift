@@ -344,9 +344,10 @@ final class VideoRenderer: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, isRunning else { return }
             let tier = tierSource()
-            switch copy.switchTo(url, selector: variantSelector, current: asset.url, tier: tier, displayPixels: displayPixelSize, asleep: lifecycle.displayAsleep, open: loadBlocking) {
+            let hold = lifecycle.displayAsleep || !lifecycle.surfaceOpen
+            switch copy.switchTo(url, selector: variantSelector, current: asset.url, tier: tier, displayPixels: displayPixelSize, hold: hold, open: loadBlocking) {
             case .held:
-                traceLog("  [switchVideo #\(debugID)] DEFERRED until wake: \(url.lastPathComponent)")
+                traceLog("  [switchVideo #\(debugID)] DEFERRED until wake or reopen: \(url.lastPathComponent)")
                 return
             case let .opened(loaded):
                 adopt(loaded)
@@ -472,10 +473,18 @@ final class VideoRenderer: @unchecked Sendable {
     /// The agent invalidated this surface (false) or acquired it again
     /// (true). Closed stops the clock and feed but keeps the frame and the
     /// readers, so a reopen within the teardown grace resumes in place.
+    /// Reopening on awake displays opens a switch held while closed.
     func setSurfaceOpen(_ open: Bool) {
         queue.async { [weak self] in
-            guard let self, isRunning else { return }
-            send(.surfaceOpen(open))
+            guard let self, isRunning, open != lifecycle.surfaceOpen else { return }
+            guard open else { send(.surfaceClosed); return }
+            var changed = false
+            if !lifecycle.displayAsleep,
+               case let .opened(loaded) = copy.reopen(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, open: loadBlocking) {
+                adopt(loaded)
+                changed = true
+            }
+            send(.surfaceReopened(assetChanged: changed))
         }
     }
 
@@ -486,7 +495,9 @@ final class VideoRenderer: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, isRunning, lifecycle.displayAsleep else { return }
             var changed = false
-            if case let .opened(loaded) = copy.wake(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, open: loadBlocking) {
+            // A closed surface keeps its held switch and copy for the reopen.
+            if lifecycle.surfaceOpen,
+               case let .opened(loaded) = copy.wake(current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize, open: loadBlocking) {
                 adopt(loaded)
                 changed = true
             }

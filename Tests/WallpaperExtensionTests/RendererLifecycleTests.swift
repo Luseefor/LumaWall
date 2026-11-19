@@ -91,7 +91,7 @@ final class RendererLifecycleTests: XCTestCase {
     func testClosingASurfaceStopsTheFeedAndKeepsItsReaders() {
         // An invalidated surface used to decode through its 15 s grace.
         var life = playing()
-        XCTAssertEqual(life.handle(.surfaceOpen(false)), [.setRate(0), .stopFeeding, .armDeepPause])
+        XCTAssertEqual(life.handle(.surfaceClosed), [.setRate(0), .stopFeeding, .armDeepPause])
         assertStoppedAndIdle(life)
         XCTAssertEqual(life.readers, .live, "the context and frame stay for a re-acquire")
     }
@@ -100,23 +100,23 @@ final class RendererLifecycleTests: XCTestCase {
         // A re-acquire within the grace must not show a black frame: no reset,
         // the held frame stays until the feed continues from it.
         var life = playing()
-        _ = life.handle(.surfaceOpen(false))
-        XCTAssertEqual(life.handle(.surfaceOpen(true)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
+        _ = life.handle(.surfaceClosed)
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
     }
 
     func testPolicyUpdatesDoNotResumeAClosedSurface() {
         var life = playing()
-        _ = life.handle(.surfaceOpen(false))
+        _ = life.handle(.surfaceClosed)
         XCTAssertEqual(life.handle(.policy(.paused, animated: false)), [])
         XCTAssertEqual(life.handle(.policy(.reduced, animated: true)), [])
         XCTAssertEqual(life.policy, .reduced)
         assertStoppedAndIdle(life)
-        XCTAssertEqual(life.handle(.surfaceOpen(true)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
     }
 
     func testSurfaceClosedBeforeStartShowsItsFirstFrameWithoutPlaying() {
         var life = RendererLifecycle()
-        XCTAssertEqual(life.handle(.surfaceOpen(false)), [])
+        XCTAssertEqual(life.handle(.surfaceClosed), [])
         XCTAssertEqual(life.handle(.started(displayAsleep: false)), [])
         XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.armDeepPause])
         assertStoppedAndIdle(life)
@@ -125,14 +125,56 @@ final class RendererLifecycleTests: XCTestCase {
     func testClosingCutsARampDownShort() {
         var life = playing()
         XCTAssertEqual(life.handle(.policy(.paused, animated: true)), [.ramp(to: 0)])
-        XCTAssertEqual(life.handle(.surfaceOpen(false)), [.setRate(0), .stopFeeding, .armDeepPause])
+        XCTAssertEqual(life.handle(.surfaceClosed), [.setRate(0), .stopFeeding, .armDeepPause])
     }
 
-    func testDeepPausedClosedSurfaceRebuildsFromItsPositionOnReopen() {
+    func testDeepPausedClosedSurfaceRestartsOnReopenHoldingItsFrame() {
+        // A preview past its lease frees its readers after 30 s. Its clock
+        // counts every loop, so resuming from it can seek past the clip (#27);
+        // it restarts instead, and a restart's flush keeps the frame up.
         var life = playing()
-        _ = life.handle(.surfaceOpen(false))
+        _ = life.handle(.surfaceClosed)
         XCTAssertEqual(life.handle(.deepPauseFired), [.freeReaders])
-        XCTAssertEqual(life.handle(.surfaceOpen(true)), [.beginReset(.resume, generation: 1)])
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [.beginReset(.restart, generation: 1)])
+    }
+
+    func testResetFlushingWhileClosedBuildsOnReopen() {
+        // Building decodes a frame into the held image; a closed surface waits.
+        var life = playing()
+        XCTAssertEqual(life.handle(.assetChanged), [.beginReset(.restart, generation: 1)])
+        XCTAssertEqual(life.handle(.surfaceClosed), [])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [])
+        XCTAssertEqual(life.readers, .awaitingBuild(.restart))
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [.buildPipeline(.restart)])
+        XCTAssertEqual(life.handle(.pipelineBuilt(true)), [.setRate(1), .startFeeding(token: 2)])
+    }
+
+    func testWakeDoesNotBuildAClosedSurface() {
+        var life = playing()
+        _ = life.handle(.displaySleep)
+        _ = life.handle(.assetChanged)
+        _ = life.handle(.resetFlushed(generation: 1))
+        XCTAssertEqual(life.handle(.surfaceClosed), [])
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [])
+        XCTAssertEqual(life.readers, .awaitingBuild(.restart))
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [.buildPipeline(.restart)])
+    }
+
+    func testReopenWhileAsleepWaitsForWake() {
+        var life = playing()
+        _ = life.handle(.surfaceClosed)
+        _ = life.handle(.displaySleep)
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: false)), [])
+        XCTAssertEqual(life.handle(.displayWake(assetChanged: false)), [.setRate(1), .startFeeding(token: 2), .disarmDeepPause])
+    }
+
+    func testSwitchHeldWhileClosedRestartsOnReopen() {
+        // The renderer holds a shuffle or automation switch while closed and
+        // opens it on reopen; the new video restarts behind the held frame.
+        var life = playing()
+        _ = life.handle(.surfaceClosed)
+        XCTAssertEqual(life.handle(.surfaceReopened(assetChanged: true)), [.disarmDeepPause, .beginReset(.restart, generation: 1)])
+        XCTAssertEqual(life.handle(.resetFlushed(generation: 1)), [.buildPipeline(.restart)])
     }
 
     func testClosedSurfaceDoesNotRetryAFailedVideo() {
@@ -144,7 +186,7 @@ final class RendererLifecycleTests: XCTestCase {
         }
         XCTAssertEqual(life.readers, .failed)
         XCTAssertTrue(life.retryArmed)
-        XCTAssertEqual(life.handle(.surfaceOpen(false)), [.disarmRetry])
+        XCTAssertEqual(life.handle(.surfaceClosed), [.disarmRetry])
     }
 
     // MARK: Start

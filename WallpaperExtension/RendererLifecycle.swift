@@ -16,7 +16,9 @@ import Foundation
 /// A closed surface (invalidated by the agent, or a preview past its lease)
 /// is a second gate beside sleep. It stops the clock and feed but keeps the
 /// readers and the displayed frame, so a re-acquire resumes in place with no
-/// flush and no blank frame.
+/// flush and no blank frame. While either gate is shut a flushed reset waits
+/// to build, and the renderer holds switches, so nothing decodes into the
+/// held frame; the latest of them applies once both gates open.
 ///
 /// Every pipeline rebuild (a switch, a deep-pause wake, decoder recovery)
 /// goes through one reset: at most one flush is in flight, a reset requested
@@ -89,8 +91,11 @@ struct RendererLifecycle: Equatable {
         /// The renderer loaded a different asset (switch or battery-tier copy).
         case assetChanged
         case displaySleep
-        /// The agent invalidated the surface (false) or acquired it again (true).
-        case surfaceOpen(Bool)
+        /// The agent invalidated the surface, or a preview's lease ran out.
+        case surfaceClosed
+        /// The surface was acquired again. `assetChanged`: the renderer
+        /// opened a switch it held while the surface was closed.
+        case surfaceReopened(assetChanged: Bool)
         /// `assetChanged`: the renderer loaded the held switch or the tier's copy.
         case displayWake(assetChanged: Bool)
         case resetFlushed(generation: Int)
@@ -184,25 +189,23 @@ struct RendererLifecycle: Equatable {
             guard !displayAsleep else { return [] }
             displayAsleep = true
             rampWhenReady = false
-        case let .surfaceOpen(open):
-            guard open != surfaceOpen else { return [] }
-            surfaceOpen = open
-            if !open { rampWhenReady = false }
+        case .surfaceClosed:
+            guard surfaceOpen else { return [] }
+            surfaceOpen = false
+            rampWhenReady = false
+        case let .surfaceReopened(assetChanged):
+            guard !surfaceOpen else { return [] }
+            surfaceOpen = true
+            if !displayAsleep, readers == .freed, wantsPlayback {
+                // The clock counts every loop, so resuming from it can seek
+                // past the clip (#27). Restart; the flush keeps the frame up.
+                requestReset(.restart, &effects)
+            }
+            releaseGates(assetChanged: assetChanged, &effects)
         case let .displayWake(assetChanged):
             guard displayAsleep else { return [] }
             displayAsleep = false
-            if assetChanged { failures = 0 }
-            if case let .awaitingBuild(kind) = readers {
-                let build = assetChanged ? max(kind, .restart) : kind
-                if build == .resume, !wantsPlayback {
-                    readers = .freed
-                } else {
-                    readers = .building
-                    effects.append(.buildPipeline(build))
-                }
-            } else if assetChanged {
-                requestReset(.restart, &effects)
-            }
+            releaseGates(assetChanged: assetChanged, &effects)
         case let .resetFlushed(flushed):
             guard flushed == generation, let kind = resetInFlight else { return [] }
             resetInFlight = nil
@@ -211,8 +214,9 @@ struct RendererLifecycle: Equatable {
                 failedRounds += 1
                 rampWhenReady = false
                 effects.append(.showFallback)
-            } else if displayAsleep {
-                // Building decodes the first frame; nobody can see it now.
+            } else if !gatesOpen {
+                // Building decodes a first frame nobody can see, and on a
+                // closed surface it would replace the held frame.
                 readers = .awaitingBuild(kind)
             } else {
                 readers = .building
@@ -286,6 +290,28 @@ struct RendererLifecycle: Equatable {
     /// the clip only if the reader completed.
     static func outOfSamples(readerCompleted: Bool, token: Int) -> Event {
         readerCompleted ? .readerExhausted(token: token) : .readerFailed(token: token)
+    }
+
+    /// Neither the sleep gate nor the closed gate is shut.
+    private var gatesOpen: Bool { !displayAsleep && surfaceOpen }
+
+    /// A gate opened: run the build a shut gate held back, or the restart for
+    /// an asset the renderer opened as it opened. Waits while the other gate
+    /// is still shut.
+    private mutating func releaseGates(assetChanged: Bool, _ effects: inout [Effect]) {
+        if assetChanged { failures = 0 }
+        guard gatesOpen else { return }
+        if case let .awaitingBuild(kind) = readers {
+            let build = assetChanged ? max(kind, .restart) : kind
+            if build == .resume, !wantsPlayback {
+                readers = .freed
+            } else {
+                readers = .building
+                effects.append(.buildPipeline(build))
+            }
+        } else if assetChanged {
+            requestReset(.restart, &effects)
+        }
     }
 
     private mutating func requestReset(_ kind: ResetKind, _ effects: inout [Effect]) {
