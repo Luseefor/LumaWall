@@ -33,20 +33,25 @@ actor PosterCache {
     /// Makes a still from a video at a pixel width; nil when it can't.
     typealias FrameGenerator = @Sendable (URL, CGFloat) async -> CGImage?
 
-    /// A request that already failed: poster and fallback together, so a
-    /// poster that appears later isn't shadowed once the video changes.
-    private struct FailedRequest: Hashable {
-        let poster: URL?
-        let video: URL?
-        let width: Int
-        /// The poster file's state when the request failed, so a poster that
-        /// is written or replaced later no longer matches and is tried again.
-        let posterStamp: PosterStamp?
+    /// A poster that failed to decode, with the file's state at the time, so
+    /// a poster written or replaced later no longer matches and is tried again.
+    private struct FailedPoster: Hashable {
+        let key: Key
+        let stamp: PosterStamp
     }
 
+    /// Kept apart from poster failures: the frame generation for a video is
+    /// shared by every request that names it, whatever its poster is.
     private struct PosterStamp: Hashable {
         let modified: Date?
         let size: Int?
+        let fileNumber: Int?
+    }
+
+    /// What `remove` and `removeAll` had done when work for a request began.
+    private struct Epoch: Equatable {
+        let clears: Int
+        let removals: Int
     }
 
     private struct InFlight {
@@ -60,12 +65,14 @@ actor PosterCache {
     private let frameGenerator: FrameGenerator
     private var inFlightFrames: [Key: InFlight] = [:]
     private var nextTaskID = 0
-    /// Bumped by `remove` and `removeAll`. Work that started under an older
-    /// value finished for a file that may have changed, so it must not record
-    /// a failure or cache a frame.
-    private var invalidations = 0
-    /// Oldest first; bounded so a library full of broken files can't grow it.
-    private var failures: [FailedRequest] = []
+    /// `removeAll` count, and how often `remove` ran for each URL. Work that
+    /// began before either changed finished for a file that may be different
+    /// now, so it must not record a failure or cache a frame.
+    private var clears = 0
+    private var removals: [URL: Int] = [:]
+    /// Oldest first; bounded so a library full of broken files can't grow them.
+    private var failedPosters: [FailedPoster] = []
+    private var failedFrames: [Key] = []
     private var entries: [Key: Entry] = [:]
     /// Least recently used first.
     private var order: [Key] = []
@@ -95,23 +102,27 @@ actor PosterCache {
                 return entry.image
             }
         }
-        let request = FailedRequest(poster: url, video: fallbackVideo, width: width, posterStamp: url.map { Self.stamp(of: $0) })
-        if failures.contains(request) { return nil }
-        if let url, let cgImage = Self.decode(url, maxPixelWidth: maxPixelWidth) {
-            return store(cgImage, for: Key(url: url, width: width))
+        // The poster is checked first, so one that appears later shows up
+        // even while the video's still is known to fail.
+        if let url {
+            let failed = FailedPoster(key: Key(url: url, width: width), stamp: Self.stamp(of: url))
+            if !failedPosters.contains(failed) {
+                if let cgImage = Self.decode(url, maxPixelWidth: maxPixelWidth) {
+                    return store(cgImage, for: failed.key)
+                }
+                remember(failed)
+            }
         }
-        guard let fallbackVideo else {
-            if url != nil { remember(request) }
-            return nil
-        }
+        guard let fallbackVideo else { return nil }
         let key = Key(url: fallbackVideo, width: width)
-        let startedAt = invalidations
+        if failedFrames.contains(key) { return nil }
+        let startedAt = epoch(of: fallbackVideo)
         let frame = await frame(for: fallbackVideo, key: key, maxPixelWidth: maxPixelWidth)
         // `remove` ran while we waited: the file may be different now, so
         // neither the failure nor the frame describes it.
-        guard startedAt == invalidations else { return frame.map(Self.image) }
+        guard startedAt == epoch(of: fallbackVideo) else { return frame.map(Self.image) }
         guard let frame else {
-            remember(request)
+            remember(key)
             return nil
         }
         // Another caller may have stored this frame while we awaited.
@@ -134,10 +145,20 @@ actor PosterCache {
         return frame
     }
 
-    private func remember(_ request: FailedRequest) {
-        guard !failures.contains(request) else { return }
-        failures.append(request)
-        if failures.count > maxFailures { failures.removeFirst(failures.count - maxFailures) }
+    private func epoch(of url: URL) -> Epoch {
+        Epoch(clears: clears, removals: removals[url, default: 0])
+    }
+
+    private func remember(_ failed: FailedPoster) {
+        guard !failedPosters.contains(failed) else { return }
+        failedPosters.append(failed)
+        if failedPosters.count > maxFailures { failedPosters.removeFirst(failedPosters.count - maxFailures) }
+    }
+
+    private func remember(_ key: Key) {
+        guard !failedFrames.contains(key) else { return }
+        failedFrames.append(key)
+        if failedFrames.count > maxFailures { failedFrames.removeFirst(failedFrames.count - maxFailures) }
     }
 
     func contains(_ url: URL, maxPixelWidth: CGFloat) -> Bool {
@@ -146,18 +167,21 @@ actor PosterCache {
 
     /// Drops every cached size of `url`.
     func remove(_ url: URL) {
-        invalidations += 1
+        removals[url, default: 0] += 1
         for key in order where key.url == url { drop(key) }
         for key in inFlightFrames.keys where key.url == url { inFlightFrames[key] = nil }
-        failures.removeAll { $0.poster == url || $0.video == url }
+        failedPosters.removeAll { $0.key.url == url }
+        failedFrames.removeAll { $0.url == url }
     }
 
     func removeAll() {
-        invalidations += 1
+        clears += 1
+        removals.removeAll()
         inFlightFrames.removeAll()
         entries.removeAll()
         order.removeAll()
-        failures.removeAll()
+        failedPosters.removeAll()
+        failedFrames.removeAll()
         totalBytes = 0
     }
 
@@ -179,8 +203,13 @@ actor PosterCache {
     }
 
     nonisolated private static func stamp(of url: URL) -> PosterStamp {
-        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-        return PosterStamp(modified: values?.contentModificationDate, size: values?.fileSize)
+        // Not `URL.resourceValues`, which can return values cached on the URL.
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return PosterStamp(
+            modified: attributes?[.modificationDate] as? Date,
+            size: (attributes?[.size] as? NSNumber)?.intValue,
+            fileNumber: (attributes?[.systemFileNumber] as? NSNumber)?.intValue
+        )
     }
 
     /// Real memory of the decoded bitmap, including any row padding.

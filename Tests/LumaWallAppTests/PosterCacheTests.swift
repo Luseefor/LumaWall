@@ -244,14 +244,16 @@ final class PosterCacheTests: XCTestCase {
 
     func testStaleFrameFromBeforeRemoveIsNotCached() async throws {
         let gate = Gate()
+        let started = CallCounter()
         let frame = stillFrame()
         let cache = PosterCache(frameGenerator: { _, _ in
+            await started.hit()
             await gate.wait()
             return frame
         })
         let video = folder.appendingPathComponent("clip.mov")
         let first = Task { await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640) }
-        try await Task.sleep(for: .milliseconds(50))
+        while await started.count == 0 { try await Task.sleep(for: .milliseconds(5)) }
         await cache.remove(video)
         await gate.open()
         _ = await first.value
@@ -276,6 +278,40 @@ final class PosterCacheTests: XCTestCase {
                 }
             }
         }
+        let calls = await counter.count
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testRemovingAnotherVideoKeepsAPendingFailure() async throws {
+        let counter = CallCounter()
+        let gate = Gate()
+        let cache = PosterCache(frameGenerator: { _, _ in
+            await counter.hit()
+            await gate.wait()
+            return nil
+        })
+        let video = folder.appendingPathComponent("broken.mov")
+        let other = folder.appendingPathComponent("other.mov")
+        let first = Task { await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640) }
+        while await counter.count == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        await cache.remove(other)
+        await gate.open()
+        _ = await first.value
+        _ = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        let calls = await counter.count
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testAFailingStillIsGeneratedOnceWhateverThePosterIs() async {
+        let counter = CallCounter()
+        let cache = PosterCache(frameGenerator: { _, _ in
+            await counter.hit()
+            return nil
+        })
+        let video = folder.appendingPathComponent("broken.mov")
+        _ = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        _ = await cache.image(for: folder.appendingPathComponent("missing.jpg"), fallbackVideo: video, maxPixelWidth: 640)
+        _ = await cache.image(for: folder.appendingPathComponent("other.jpg"), fallbackVideo: video, maxPixelWidth: 640)
         let calls = await counter.count
         XCTAssertEqual(calls, 1)
     }
