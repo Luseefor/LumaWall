@@ -177,6 +177,19 @@ final class WallpaperState: Sendable {
         return result
     }
 
+    /// An acquire reached an existing context: reopen it, note a live
+    /// request, and say whether it still takes a preview lease. Nil when the
+    /// key has no context yet.
+    func noteAcquire(for key: DisplayKey, byPreview: Bool) -> (reopened: Bool, takesLease: Bool)? {
+        lock.withLock { state in
+            guard var context = state.contexts[key] else { return nil }
+            let reopened = context.slot.acquired(byPreview: byPreview)
+            state.contexts[key] = context
+            if reopened { context.renderer?.setSurfaceOpen(true) }
+            return (reopened, context.slot.takesLease(contextIsPreview: context.isPreview))
+        }
+    }
+
     /// Open or close a surface's playback and tell its renderer. Sent under
     /// the lock, so the renderer sees opens and closes in the order they were
     /// recorded even when `installRenderer` races them. Returns whether it changed.

@@ -1,7 +1,7 @@
 import XCTest
 
-/// Orderings between acquire, invalidate, and renderer creation on one
-/// surface (#12 review).
+/// Orderings between acquire, invalidate, renderer creation, and preview
+/// leases on one surface (#12 review).
 final class SurfaceSlotTests: XCTestCase {
 
     // MARK: Renderer creation
@@ -43,5 +43,53 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertTrue(slot.claimCreate(token: 3))
         XCTAssertEqual(slot.finishCreate(token: 3), .install(closed: false))
         XCTAssertFalse(slot.claimCreate(token: 4), "the slot has its renderer")
+    }
+
+    // MARK: Acquire and leases
+
+    func testAcquireReopensAClosedSurface() {
+        var slot = SurfaceSlot()
+        slot.setOpen(false)
+        XCTAssertTrue(slot.acquired(byPreview: false))
+        XCTAssertFalse(slot.acquired(byPreview: false), "already open")
+    }
+
+    func testAPreviewContextALiveRequestUsedNeverTakesALease() {
+        // A live request reusing a preview's key is handed the preview's
+        // context; a lease expiring on it would freeze that wallpaper.
+        var slot = SurfaceSlot()
+        XCTAssertTrue(slot.takesLease(contextIsPreview: true))
+        _ = slot.acquired(byPreview: false)
+        XCTAssertFalse(slot.takesLease(contextIsPreview: true))
+        _ = slot.acquired(byPreview: true)
+        XCTAssertFalse(slot.takesLease(contextIsPreview: true), "a later preview acquire doesn't restore it")
+        XCTAssertFalse(SurfaceSlot().takesLease(contextIsPreview: false))
+    }
+
+    func testRenewalSupersedesTheEarlierTimer() {
+        var book = LeaseBook<String>()
+        let first = book.renew("p")
+        let second = book.renew("p")
+        XCTAssertFalse(book.expire("p", lease: first), "renewed before it ran out")
+        XCTAssertTrue(book.expire("p", lease: second))
+        XCTAssertFalse(book.expire("p", lease: second), "expires once")
+    }
+
+    func testReacquireAfterExpiryStartsANewLease() {
+        var book = LeaseBook<String>()
+        let first = book.renew("p")
+        XCTAssertTrue(book.expire("p", lease: first))
+        let second = book.renew("p")
+        XCTAssertFalse(book.expire("p", lease: first))
+        XCTAssertTrue(book.expire("p", lease: second))
+    }
+
+    func testInvalidateOrRemovalEndsTheLease() {
+        var book = LeaseBook<String>()
+        let lease = book.renew("p")
+        let other = book.renew("q")
+        book.end("p")
+        XCTAssertFalse(book.expire("p", lease: lease))
+        XCTAssertTrue(book.expire("q", lease: other), "other surfaces keep theirs")
     }
 }
