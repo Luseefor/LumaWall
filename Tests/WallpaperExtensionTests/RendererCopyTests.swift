@@ -96,6 +96,22 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertEqual(attempts, [])
     }
 
+    func testTheActiveOriginalChangesOnlyWhenASwitchOpens() {
+        // The give-up still is looked up for this file, so a held or failed
+        // switch must not move it.
+        var copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        _ = copy.switchTo(url("c.mp4"), selector: selector("c"), current: url("a.full.mov"), tier: .full, displayPixels: display, hold: true, open: open)
+        XCTAssertEqual(copy.activeOriginal, url("a.mp4"))
+        _ = copy.wake(current: url("a.full.mov"), tier: .reduced, displayPixels: display, open: open)
+        XCTAssertEqual(copy.activeOriginal, url("c.mp4"))
+        _ = copy.switchTo(url("b.mp4"), selector: selector("b"), current: url("c.reduced.mov"), tier: .full, displayPixels: display, hold: true, open: open)
+        _ = copy.reopen(current: url("c.reduced.mov"), tier: .full, displayPixels: display, open: open)
+        XCTAssertEqual(copy.activeOriginal, url("b.mp4"))
+        playable.subtract(["c.full.mov", "c.mp4"])
+        XCTAssertEqual(copy.switchTo(url("c.mp4"), selector: selector("c"), current: url("b.full.mov"), tier: .full, displayPixels: display, hold: false, open: open), .failed)
+        XCTAssertEqual(copy.activeOriginal, url("b.mp4"))
+    }
+
     // MARK: Closed surfaces
 
     func testSwitchHeldWhileClosedOpensOnReopen() {

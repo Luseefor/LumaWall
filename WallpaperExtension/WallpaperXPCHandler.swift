@@ -55,6 +55,43 @@ enum Lifecycle {
 /// removed that context while the renderer loaded or played its first
 /// frame. Runs on `Lifecycle.queue`, where teardown runs, so the check and
 /// the reply can't straddle one.
+/// Replies for acquires that reused a surface whose renderer is still being
+/// created. They go out with that create's own reply, once the layer holds
+/// something displayable, instead of handing the agent an empty context.
+private let heldReplies = OSAllocatedUnfairLock<[DisplayKey: [@Sendable () -> Void]]>(initialState: [:])
+
+/// False when no create is seeding `key`, so the caller replies now.
+private func holdReply(for key: DisplayKey, _ send: @escaping @Sendable () -> Void) -> Bool {
+    heldReplies.withLock { held in
+        guard held[key] != nil else { return false }
+        held[key]?.append(send)
+        return true
+    }
+}
+
+private func releaseHeldReplies(for key: DisplayKey) {
+    let sends = heldReplies.withLock { $0.removeValue(forKey: key) } ?? []
+    sends.forEach { $0() }
+}
+
+/// The no-video gradient, under any other sublayer. A CAGradientLayer
+/// composites in the agent's CALayerHost, unlike `CALayer.contents`.
+private func installGradientFallback(on rootLayer: CALayer) {
+    let gradientLayer = CAGradientLayer()
+    gradientLayer.colors = [
+        CGColor(red: 0.2, green: 0.0, blue: 0.5, alpha: 1.0),
+        CGColor(red: 0.0, green: 0.3, blue: 0.7, alpha: 1.0),
+        CGColor(red: 0.0, green: 0.6, blue: 0.4, alpha: 1.0),
+    ]
+    gradientLayer.startPoint = CGPoint(x: 0, y: 0)
+    gradientLayer.endPoint = CGPoint(x: 1, y: 1)
+    gradientLayer.frame = rootLayer.bounds
+    gradientLayer.contentsScale = rootLayer.contentsScale
+    CATransaction.begin(); CATransaction.setDisableActions(true)
+    rootLayer.insertSublayer(gradientLayer, at: 0)
+    CATransaction.commit(); CATransaction.flush()
+}
+
 private func replyIfContextLive<Reply>(
     _ boxedReply: SendableBox<Reply>, contextId: UInt32, key: DisplayKey,
     reply: @escaping @Sendable (Any?, (any Error)?) -> Void,
@@ -389,12 +426,18 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             extensionLog("  [acquire] reopened surface on display \(key.displayID), playback resumes in place")
         }
         let videoURL = findVideoURL(forChoice: renderChoice)
-        let cachedStill = loadCachedSnapshotImage(forChoice: choiceConfiguration)
+        // Read (and later decode) the cached still only where a new renderer
+        // is seeded with it: a same-choice re-acquire or an in-place switch
+        // never uses it.
+        let pixelWidth = Int(destSize.width * scaleFactor), pixelHeight = Int(destSize.height * scaleFactor)
+        let loadStill = { @Sendable [choiceConfiguration] (url: URL) in
+            loadCachedSnapshotImage(forChoice: choiceConfiguration, videoURL: url, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+        }
 
         // Diagnostic bisection: host a still only (no video pipeline). Same context
         // reuse/create/reply as below. That's what we're stress-testing, but there is no renderer.
         if Bisect.stillOnly {
-            acquireStillOnlyBisect(key: key, displayID: displayID, destSize: destSize, scaleFactor: scaleFactor, videoURL: videoURL, cachedStill: cachedStill, choice: choiceConfiguration, reply: reply)
+            acquireStillOnlyBisect(key: key, displayID: displayID, destSize: destSize, scaleFactor: scaleFactor, videoURL: videoURL, cachedStill: videoURL.flatMap(loadStill), choice: choiceConfiguration, reply: reply)
             return
         }
 
@@ -443,7 +486,12 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
                 reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
             }
-            reply(replyObj, nil)
+            let boxedReuseReply = SendableBox(value: replyObj), reuseContextId = existing.contextId
+            if existing.renderer == nil, holdReply(for: key, { replyIfContextLive(boxedReuseReply, contextId: reuseContextId, key: key, reply: reply) }) {
+                extensionLog("  [acquire] REUSE while display \(key.displayID)'s renderer is being created → reply waits for its seed")
+            } else {
+                reply(replyObj, nil)
+            }
 
             if ColorDiag.enabled { colorDiagInstall(rootLayer: existing.rootLayer, for: key); return }
 
@@ -470,11 +518,12 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // attach one to the existing root layer. The claim prevents a racing
                 // (preview) acquire from creating a duplicate renderer on the same layer.
                 let boxedRoot = SendableBox(value: existing.rootLayer)
-                Task { [boxedRoot, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
+                Task { [boxedRoot, videoURL, loadStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
                     let renderer: VideoRenderer
                     do {
                         renderer = try await VideoRenderer.create(
-                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
+                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: loadStill(videoURL),
+                            fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         )
                     } catch {
@@ -498,8 +547,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             } else {
                 traceLog("  [acquire] renderer create already in flight for display \(key.displayID), skipping duplicate")
             }
-            let w = Int(destSize.width * scaleFactor), h = Int(destSize.height * scaleFactor)
-            Task { [videoURL, choiceConfiguration, w, h] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: w, displayPixelHeight: h) }
+            Task { [videoURL, choiceConfiguration, pixelWidth, pixelHeight] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: pixelWidth, displayPixelHeight: pixelHeight) }
             return
         }
 
@@ -516,6 +564,9 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         }
         let contextId = caContext.contextId
 
+        // Only a surface that gets a renderer needs the still; the renderer
+        // takes it as its IOSurface seed, and the root layer holds it until then.
+        let cachedStill = ColorDiag.enabled ? nil : videoURL.flatMap(loadStill)
         let layerFrame = CGRect(origin: .zero, size: destSize)
         let rootLayer = CALayer()
         rootLayer.frame = layerFrame
@@ -551,19 +602,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         guard let videoURL else {
             // No video file, so solid gradient fallback. Static content, so it's ready as
             // soon as it's installed; reply immediately.
-            let gradientLayer = CAGradientLayer()
-            gradientLayer.colors = [
-                CGColor(red: 0.2, green: 0.0, blue: 0.5, alpha: 1.0),
-                CGColor(red: 0.0, green: 0.3, blue: 0.7, alpha: 1.0),
-                CGColor(red: 0.0, green: 0.6, blue: 0.4, alpha: 1.0),
-            ]
-            gradientLayer.startPoint = CGPoint(x: 0, y: 0)
-            gradientLayer.endPoint = CGPoint(x: 1, y: 1)
-            gradientLayer.frame = layerFrame
-            gradientLayer.contentsScale = scaleFactor
-            CATransaction.begin(); CATransaction.setDisableActions(true)
-            rootLayer.addSublayer(gradientLayer)
-            CATransaction.commit(); CATransaction.flush()
+            installGradientFallback(on: rootLayer)
             reply(replyObj, nil)
             extensionLog("  No video file found, solid color fallback")
             return
@@ -596,18 +635,36 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             // The reply object is non-Sendable; box it to cross into the render Task.
             let boxedReply = SendableBox(value: replyObj)
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
-            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
+            heldReplies.withLock { $0[key] = $0[key] ?? [] }
+            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview, pixelWidth, pixelHeight] in
+                // A cold start replies once create() has seeded the display
+                // layer, so a cache miss seeds the decoded first frame, or the
+                // gradient, rather than leaving the layer empty.
+                var seed = cachedStill
+                var seeded = cachedStill == nil ? "nothing" : "the cached still"
+                if seed == nil, coldStart {
+                    if let frame = await firstFrameImage(of: videoURL) {
+                        seed = frame
+                        seeded = "the decoded first frame"
+                    } else if let gradient = VideoRenderer.makeGradientStill() {
+                        seed = gradient
+                        seeded = "the gradient"
+                    }
+                }
                 let renderer: VideoRenderer
                 do {
                     renderer = try await VideoRenderer.create(
-                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, variantSelector: selector,
+                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
+                        fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                     )
                 } catch {
-                    extensionLog("  [Renderer] Failed to create: \(error)")
+                    extensionLog("  [Renderer] Failed to create: \(error); seeded the gradient layer")
                     WallpaperState.shared.clearRendererPending(for: key, token: token)
-                    // Unblock the acquire regardless (create failed).
+                    // Unblock the acquire regardless, with something displayable.
+                    installGradientFallback(on: boxedRoot.value)
                     replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
+                    releaseHeldReplies(for: key)
                     return
                 }
                 guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
@@ -615,22 +672,41 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     // don't hand the agent a context that no longer exists.
                     renderer.stop()
                     reply(nil, NSError(domain: "LumaWallExtension", code: 5, userInfo: [NSLocalizedDescriptionKey: "Surface was torn down while its renderer loaded"]))
+                    releaseHeldReplies(for: key)
                     return
                 }
                 // Cold start: the IOSurface still is now seeded + flushed into the display
                 // layer, so reply. The agent hosts our context already showing the still
                 // (no black gap), and video plays over it.
                 if coldStart {
+                    if !renderer.seededStill {
+                        installGradientFallback(on: boxedRoot.value)
+                        seeded = "the gradient layer (\(seeded) didn't reach the display layer)"
+                    }
                     replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
-                    traceLog("  [acquire] cold start → replied after still seeded for \(videoURL.lastPathComponent)")
+                    releaseHeldReplies(for: key)
+                    traceLog("  [acquire] cold start → replied after seeding \(seeded) for \(videoURL.lastPathComponent)")
                 }
                 WallpaperPrefs.shared.setActive(true)
                 // Switch: reply only once the first video frame is composited (cold start
                 // already replied with the still). Either way, stop the old renderer once
                 // we've told the agent to swap off it.
+                let heldStill = cachedStill != nil
                 renderer.start(onFirstFrameReady: {
-                    if !coldStart { replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply) }
+                    if !coldStart {
+                        replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
+                        releaseHeldReplies(for: key)
+                    }
                     old?.stop()
+                    // Video (or, on failure, the seeded still) is in the display
+                    // layer now; the root layer's copy is only memory (a 4K frame
+                    // is 33 MB decoded).
+                    if heldStill {
+                        CATransaction.begin()
+                        CATransaction.setDisableActions(true)
+                        boxedRoot.value.contents = nil
+                        CATransaction.commit()
+                    }
                     // After the reply so a pre-first-frame pause can't stall the
                     // acquire: apply pause conditions that predate this process
                     // (fullscreen app, occlusion, per-display pause), which arrive
@@ -642,8 +718,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             traceLog("  [acquire] renderer create already in flight for display \(key.displayID), skipping duplicate (create path)")
             reply(replyObj, nil)
         }
-        let w = Int(destSize.width * scaleFactor), h = Int(destSize.height * scaleFactor)
-        Task { await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: w, displayPixelHeight: h) }
+        Task { [pixelWidth, pixelHeight] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: pixelWidth, displayPixelHeight: pixelHeight) }
     }
 
     /// Bisection acquire: identical CAContext reuse/create/reply as `acquireBody`, but

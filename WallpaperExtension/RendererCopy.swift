@@ -33,6 +33,10 @@ struct RendererCopy {
         active = (original, selector)
     }
 
+    /// The original of the choice being played. A held switch doesn't
+    /// count until it opens.
+    var activeOriginal: URL { active.original }
+
     /// The first file a new renderer reads: the copy for `tier`, else
     /// `requested`.
     static func opening<Loaded>(
