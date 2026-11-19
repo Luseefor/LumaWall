@@ -208,8 +208,9 @@ final class WallpaperState: Sendable {
     func invalidate(_ key: DisplayKey, by serial: Int) -> SurfaceSlot.InvalidateAction? {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
+            let wasOpen = context.slot.open
             let action = context.slot.invalidated(by: serial, openConnections: state.openConnections)
-            let closed = action == .close && context.slot.setOpen(false)
+            let closed = wasOpen && !context.slot.open
             state.contexts[key] = context
             if closed { context.renderer?.setSurfaceOpen(false) }
             return action
@@ -366,11 +367,13 @@ final class WallpaperState: Sendable {
     /// Per-surface teardown runs when the invalidate grace timer fires with no
     /// re-acquire (the Space closed, the preview dismissed, or the display
     /// slept). It stops ONLY this surface's renderer and invalidates its
-    /// `CAContext`, leaving other surfaces playing. Returns whether it tore
-    /// down.
+    /// `CAContext`, leaving other surfaces playing. A surface an ambiguous
+    /// invalidate left open is kept (`SurfaceSlot.tearsDownAtGraceEnd`).
+    /// Returns whether it tore down.
     @discardableResult
     func tearDownContext(for key: DisplayKey) -> Bool {
         let removed = lock.withLock { state -> ActiveWallpaper? in
+            guard state.contexts[key]?.slot.tearsDownAtGraceEnd == true else { return nil }
             // Ids kept through an ambiguous invalidate's grace retire here.
             for (uuid, mapped) in state.keyForWallpaperUUID where mapped == key {
                 Self.forget(uuid, in: &state)

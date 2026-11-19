@@ -174,6 +174,52 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertTrue(owners.retiresWallpaperID)
     }
 
+    // MARK: Grace end
+
+    func testPickerDismissalLeavesTheLiveContextPastTheGrace() {
+        // The picker's invalidate armed the 15 s teardown, which destroyed
+        // the CAContext the desktop still hosted.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .graceOnly)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd, "the desktop still hosts it")
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .close)
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+    }
+
+    func testPickerDismissalOnTheLiveConnectionLeavesTheLiveContext() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 1, replyOnly: true)
+        _ = slot.invalidated(by: 1, openConnections: [1])
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+    }
+
+    func testAStaleInvalidateLeavesTheReacquiredContext() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: false)
+        _ = slot.invalidated(by: 1, openConnections: [1, 2])
+        XCTAssertFalse(slot.tearsDownAtGraceEnd, "connection 2 hosts it")
+    }
+
+    func testTheOwnersInvalidateClosesWhileThePickerSharesFromAnotherConnection() {
+        // The picker on connection 2 can't send connection 1's invalidate.
+        // Taking the grace here would keep an unhosted surface decoding
+        // now that an open slot is never torn down.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .close)
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .graceOnly, "the picker leaving changes nothing")
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+    }
+
+    func testAReopenedSurfaceIsNotTornDown() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .close)
+        _ = slot.acquired(by: 1, replyOnly: false)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+    }
+
     func testInvalidateWithNoKnownAcquirerCloses() {
         var slot = SurfaceSlot()
         XCTAssertEqual(slot.invalidated(by: 3, openConnections: [3]), .close)

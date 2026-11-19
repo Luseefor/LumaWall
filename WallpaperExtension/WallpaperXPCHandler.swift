@@ -128,8 +128,10 @@ private func scheduleTeardown(for key: DisplayKey) {
     let item = DispatchWorkItem {
         Lifecycle.teardownTimers[key] = nil
         let torn = WallpaperState.shared.tearDownContext(for: key)
-        failHeldReplies(for: key)
-        extensionLog("  [teardown] grace fired for display \(key.displayID) → \(torn ? "stopped renderer + invalidated CAContext" : "nothing to tear down")")
+        // A surface kept open still has its context; its waiters go out with
+        // its create's reply. Fail them only once the context is gone.
+        if WallpaperState.shared.context(for: key) == nil { failHeldReplies(for: key) }
+        extensionLog("  [teardown] grace fired for display \(key.displayID) → \(torn ? "stopped renderer + invalidated CAContext" : "nothing to tear down, or still open after an ambiguous invalidate")")
         ShuffleController.shared.syncActiveWithContexts()
     }
     Lifecycle.teardownTimers[key] = item
@@ -882,14 +884,15 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Nobody hosts the surface now: stop decoding at once, but keep the
         // context and its frame so a re-acquire within the grace is seamless.
         // An ambiguous invalidate (another open connection reacquired since,
-        // or the picker shares the surface) keeps playing through the grace,
-        // as on main, and keeps the id so the owner's invalidate still lands.
+        // or the picker shares the surface) keeps playing, keeps the id so
+        // the owner's invalidate still lands, and survives the grace: the
+        // owner may still host the context.
         let action = WallpaperState.shared.invalidate(key, by: connectionSerial)
         if action?.retiresWallpaperID ?? true {
             WallpaperState.shared.forgetWallpaperID(uuid)
         }
         scheduleTeardown(for: key)
-        let stopped = action == .graceOnly ? "ambiguous (reacquired elsewhere or shared with the picker), keeps playing" : "stopped playback"
+        let stopped = action == .graceOnly ? "ambiguous (reacquired elsewhere or shared with the picker), keeps playing and survives the grace" : "stopped playback"
         extensionLog("=== INVALIDATE === UUID \(uuid) → \(stopped), tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
         reply(nil)
     }
