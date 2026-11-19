@@ -17,7 +17,14 @@ final class PowerMonitor: Sendable {
     /// critical notification and resume playback on a hot machine.
     private let thermalQueue = DispatchQueue(label: "app.lumawall.thermal")
     private let continuations = OSAllocatedUnfairLock(initialState: [UUID: AsyncStream<PowerState>.Continuation]())
-    private nonisolated(unsafe) var _batteryScheduler: NSBackgroundActivityScheduler?
+    /// Owns the battery and brightness poll: `playing`, `pollMode`, and
+    /// `pollTimer` are touched only here.
+    private let pollQueue = DispatchQueue(label: "app.lumawall.power-poll", qos: .utility)
+    private nonisolated(unsafe) var playing = PlayingRenderers()
+    private nonisolated(unsafe) var pollMode = PowerPolling.off
+    private nonisolated(unsafe) var pollTimer: (any DispatchSourceTimer)?
+    private static let pollInterval: TimeInterval = 30
+    private static let pollLeeway: DispatchTimeInterval = .seconds(15)
     private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
 
     /// gamepolicyd's state-carrying Darwin notification for Game Mode sessions
@@ -54,6 +61,21 @@ final class PowerMonitor: Sendable {
     func refreshNow() {
         updateBatteryState()
         updateBrightnessState()
+        pollQueue.async { [weak self] in self?.updatePolling() }
+    }
+
+    /// A renderer started or stopped wanting playback. The poll runs while
+    /// any renderer plays; the first one to start re-reads power at once,
+    /// since nothing was read while all were paused.
+    func notePlayback(renderer id: Int, playing isPlaying: Bool) {
+        pollQueue.async { [weak self] in
+            guard let self, playing.set(id, playing: isPlaying) else { return }
+            if playing.anyPlaying {
+                updateBatteryState()
+                updateBrightnessState()
+            }
+            updatePolling()
+        }
     }
 
     /// AsyncStream that yields whenever any component of power state changes.
@@ -95,32 +117,11 @@ final class PowerMonitor: Sendable {
             self?.handleLowPowerModeChange()
         }
 
-        // Battery and brightness use an OS-managed periodic check.
+        // Battery and brightness are polled while it matters (`PowerPolling`).
         // Brightness needs polling because IODisplay doesn't broadcast a
         // notification when the user drags the slider, and `screensDidSleep`
         // doesn't fire when brightness is held at zero manually.
-        let scheduler = NSBackgroundActivityScheduler(
-            identifier: "app.lumawall.personal.powerCheck",
-        )
-        scheduler.interval = 30
-        scheduler.tolerance = 15
-        scheduler.repeats = true
-        scheduler.qualityOfService = .utility
-        nonisolated(unsafe) let capturedScheduler = scheduler
-        scheduler.schedule { [weak self] completion in
-            guard let self else {
-                completion(.finished)
-                return
-            }
-            if capturedScheduler.shouldDefer {
-                completion(.deferred)
-                return
-            }
-            updateBatteryState()
-            updateBrightnessState()
-            completion(.finished)
-        }
-        _batteryScheduler = scheduler
+        pollQueue.async { [weak self] in self?.updatePolling() }
 
         // Game Mode, event-driven via gamepolicyd's state-carrying notification.
         // Reaches the sandboxed extension: com.apple.* notify names aren't filtered.
@@ -146,6 +147,42 @@ final class PowerMonitor: Sendable {
     }
 
     // MARK: - Private
+
+    /// Start, narrow, or stop the poll for the current state. `pollQueue` only.
+    private func updatePolling() {
+        dispatchPrecondition(condition: .onQueue(pollQueue))
+        let current = currentState
+        let mode = PowerPolling.mode(
+            anyPlaying: playing.anyPlaying,
+            batteryLevel: current.batteryLevel,
+            displayBrightness: current.displayBrightness,
+        )
+        guard mode != pollMode else { return }
+        pollMode = mode
+        extensionLog("[PowerMonitor] Power poll → \(mode)")
+        guard mode != .off else {
+            pollTimer?.cancel()
+            pollTimer = nil
+            return
+        }
+        guard pollTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: pollQueue)
+        timer.schedule(deadline: .now() + Self.pollInterval, repeating: Self.pollInterval, leeway: Self.pollLeeway)
+        timer.setEventHandler { [weak self] in self?.poll() }
+        pollTimer = timer
+        timer.resume()
+    }
+
+    private func poll() {
+        switch pollMode {
+        case .off: return
+        case .brightness: updateBrightnessState()
+        case .all:
+            updateBatteryState()
+            updateBrightnessState()
+        }
+        updatePolling()
+    }
 
     /// Runs on `thermalQueue` only.
     private func handleThermalChange() {
