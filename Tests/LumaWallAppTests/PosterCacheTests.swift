@@ -207,6 +207,101 @@ final class PosterCacheTests: XCTestCase {
         XCTAssertEqual(calls, 1)
     }
 
+    /// Holds a generator open until the test lets it finish.
+    private actor Gate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var opened = false
+        func wait() async {
+            if opened { return }
+            await withCheckedContinuation { continuation = $0 }
+        }
+        func open() {
+            opened = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    func testFailureFromWorkStartedBeforeRemoveDoesNotOutliveIt() async throws {
+        let counter = CallCounter()
+        let gate = Gate()
+        let cache = PosterCache(frameGenerator: { _, _ in
+            await counter.hit()
+            await gate.wait()
+            return nil
+        })
+        let video = folder.appendingPathComponent("clip.mov")
+        let first = Task { await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640) }
+        while await counter.count == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        // The file changes while the old generation is still running.
+        await cache.remove(video)
+        await gate.open()
+        _ = await first.value
+        _ = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        let calls = await counter.count
+        XCTAssertEqual(calls, 2, "the stale failure must not block a fresh attempt")
+    }
+
+    func testStaleFrameFromBeforeRemoveIsNotCached() async throws {
+        let gate = Gate()
+        let frame = stillFrame()
+        let cache = PosterCache(frameGenerator: { _, _ in
+            await gate.wait()
+            return frame
+        })
+        let video = folder.appendingPathComponent("clip.mov")
+        let first = Task { await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640) }
+        try await Task.sleep(for: .milliseconds(50))
+        await cache.remove(video)
+        await gate.open()
+        _ = await first.value
+        let cached = await cache.contains(video, maxPixelWidth: 640)
+        XCTAssertFalse(cached)
+    }
+
+    func testConcurrentRequestsForAFailingStillGenerateOnce() async {
+        let counter = CallCounter()
+        let cache = PosterCache(frameGenerator: { _, _ in
+            await counter.hit()
+            try? await Task.sleep(for: .milliseconds(50))
+            return nil
+        })
+        let video = folder.appendingPathComponent("broken.mov")
+        let missing = folder.appendingPathComponent("missing.jpg")
+        await withTaskGroup(of: Void.self) { group in
+            for delay in [0, 20, 60, 90, 120] {
+                group.addTask {
+                    try? await Task.sleep(for: .milliseconds(delay))
+                    _ = await cache.image(for: missing, fallbackVideo: video, maxPixelWidth: 640)
+                }
+            }
+        }
+        let calls = await counter.count
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testPosterWrittenAfterAFailureShowsOnTheNextRequest() async throws {
+        let cache = PosterCache(frameGenerator: { _, _ in nil })
+        let poster = folder.appendingPathComponent("late.jpg")
+        let video = folder.appendingPathComponent("broken.mov")
+        let before = await cache.image(for: poster, fallbackVideo: video, maxPixelWidth: 640)
+        XCTAssertNil(before)
+        let written = try writePoster("late.jpg", width: 800, height: 450)
+        XCTAssertEqual(written, poster)
+        let after = await cache.image(for: poster, fallbackVideo: video, maxPixelWidth: 640)
+        XCTAssertNotNil(after)
+    }
+
+    func testPosterWrittenAfterAPosterOnlyFailureShowsOnTheNextRequest() async throws {
+        let cache = PosterCache()
+        let poster = folder.appendingPathComponent("late.jpg")
+        let before = await cache.image(for: poster, maxPixelWidth: 640)
+        XCTAssertNil(before)
+        _ = try writePoster("late.jpg", width: 800, height: 450)
+        let after = await cache.image(for: poster, maxPixelWidth: 640)
+        XCTAssertNotNil(after)
+    }
+
     func testRemoveDropsEverySizeOfAPoster() async throws {
         let url = try writePoster("a.jpg", width: 2000, height: 1250)
         let cache = PosterCache()
