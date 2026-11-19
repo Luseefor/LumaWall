@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import LumaWallCore
 import XCTest
 @testable import LumaWall
 
@@ -201,6 +202,40 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertEqual(readiness("Wallpaper.qhd.mov", saver), .hold)
         XCTAssertEqual(readiness("Wallpaper.qhd.mov", [Surface(pixelSize: uhd, tier: .full)]), .drop)
         XCTAssertEqual(readiness("Wallpaper.qhd.mov", []), .drop)
+    }
+
+    func testReducedTierRanksTheCopyTheExtensionPlays() {
+        typealias Surface = NativeWallpaperDeployment.Surface
+        for fixture in QHDFitFixtures.reducedRows {
+            let specs = NativeWallpaperDeployment.variantSpecs(sourceSize: fixture.source, sourceFPS: fixture.fps)
+            XCTAssertEqual(Set(specs.map(\.filename)), fixture.planned, "\(fixture)")
+            let surfaces = [Surface(pixelSize: fixture.source, tier: .reduced)]
+            for spec in specs where !spec.forFullQuality {
+                let readiness = NativeWallpaperDeployment.copyReadiness(
+                    spec, sourceSize: fixture.source, sourceFPS: fixture.fps, surfaces: surfaces, canMakeOptionalCopies: true
+                )
+                let expected: NativeWallpaperDeployment.VariantEncodeQueue.Readiness = spec.filename == fixture.reducedPlays ? .ready(rank: 0) : .ready(rank: 1)
+                XCTAssertEqual(readiness, expected, "\(spec.filename) for \(fixture)")
+            }
+        }
+    }
+
+    func testRestoreReportsNoDisplayAnOverlayOwns() {
+        let wallpaper = WallpaperID()
+        let native = DisplayID(rawValue: "native")
+        let cropped = DisplayID(rawValue: "cropped")
+        let spanning = DisplayID(rawValue: "spanning")
+        let off = DisplayID(rawValue: "off")
+        let crop = DisplayComposition(scale: 1.5)
+        let span = DisplayComposition(spanningCanvas: CGRect(x: 0, y: 0, width: 5120, height: 1440))
+        let assignments = [
+            DisplayAssignment(displayID: native, wallpaperID: wallpaper),
+            DisplayAssignment(displayID: cropped, wallpaperID: wallpaper, composition: crop),
+            DisplayAssignment(displayID: spanning, wallpaperID: wallpaper, composition: span),
+            DisplayAssignment(displayID: off, wallpaperID: wallpaper, composition: crop, isEnabled: false),
+        ]
+        XCTAssertEqual(NativeWallpaperEngine.overlayOwnedDisplays(in: assignments, onlyDefaultCrop: true), [cropped, spanning])
+        XCTAssertEqual(NativeWallpaperEngine.overlayOwnedDisplays(in: assignments, onlyDefaultCrop: false), [])
     }
 
     func testNoBackfillForAQHDCopyNoDisplayPlays() {

@@ -81,7 +81,7 @@ extension NativeWallpaperDeployment {
         let playing = surfaces.contains { surface in
             switch surface.tier {
             case .full: fullQualityPick(among: all, sourceSize: sourceSize, sourceFPS: sourceFPS, display: surface.pixelSize) == spec
-            case .reduced: spec.filename == "Wallpaper.reduced.mov"
+            case .reduced: reducedPick(among: all, sourceSize: sourceSize, sourceFPS: sourceFPS) == spec
             case .minimal: spec.filename == "Wallpaper.minimal.mov"
             case .staticFrame, .paused: false
             }
@@ -90,6 +90,24 @@ extension NativeWallpaperDeployment {
         let planned = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: surfaces.map(\.pixelSize))
         guard planned.contains(spec) else { return .drop }
         return playing && canMakeOptionalCopies ? .ready(rank: 0) : .hold
+    }
+
+    /// The copy the extension's Reduced tier plays: the one named for it, or
+    /// without it (a source of 1920 px or less plans no 1080p copy) the
+    /// fastest copy below the source rate, else the smallest at the same
+    /// rate. Mirrors `VariantSelection.variant(for: .reduced)`, which orders
+    /// copies by rate, then size, largest first.
+    static func reducedPick(among specs: [VariantSpec], sourceSize: CGSize, sourceFPS: Double) -> VariantSpec? {
+        if let named = specs.first(where: { $0.filename == "Wallpaper.reduced.mov" }) { return named }
+        func area(_ spec: VariantSpec) -> CGFloat {
+            let size = copySize(source: sourceSize, fitting: spec.fitting)
+            return size.width * size.height
+        }
+        let sorted = specs.sorted {
+            $0.recordedFPS != $1.recordedFPS ? $0.recordedFPS > $1.recordedFPS : area($0) > area($1)
+        }
+        let sourceRate = Int(sourceFPS.rounded())
+        return sorted.first { $0.recordedFPS < sourceRate } ?? sorted.last
     }
 
     private static func readiness(of job: VariantEncodeQueue.Job) -> VariantEncodeQueue.Readiness {
