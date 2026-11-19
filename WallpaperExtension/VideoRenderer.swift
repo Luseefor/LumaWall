@@ -91,6 +91,8 @@ final class VideoRenderer: @unchecked Sendable {
     private(set) var seededStill = false
     /// The original whose still init seeded, or nil. Set once there.
     private var seededOriginal: URL?
+    /// The seed is a frame of that original, not the gradient. Set once in init.
+    private var seedIsOfVideo = false
     /// Whether `start()` enqueued the first video frame. Set on the queue
     /// before `onFirstFrameReady` runs.
     private(set) var showedFirstFrame = false
@@ -103,6 +105,7 @@ final class VideoRenderer: @unchecked Sendable {
         rootLayer: CALayer,
         videoURL: URL,
         stillImage: CGImage? = nil,
+        stillIsOfVideo: Bool = true,
         fallbackStill: @escaping @Sendable (URL) -> CGImage? = { _ in nil },
         variantSelector: @escaping RendererCopy.Selector,
         tierSource: @escaping @Sendable () -> PlaybackPolicy,
@@ -151,6 +154,7 @@ final class VideoRenderer: @unchecked Sendable {
             asset: asset,
             videoTrack: track,
             stillImage: stillImage,
+            stillIsOfVideo: stillIsOfVideo,
             fallbackStill: fallbackStill,
             nominalFrameRate: nominalFrameRate,
             originalURL: videoURL,
@@ -167,6 +171,7 @@ final class VideoRenderer: @unchecked Sendable {
         asset: AVURLAsset,
         videoTrack: AVAssetTrack,
         stillImage: CGImage?,
+        stillIsOfVideo: Bool,
         fallbackStill: @escaping @Sendable (URL) -> CGImage?,
         nominalFrameRate: Double,
         originalURL: URL,
@@ -239,6 +244,7 @@ final class VideoRenderer: @unchecked Sendable {
             renderer.enqueue(stillBuffer)
             seededStill = true
             seededOriginal = originalURL
+            seedIsOfVideo = stillIsOfVideo
             traceLog("  [Renderer #\(debugID)] Seeded still into display layer (\(stillImage.width)x\(stillImage.height))")
         } else {
             traceLog("  [Renderer #\(debugID)] Seeded nothing (stillImage present: \(stillImage != nil)); the display layer is empty until the first frame")
@@ -530,6 +536,9 @@ final class VideoRenderer: @unchecked Sendable {
             isPreview = false
             extensionLog("  [Renderer #\(debugID)] a live request shares this preview surface, preview hold off")
             applyTier(requestedTier, animated: false)
+            // Still paused: a held gradient seed gives way to the video's
+            // frame, as on a live surface created paused.
+            send(.liveTakeover(keepsSeed: copy.liveKeepsSeed(seedOf: seededOriginal, seedIsStill: seedIsOfVideo)))
         }
     }
 

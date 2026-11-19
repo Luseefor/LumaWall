@@ -247,6 +247,14 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertFalse(copy.previewHoldsSeed(playing: url("b.mp4"), seedOf: url("a.mp4")))
     }
 
+    func testLiveTakeoverKeepsOnlyAStillOfTheActiveChoice() {
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertTrue(copy.liveKeepsSeed(seedOf: url("a.mp4"), seedIsStill: true))
+        XCTAssertFalse(copy.liveKeepsSeed(seedOf: url("a.mp4"), seedIsStill: false), "the gradient")
+        XCTAssertFalse(copy.liveKeepsSeed(seedOf: url("b.mp4"), seedIsStill: true), "another choice's still")
+        XCTAssertFalse(copy.liveKeepsSeed(seedOf: nil, seedIsStill: false), "nothing seeded")
+    }
+
     // MARK: Tier changes
 
     func testPausedRendererResumingOnBatteryMovesToTheBatteryCopy() async {

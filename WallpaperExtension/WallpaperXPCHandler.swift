@@ -118,11 +118,12 @@ private func surfaceReady(_ key: DisplayKey, token: Int) {
 /// What a new renderer's display layer is seeded with: the cached still,
 /// else the video's decoded first frame (unless `decode` is false), else the
 /// gradient, so the layer shows something before the first video frame.
-private func seedStill(cached: CGImage?, videoURL: URL, decode: Bool = true) async -> (image: CGImage?, source: String) {
-    if let cached { return (cached, "the cached still") }
-    if decode, let frame = await firstFrameImage(of: videoURL) { return (frame, "the decoded first frame") }
-    if let gradient = VideoRenderer.makeGradientStill() { return (gradient, "the gradient") }
-    return (nil, "nothing")
+/// `isStill`: the image is a frame of the video, not the gradient.
+private func seedStill(cached: CGImage?, videoURL: URL, decode: Bool = true) async -> (image: CGImage?, source: String, isStill: Bool) {
+    if let cached { return (cached, "the cached still", true) }
+    if decode, let frame = await firstFrameImage(of: videoURL) { return (frame, "the decoded first frame", true) }
+    if let gradient = VideoRenderer.makeGradientStill() { return (gradient, "the gradient", false) }
+    return (nil, "nothing", false)
 }
 
 /// Fail the replies waiting on `key`'s context, which was just removed.
@@ -567,11 +568,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     // shows, and the agent already hosts it: seed it even on a
                     // cache miss so the layer never goes empty.
                     let holds = isPreview ? await previewHoldsOriginal(videoURL, selector: selector, displayID: displayID, pixelWidth: pixelWidth, pixelHeight: pixelHeight) : false
-                    let seed = await seedStill(cached: loadStill(videoURL), videoURL: videoURL, decode: !holds).image
+                    let seed = await seedStill(cached: loadStill(videoURL), videoURL: videoURL, decode: !holds)
                     let renderer: VideoRenderer
                     do {
                         renderer = try await VideoRenderer.create(
-                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
+                            rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed.image, stillIsOfVideo: seed.isStill,
                             fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                             tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                             isPreview: isPreview,
@@ -694,13 +695,13 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // gradient, rather than leaving the layer empty. A preview that
                 // will hold the original shows its seed and decodes nothing.
                 let holds = isPreview ? await previewHoldsOriginal(videoURL, selector: selector, displayID: displayID, pixelWidth: pixelWidth, pixelHeight: pixelHeight) : false
-                var (seed, seeded) = coldStart || holds
+                var (seed, seeded, seedIsStill) = coldStart || holds
                     ? await seedStill(cached: cachedStill, videoURL: videoURL, decode: !holds)
-                    : (cachedStill, cachedStill == nil ? "nothing" : "the cached still")
+                    : (cachedStill, cachedStill == nil ? "nothing" : "the cached still", cachedStill != nil)
                 let renderer: VideoRenderer
                 do {
                     renderer = try await VideoRenderer.create(
-                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed,
+                        rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: seed, stillIsOfVideo: seedIsStill,
                         fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         isPreview: isPreview,

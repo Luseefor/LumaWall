@@ -150,6 +150,14 @@ struct RendererCopy {
         return isOriginal(playing) && isOriginal(seedOf)
     }
 
+    /// Whether a live request taking over a held preview can keep its seed:
+    /// a still (not the gradient) of the active choice, which is what a
+    /// paused live surface would show at this size.
+    func liveKeepsSeed(seedOf: URL?, seedIsStill: Bool) -> Bool {
+        guard seedIsStill, let seedOf else { return false }
+        return isOriginal(seedOf)
+    }
+
     /// Whether a new preview of `original` would open the original for
     /// `tier`, the way `create` and `start` pick its file, so its seed
     /// needn't decode a first frame (#35). `hasVideo` probes a copy: one
