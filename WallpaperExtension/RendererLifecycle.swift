@@ -145,10 +145,6 @@ struct RendererLifecycle: Equatable {
     private(set) var retrying = false
     /// Bumped whenever a reset starts, so a stale flush completion is dropped.
     private(set) var generation = 0
-    /// Readers were freed while the surface was closed. Its clock counts every
-    /// loop, so resuming from it can seek past the clip (#27); the next
-    /// rebuild restarts instead, whenever it runs.
-    private(set) var restartFreedReaders = false
 
     /// `policy` is the tier the renderer was created for, so the recompute
     /// after its first frame doesn't move it off the copy it opened.
@@ -283,7 +279,6 @@ struct RendererLifecycle: Equatable {
             deepPauseArmed = false
             guard readers == .live, resetInFlight == nil, clock == .stopped else { break }
             readers = .freed
-            if !surfaceOpen { restartFreedReaders = true }
             effects.append(.freeReaders)
         }
         reconcile(animated: animated, &effects)
@@ -367,7 +362,6 @@ struct RendererLifecycle: Equatable {
             effects.append(.disarmRetry)
         }
         generation += 1
-        restartFreedReaders = false
         resetInFlight = kind
         feeding = false
         clock = .stopped
@@ -383,8 +377,10 @@ struct RendererLifecycle: Equatable {
             effects.append(.buildPipeline(kind))
         }
         if !displayAsleep, resetInFlight == nil, readers == .freed, wantsPlayback {
-            // A restart's flush keeps the frame up, like a resume's.
-            requestReset(restartFreedReaders ? .restart : .resume, &effects)
+            // Resume where it paused, on an open or a reopened surface: the
+            // renderer maps its loop-counting clock back into the clip
+            // (`LoopTiming`). The flush keeps the frame up.
+            requestReset(.resume, &effects)
         }
         let ready = readers == .live && resetInFlight == nil
         let wantClock = wantsPlayback && ready
