@@ -27,6 +27,7 @@ final class PowerMonitor: Sendable {
     /// `pollQueue` after the read, so a fresh stamp means a finished sample.
     private let lastRead = OSAllocatedUnfairLock<Date?>(initialState: nil)
     private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
+    private let powerSourceToken = OSAllocatedUnfairLock(initialState: NOTIFY_TOKEN_INVALID)
 
     /// gamepolicyd's state-carrying Darwin notification for Game Mode sessions
     /// (name recovered from the gamepolicyd binary; posted with notify_set_state).
@@ -121,6 +122,20 @@ final class PowerMonitor: Sendable {
         // Brightness needs polling because IODisplay doesn't broadcast a
         // notification when the user drags the slider, and `screensDidSleep`
         // doesn't fire when brightness is held at zero manually.
+        //
+        // An AC/battery flip is posted, so read at once instead of waiting
+        // for the poll or for the reading to go stale: a lock or wake right
+        // after unplugging would otherwise open the AC copy and ramp for 6 s.
+        var sourceToken = NOTIFY_TOKEN_INVALID
+        let sourceStatus = notify_register_dispatch(kIOPSNotifyPowerSource, &sourceToken, pollQueue) { [weak self] _ in
+            self?.readHardware()
+        }
+        if sourceStatus == UInt32(NOTIFY_STATUS_OK) {
+            let registered = sourceToken
+            powerSourceToken.withLock { $0 = registered }
+        } else {
+            extensionLog("[PowerMonitor] Power source notify registration failed (status \(sourceStatus))")
+        }
 
         // Game Mode, event-driven via gamepolicyd's state-carrying notification.
         // Reaches the sandboxed extension: com.apple.* notify names aren't filtered.
