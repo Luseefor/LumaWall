@@ -45,3 +45,37 @@ struct PlayingRenderers {
         return before != anyPlaying
     }
 }
+
+/// The poll's mode from renderer playback and the latest hardware reading.
+/// Every reading goes through `reading`, whatever asked for it: a policy
+/// computed while nothing plays can find a hardware pause, and then only the
+/// poll can notice it lift.
+struct PowerPoller {
+    /// What to do with the poll timer.
+    enum Timer: Equatable { case start, stop, keep }
+
+    private(set) var mode = PowerPolling.off
+    private var playing = PlayingRenderers()
+    private var batteryLevel = 100
+    private var displayBrightness: Float = 1
+
+    var anyPlaying: Bool { playing.anyPlaying }
+
+    mutating func reading(batteryLevel: Int, displayBrightness: Float) -> Timer {
+        self.batteryLevel = batteryLevel
+        self.displayBrightness = displayBrightness
+        return reconcile()
+    }
+
+    mutating func playback(_ id: Int, playing isPlaying: Bool) -> Timer {
+        guard playing.set(id, playing: isPlaying) else { return .keep }
+        return reconcile()
+    }
+
+    private mutating func reconcile() -> Timer {
+        let next = PowerPolling.mode(anyPlaying: anyPlaying, batteryLevel: batteryLevel, displayBrightness: displayBrightness)
+        defer { mode = next }
+        if next == .off { return mode == .off ? .keep : .stop }
+        return mode == .off ? .start : .keep
+    }
+}

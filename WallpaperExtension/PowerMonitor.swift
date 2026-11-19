@@ -17,14 +17,14 @@ final class PowerMonitor: Sendable {
     /// critical notification and resume playback on a hot machine.
     private let thermalQueue = DispatchQueue(label: "app.lumawall.thermal")
     private let continuations = OSAllocatedUnfairLock(initialState: [UUID: AsyncStream<PowerState>.Continuation]())
-    /// Owns the battery and brightness poll: `playing`, `pollMode`, and
-    /// `pollTimer` are touched only here.
+    /// Runs every battery and brightness read and owns the poll: `poller`
+    /// and `pollTimer` are touched only here. Never call `currentState` on it.
     private let pollQueue = DispatchQueue(label: "app.lumawall.power-poll", qos: .utility)
-    private nonisolated(unsafe) var playing = PlayingRenderers()
-    private nonisolated(unsafe) var pollMode = PowerPolling.off
+    private nonisolated(unsafe) var poller = PowerPoller()
     private nonisolated(unsafe) var pollTimer: (any DispatchSourceTimer)?
     private static let pollLeeway: DispatchTimeInterval = .seconds(15)
-    /// When battery and brightness were last both read.
+    /// When a battery and brightness read last completed. Written on
+    /// `pollQueue` after the read, so a fresh stamp means a finished sample.
     private let lastRead = OSAllocatedUnfairLock<Date?>(initialState: nil)
     private let gameModeTokens = OSAllocatedUnfairLock(initialState: [Int32]())
 
@@ -54,7 +54,9 @@ final class PowerMonitor: Sendable {
     /// last reading is older than the poll interval (the poll stops while
     /// nothing plays).
     var currentState: PowerState {
-        readIfStale()
+        if readIsStale() {
+            pollQueue.sync { if readIsStale() { readHardware() } }
+        }
         return state.withLock { $0 }
     }
 
@@ -63,8 +65,7 @@ final class PowerMonitor: Sendable {
     /// (e.g. the user picking Battery Saver right after unplugging) applies
     /// against stale power state and looks like "nothing changes".
     func refreshNow() {
-        readBatteryAndBrightness()
-        pollQueue.async { [weak self] in self?.updatePolling() }
+        pollQueue.sync { readHardware() }
     }
 
     /// A renderer started or stopped wanting playback. The poll runs while
@@ -72,9 +73,9 @@ final class PowerMonitor: Sendable {
     /// since nothing was read while all were paused.
     func notePlayback(renderer id: Int, playing isPlaying: Bool) {
         pollQueue.async { [weak self] in
-            guard let self, playing.set(id, playing: isPlaying) else { return }
-            if playing.anyPlaying { readIfStale() }
-            updatePolling()
+            guard let self else { return }
+            apply(poller.playback(id, playing: isPlaying))
+            if poller.anyPlaying, readIsStale() { readHardware() }
         }
     }
 
@@ -99,7 +100,7 @@ final class PowerMonitor: Sendable {
             $0.thermalState = ProcessInfo.processInfo.thermalState
             $0.isLowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
-        readBatteryAndBrightness()
+        pollQueue.sync { readHardware() }
 
         // Thermal state, event-driven via notification
         NotificationCenter.default.addObserver(
@@ -120,7 +121,6 @@ final class PowerMonitor: Sendable {
         // Brightness needs polling because IODisplay doesn't broadcast a
         // notification when the user drags the slider, and `screensDidSleep`
         // doesn't fire when brightness is held at zero manually.
-        pollQueue.async { [weak self] in self?.updatePolling() }
 
         // Game Mode, event-driven via gamepolicyd's state-carrying notification.
         // Reaches the sandboxed extension: com.apple.* notify names aren't filtered.
@@ -147,49 +147,47 @@ final class PowerMonitor: Sendable {
 
     // MARK: - Private
 
-    /// Start, narrow, or stop the poll for the current state. `pollQueue` only.
-    private func updatePolling() {
+    /// Read battery (unless `battery` is false) and brightness, then bring
+    /// the poll in line with the reading. Every read goes through here, so a
+    /// read that finds a hardware pause starts the poll that can lift it.
+    /// `pollQueue` only.
+    private func readHardware(battery: Bool = true) {
         dispatchPrecondition(condition: .onQueue(pollQueue))
+        if battery { updateBatteryState() }
+        updateBrightnessState()
+        if battery { lastRead.withLock { $0 = Date() } }
         let current = state.withLock { $0 }
-        let mode = PowerPolling.mode(
-            anyPlaying: playing.anyPlaying,
-            batteryLevel: current.batteryLevel,
-            displayBrightness: current.displayBrightness,
-        )
-        guard mode != pollMode else { return }
-        pollMode = mode
-        extensionLog("[PowerMonitor] Power poll → \(mode)")
-        guard mode != .off else {
+        apply(poller.reading(batteryLevel: current.batteryLevel, displayBrightness: current.displayBrightness))
+    }
+
+    private func readIsStale() -> Bool {
+        PowerPolling.readIsStale(lastRead: lastRead.withLock { $0 }, now: Date())
+    }
+
+    /// `pollQueue` only.
+    private func apply(_ timer: PowerPoller.Timer) {
+        switch timer {
+        case .keep:
+            return
+        case .stop:
             pollTimer?.cancel()
             pollTimer = nil
-            return
+        case .start:
+            let source = DispatchSource.makeTimerSource(queue: pollQueue)
+            source.schedule(deadline: .now() + PowerPolling.interval, repeating: PowerPolling.interval, leeway: Self.pollLeeway)
+            source.setEventHandler { [weak self] in self?.poll() }
+            pollTimer = source
+            source.resume()
         }
-        guard pollTimer == nil else { return }
-        let timer = DispatchSource.makeTimerSource(queue: pollQueue)
-        timer.schedule(deadline: .now() + PowerPolling.interval, repeating: PowerPolling.interval, leeway: Self.pollLeeway)
-        timer.setEventHandler { [weak self] in self?.poll() }
-        pollTimer = timer
-        timer.resume()
+        extensionLog("[PowerMonitor] Power poll → \(poller.mode)")
     }
 
     private func poll() {
-        switch pollMode {
+        switch poller.mode {
         case .off: return
-        case .brightness: updateBrightnessState()
-        case .all: readBatteryAndBrightness()
+        case .brightness: readHardware(battery: false)
+        case .all: readHardware()
         }
-        updatePolling()
-    }
-
-    private func readBatteryAndBrightness() {
-        lastRead.withLock { $0 = Date() }
-        updateBatteryState()
-        updateBrightnessState()
-    }
-
-    private func readIfStale() {
-        guard PowerPolling.readIsStale(lastRead: lastRead.withLock { $0 }, now: Date()) else { return }
-        readBatteryAndBrightness()
     }
 
     /// Runs on `thermalQueue` only.
