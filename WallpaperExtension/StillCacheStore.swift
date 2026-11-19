@@ -135,8 +135,13 @@ actor StillCacheStore {
         guard latest[wallpaper] == version else { return (.superseded, nil) }
         switch StillCache.source(for: key, version: version, in: Self.scan(dir)) {
         case let .existing(entry):
-            _ = tag(dir.appendingPathComponent(entry.fileName), Self.usedAttribute, Self.nowString())
-            return (.hit, entry)
+            // A refused touch is a refused publish: the caller marks the
+            // directory. Any other failure evicts nothing, like a failed publish.
+            switch tag(dir.appendingPathComponent(entry.fileName), Self.usedAttribute, Self.nowString()) {
+            case 0: return (.hit, entry)
+            case let error where Self.permanentRefusals.contains(error): return (.refused(errno: error), nil)
+            default: return (.failed, nil)
+            }
         case let .copy(from: sibling):
             let source = dir.appendingPathComponent(sibling.fileName)
             switch publish(key: key, version: version, in: dir, fill: { try FileManager.default.copyItem(at: source, to: $0) }) {
@@ -212,7 +217,13 @@ actor StillCacheStore {
                       let file = StillCache.candidates(Self.scan(dir), choiceHash: choiceHash, version: version, size: size)
                           .first(where: { !excluded.contains($0.entry) }) else { return nil }
                 let url = dir.appendingPathComponent(file.entry.fileName)
-                _ = tag(url, Self.usedAttribute, Self.nowString())
+                // A refused touch marks the directory as a refused publish
+                // does, so writes stop too. A transient failure still seeds.
+                let error = tag(url, Self.usedAttribute, Self.nowString())
+                if Self.permanentRefusals.contains(error) {
+                    refused[scope] = error
+                    return nil
+                }
                 return (file.entry, try? Data(contentsOf: url, options: .alwaysMapped))
             }
             guard let pick else { return nil }

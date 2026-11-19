@@ -187,6 +187,56 @@ final class StillCacheStoreTests: XCTestCase {
         XCTAssertEqual(names(), [])
     }
 
+    func testARefusedTouchOnLoadMarksTheDirectory() async throws {
+        try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let decodes = OSAllocatedUnfairLock(initialState: 0)
+        let store = StillCacheStore(tag: { _, name, _ in name == StillCacheStore.usedAttribute ? EACCES : 0 })
+        XCTAssertNil(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd), "a still whose touch was refused was served")
+        let report = await store.write(in: dir, choiceHash: hashB, version: "v1", size: qhd) {
+            decodes.withLock { $0 += 1 }
+            return stillFixture(stillBlue)
+        }
+        XCTAssertEqual(report.outcome, .refused(errno: EACCES))
+        XCTAssertEqual(decodes.withLock { $0 }, 0)
+    }
+
+    func testARefusedTouchOnAHitEvictsNothing() async throws {
+        let other = try place(hashB, fourK, version: "v1", usedAgo: 300)
+        let hit = try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let store = StillCacheStore(budget: stillFixtureBytes, tag: { _, _, _ in ENOTSUP })
+        let report = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { nil }
+        XCTAssertEqual(report.outcome, .refused(errno: ENOTSUP))
+        XCTAssertEqual(names(), [other.lastPathComponent, hit.lastPathComponent])
+    }
+
+    func testAFailedTouchOnAHitEvictsNothing() async throws {
+        // A transient error, like one while publishing: nothing changes.
+        let other = try place(hashB, fourK, version: "v1", usedAgo: 300)
+        let hit = try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let store = StillCacheStore(budget: stillFixtureBytes, tag: { _, _, _ in EIO })
+        let report = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { nil }
+        XCTAssertEqual(report.outcome, .failed)
+        XCTAssertEqual(names(), [other.lastPathComponent, hit.lastPathComponent])
+    }
+
+    func testAWriteDecodingWhenALoadsTouchIsRefusedDoesntPublish() async throws {
+        try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let tags = OSAllocatedUnfairLock(initialState: 0)
+        let store = StillCacheStore(tag: { _, _, _ in
+            tags.withLock { $0 += 1 }
+            return EPERM
+        })
+        let gate = StillTestGate()
+        let dir = dir!, hashB = hashB, qhd = qhd
+        let suspended = startHeldWrite(store, in: dir, choiceHash: hashB, version: "v1", size: qhd, gate: gate, bgr: stillRed)
+        guard await gate.reached() else { gate.open(); return XCTFail("the write never started decoding") }
+        XCTAssertNil(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        gate.open()
+        let late = await suspended.value
+        XCTAssertEqual(late.outcome, .refused(errno: EPERM))
+        XCTAssertEqual(tags.withLock { $0 }, 1, "the suspended write tried to publish after the load's touch was refused")
+    }
+
     // MARK: Interrupted writes
 
     func testATruncatedStillIsNeitherAHitNorASeed() async throws {
