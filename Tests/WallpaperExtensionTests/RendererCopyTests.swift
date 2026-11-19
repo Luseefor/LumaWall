@@ -207,15 +207,32 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertEqual(copy.previewTier(.full, displayPixels: display), .full)
     }
 
-    func testPreviewThatOpensTheOriginalHoldsItWithoutDecoding() {
+    private func holdsOriginal(_ selector: @escaping RendererCopy.Selector, tier: PlaybackPolicy) async -> Bool {
+        await RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector, tier: tier, displayPixels: display) { self.open($0) != nil }
+    }
+
+    func testPreviewThatOpensTheOriginalHoldsItWithoutDecoding() async {
         let originalOnly: RendererCopy.Selector = { _, _ in URL(fileURLWithPath: "/videos/a.mp4") }
-        XCTAssertTrue(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: originalOnly, tier: .full, displayPixels: display))
-        XCTAssertFalse(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector("a"), tier: .full, displayPixels: display))
+        let holdsWithNoCopy = await holdsOriginal(originalOnly, tier: .full)
+        XCTAssertTrue(holdsWithNoCopy)
+        XCTAssertEqual(attempts, [], "the original isn't probed")
+        let holdsWithCopy = await holdsOriginal(selector("a"), tier: .full)
+        XCTAssertFalse(holdsWithCopy)
         // A paused preview opens the Full copy, which is cheap to decode.
-        XCTAssertFalse(RendererCopy.previewHoldsOriginal(url("a.mp4"), selector: selector("a"), tier: .paused, displayPixels: display))
+        let holdsPaused = await holdsOriginal(selector("a"), tier: .paused)
+        XCTAssertFalse(holdsPaused)
         let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
         XCTAssertTrue(copy.isOriginal(URL(fileURLWithPath: "/videos/./a.mp4")))
         XCTAssertFalse(copy.isOriginal(url("a.full.mov")))
+    }
+
+    func testPreviewWhoseCopyHasNoVideoHoldsTheOriginal() async {
+        // The renderer falls back to the original and holds, so the seed
+        // must not decode the original either.
+        playable.remove("a.full.mov")
+        let holds = await holdsOriginal(selector("a"), tier: .full)
+        XCTAssertTrue(holds)
+        XCTAssertEqual(attempts, ["a.full.mov"])
     }
 
     func testPreviewHoldsItsSeedOnlyWhileTheSeedIsOfTheChoiceItOpened() {

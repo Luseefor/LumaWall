@@ -151,12 +151,23 @@ struct RendererCopy {
     }
 
     /// Whether a new preview of `original` would open the original for
-    /// `tier`, the way `start` picks its file, so its seed needn't decode a
-    /// first frame (#35).
-    static func previewHoldsOriginal(_ original: URL, selector: @escaping Selector, tier: PlaybackPolicy, displayPixels: CGSize) -> Bool {
+    /// `tier`, the way `create` and `start` pick its file, so its seed
+    /// needn't decode a first frame (#35). `hasVideo` probes a copy: one
+    /// with no video track leaves the renderer on the original, holding.
+    static func previewHoldsOriginal(
+        _ original: URL,
+        selector: @escaping Selector,
+        tier: PlaybackPolicy,
+        displayPixels: CGSize,
+        hasVideo: (URL) async -> Bool,
+    ) async -> Bool {
         let copy = RendererCopy(original: original, selector: selector)
         let played = copy.previewTier(tier, displayPixels: displayPixels)
-        return copy.isOriginal(candidates(original, selector: selector, tier: played, displayPixels: displayPixels)[0])
+        for url in candidates(original, selector: selector, tier: played, displayPixels: displayPixels) {
+            if copy.isOriginal(url) { return true }
+            if await hasVideo(url) { return false }
+        }
+        return true
     }
 
     /// Where the next loop's reader comes from.
