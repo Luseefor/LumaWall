@@ -8,8 +8,9 @@ func buildSettingsViewModelsXPC() async -> AnyObject? {
     let library = VideoLibrary.shared
     let groupID = GroupID(id: "video-wallpapers")
 
-    // Always re-scan to pick up changes (deletions, new deployments)
-    library.scan()
+    // Pick up changes (deletions, new deployments). A push follows the scan
+    // its library-change notification already ran, so reuse a fresh one.
+    library.scanUnlessFresh()
 
     let entries = library.entries
 

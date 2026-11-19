@@ -22,6 +22,11 @@ final class VideoLibrary: Sendable {
     private let videosDir: URL
     private let indexURL: URL
     private let lock = OSAllocatedUnfairLock(initialState: [VideoEntry]())
+    /// When the last `scan` finished.
+    private let lastScan = OSAllocatedUnfairLock<Date?>(initialState: nil)
+    /// How long a scan stays fresh for `scanUnlessFresh`. The app posts a
+    /// library-change notification, which rescans, after each change.
+    private static let scanReuse: TimeInterval = 10
 
     private init() {
         let docs = FileManager.default.homeDirectoryForCurrentUser
@@ -84,6 +89,16 @@ final class VideoLibrary: Sendable {
             return videoURL(for: entry)
         }
         return variantURL(for: id, variant: chosen)
+    }
+
+    /// `scan`, unless one finished in the last `scanReuse` seconds.
+    func scanUnlessFresh() {
+        let age = lastScan.withLock { $0.map { Date().timeIntervalSince($0) } }
+        if let age, age >= 0, age < Self.scanReuse {
+            traceLog("[VideoLibrary] Reusing the scan from \(String(format: "%.1f", age))s ago")
+            return
+        }
+        scan()
     }
 
     /// Scan the videos directory and rebuild the in-memory index.
@@ -155,6 +170,7 @@ final class VideoLibrary: Sendable {
         let sorted = discovered
         lock.withLock { $0 = sorted }
         saveIndex(sorted)
+        lastScan.withLock { $0 = Date() }
         traceLog("[VideoLibrary] Scanned: \(sorted.count) video(s)")
     }
 

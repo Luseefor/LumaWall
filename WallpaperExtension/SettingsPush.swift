@@ -62,15 +62,21 @@ enum SettingsPush {
         return handlers.compactMap { $0.handler?.agentProxy }
     }
 
-    /// Build the current view models once and send them over every live connection.
+    /// Build the current view models once and send them over every live
+    /// connection. With no connection there is nobody to build for.
     static func push() async {
+        guard !liveProxies().isEmpty else {
+            extensionLog("[SettingsPush] No live host connection, cache refreshes on the next query")
+            return
+        }
         guard let models = await buildSettingsViewModelsXPC() else {
             extensionLog("[SettingsPush] Build failed, nothing pushed")
             return
         }
+        // Connections may have closed while the models were built.
         let proxies = liveProxies()
         guard !proxies.isEmpty else {
-            extensionLog("[SettingsPush] No live host connection, cache refreshes on the next query")
+            extensionLog("[SettingsPush] Host connections closed during the build, nothing pushed")
             return
         }
         extensionLog("[SettingsPush] Pushing view models to \(proxies.count) connection(s)")
