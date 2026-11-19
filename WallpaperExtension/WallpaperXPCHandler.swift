@@ -765,13 +765,16 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
                 reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
             }
-            reply(replyObj, nil)
             if existing.videoID == choice {
                 traceLog("  [bisect] SAME choice → no re-seed")
+                reply(replyObj, nil)
                 return
             }
+            // Reply once the still is in the layer: the agent shows a new
+            // context's content the moment it hosts it.
             bisectShowStill(videoURL: videoURL, cachedStill: cachedStill, rootLayer: existing.rootLayer, for: key)
             WallpaperState.shared.updateVideoID(choice, for: key)
+            reply(replyObj, nil)
             return
         }
 
@@ -797,9 +800,13 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             ActiveWallpaper(caContext: caContext, contextId: caContext.contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choice, isPreview: acquiredAsPreview, destSize: destSize, scaleFactor: scaleFactor),
             for: key,
         )
+        // `bisectShowStill` decodes synchronously on `Lifecycle.queue`, where
+        // teardown and every other acquire also run, so nothing can reuse or
+        // remove this context before the reply below. That is why this path
+        // needs no `ReplyGate`: replying after the call is the same guarantee.
+        bisectShowStill(videoURL: videoURL, cachedStill: cachedStill, rootLayer: rootLayer, for: key)
         reply(replyObj, nil)
         traceLog("  [bisect] CREATED ctx=\(caContext.contextId) display=\(key.displayID) choice=\(choice ?? "nil")")
-        bisectShowStill(videoURL: videoURL, cachedStill: cachedStill, rootLayer: rootLayer, for: key)
     }
 
     private var previousPresentationMode = "default"
