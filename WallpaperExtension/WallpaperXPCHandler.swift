@@ -74,6 +74,12 @@ private func installGradientFallback(on rootLayer: CALayer) {
     CATransaction.commit(); CATransaction.flush()
 }
 
+/// Keep the fallback gradient covering its root after a resize, which
+/// re-frames the root by hand. Inside the caller's transaction.
+private func reframeGradientFallback(on rootLayer: CALayer) {
+    rootLayer.sublayers?.filter { $0 is CAGradientLayer }.forEach { $0.frame = rootLayer.bounds }
+}
+
 /// Reply to a deferred acquire with `contextId`, or fail it when teardown
 /// removed that context first. The closure runs on `Lifecycle.queue`, where teardown
 /// runs, so the check and the reply can't straddle one.
@@ -280,6 +286,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             CATransaction.setDisableActions(true)
             resized.rootLayer.frame = CGRect(origin: .zero, size: live.size)
             resized.rootLayer.contentsScale = live.scale
+            reframeGradientFallback(on: resized.rootLayer)
             CATransaction.commit()
             CATransaction.flush()
             resized.renderer?.resize(to: live.size, scale: live.scale)
@@ -491,6 +498,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 CATransaction.setDisableActions(true)
                 resized.rootLayer.frame = CGRect(origin: .zero, size: destSize)
                 resized.rootLayer.contentsScale = scaleFactor
+                reframeGradientFallback(on: resized.rootLayer)
                 CATransaction.commit()
                 CATransaction.flush()
                 resized.renderer?.resize(to: destSize, scale: scaleFactor)
