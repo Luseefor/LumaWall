@@ -123,6 +123,41 @@ struct RendererCopy {
         return wanted == preloaded ? nil : wanted
     }
 
+    /// Where the next loop's reader comes from.
+    enum LoopSource: Hashable {
+        /// The tier's copy, replacing a preload made for an older tier.
+        case replacement(URL)
+        /// The reader preloaded during the loop.
+        case preload
+        /// A fresh reader on the current file.
+        case current
+    }
+
+    /// The reader the next loop plays: the replacement for `preloaded` (see
+    /// `loopReplacement`), else the preload, else a fresh reader on
+    /// `current`, whichever `start` gets reading first. `preloaded` is nil
+    /// when no preload is ready. A replacement that won't start leaves the
+    /// preload in place, so the loop carries on with it rather than sending
+    /// recovery to a file that just failed. Nil when nothing starts.
+    func loopReader<Reader>(
+        preloaded: URL?,
+        current: URL,
+        tier: PlaybackPolicy,
+        displayPixels: CGSize,
+        start: (LoopSource) -> Reader?,
+    ) -> (source: LoopSource, reader: Reader)? {
+        var sources: [LoopSource] = []
+        if let replacement = loopReplacement(preloaded: preloaded ?? current, current: current, tier: tier, displayPixels: displayPixels) {
+            sources.append(.replacement(replacement))
+        }
+        if preloaded != nil { sources.append(.preload) }
+        sources.append(.current)
+        for source in sources {
+            if let reader = start(source) { return (source, reader) }
+        }
+        return nil
+    }
+
     func preloadURL(current: URL, tier: PlaybackPolicy, displayPixels: CGSize) -> URL {
         VariantSelection.preloadURL(current: current, tier: tier, displayPixels: displayPixels, selector: active.selector)
     }

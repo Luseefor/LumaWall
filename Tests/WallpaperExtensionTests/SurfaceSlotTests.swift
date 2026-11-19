@@ -174,6 +174,150 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertTrue(owners.retiresWallpaperID)
     }
 
+    // MARK: Grace end
+
+    func testPickerDismissalLeavesTheLiveContextPastTheGrace() {
+        // The picker's invalidate armed the 15 s teardown, which destroyed
+        // the CAContext the desktop still hosted.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .graceOnly)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd, "the desktop still hosts it")
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .close)
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+    }
+
+    func testPickerDismissalOnTheLiveConnectionLeavesTheLiveContext() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 1, replyOnly: true)
+        _ = slot.invalidated(by: 1, openConnections: [1])
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+    }
+
+    func testAStaleInvalidateLeavesTheReacquiredContext() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: false)
+        _ = slot.invalidated(by: 1, openConnections: [1, 2])
+        XCTAssertFalse(slot.tearsDownAtGraceEnd, "connection 2 hosts it")
+    }
+
+    func testTheOwnersInvalidateKeepsPlayingForAPickerStillSharing() {
+        // The owner leaves first; the picker on connection 2 still hosts the
+        // context, and its own invalidate then closes it.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .graceOnly)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .close)
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+    }
+
+    func testPickerDismissalLeavesTheDesktopHostingAPickerMadeContext() {
+        // The picker created the context, then the desktop was handed it on
+        // another connection. The picker's dismissal closed it at once and
+        // teardown destroyed what the desktop hosted.
+        var slot = SurfaceSlot(acquiredBy: 1, ownerIsPreview: true)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .graceOnly)
+        XCTAssertTrue(slot.open)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+    }
+
+    func testAPickerJoiningDuringTheOwnersGraceClosesWhenItLeaves() {
+        // The desktop left, the picker reopened the surface during the
+        // grace and cancelled teardown. With the picker gone too nobody
+        // hosts it, so it must close rather than decode on.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .close)
+        XCTAssertTrue(slot.acquired(by: 2, replyOnly: true), "reopened for the picker")
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [1, 2]), .close)
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+    }
+
+    func testASharerWhoseConnectionDroppedDoesNotKeepTheSurface() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .close)
+    }
+
+    func testPickerDismissalDuringTheDesktopsReconnectLeavesItPlaying() {
+        // The agent can keep its desktop host across a reconnect. The
+        // picker's invalidate between the drop and the reacquire took the
+        // desktop for gone and stopped what it still showed.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [2]), .graceOnly)
+        XCTAssertTrue(slot.open)
+        XCTAssertEqual(slot.invalidated(by: 3, openConnections: [2, 3]), .close, "the reconnect cleanup still closes it")
+    }
+
+    func testASharerQuittingAfterTheOwnerLeftClosesTheSurface() {
+        // The desktop left while the picker shared; Settings then quit
+        // without an invalidate, so nothing closed the surface.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .graceOnly)
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [1, 2]))
+        XCTAssertTrue(slot.connectionsChanged(openConnections: [1]))
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [1]), "closed once")
+    }
+
+    func testAConnectionDropAloneDoesNotCloseTheOwnersSurface() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [2]))
+        XCTAssertFalse(slot.connectionsChanged(openConnections: []))
+        XCTAssertTrue(slot.open, "the reconnect cleanup or a reacquire decides")
+    }
+
+    func testPickerDismissalWhileTheDesktopReconnectsKeepsAPickerMadeContext() {
+        // The picker made the context on 1 and the desktop shares it on 2.
+        // 2 drops while the desktop keeps showing the context; the picker's
+        // dismissal then took the desktop for gone and tore it down.
+        var slot = SurfaceSlot(acquiredBy: 1, ownerIsPreview: true)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [1]))
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .graceOnly)
+        XCTAssertTrue(slot.open)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+        // The desktop reacquires on 3, replacing its old connection, then leaves.
+        _ = slot.acquired(by: 3, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 3, openConnections: [1, 3]), .close)
+    }
+
+    func testTheAgentsCleanupReleasesADesktopThatDidNotReconnect() {
+        // Same as above, but the agent's new connection invalidates the
+        // surface instead of reacquiring it: the desktop is gone.
+        var slot = SurfaceSlot(acquiredBy: 1, ownerIsPreview: true)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .graceOnly)
+        XCTAssertEqual(slot.invalidated(by: 3, openConnections: [1, 3]), .close)
+    }
+
+    func testAPickerThatQuitsWithoutAnInvalidateClosesItsContext() {
+        // The picker made a decoding context and Settings quit without an
+        // invalidate: nothing closed it, and it decoded forever.
+        var slot = SurfaceSlot(acquiredBy: 1, ownerIsPreview: true)
+        XCTAssertTrue(slot.connectionsChanged(openConnections: []))
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+    }
+
+    func testAPickerThatQuitsLeavesItsContextToADesktopSharingIt() {
+        var slot = SurfaceSlot(acquiredBy: 1, ownerIsPreview: true)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [2]))
+        XCTAssertTrue(slot.open)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [2]), .close)
+    }
+
+    func testAReopenedSurfaceIsNotTornDown() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .close)
+        _ = slot.acquired(by: 1, replyOnly: false)
+        XCTAssertFalse(slot.tearsDownAtGraceEnd)
+    }
+
     func testInvalidateWithNoKnownAcquirerCloses() {
         var slot = SurfaceSlot()
         XCTAssertEqual(slot.invalidated(by: 3, openConnections: [3]), .close)

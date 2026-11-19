@@ -10,16 +10,24 @@ struct SurfaceSlot: Equatable {
     private(set) var open = true
     /// The connection that made the latest acquire, when known.
     private(set) var lastAcquirer: Int?
-    /// A request of the other role was handed this context without changing
-    /// it (the Settings picker reusing the live surface's id). The next
-    /// invalidate may be that host's, so it is ambiguous.
-    private(set) var sharedWithOtherRole = false
+    /// Connections whose request of the other role was handed this context
+    /// without changing it (the Settings picker reusing the live surface's
+    /// id). That host's invalidate comes on its own connection.
+    private(set) var sharers: Set<Int> = []
+    /// The latest acquirer left: its invalidate, or the agent's cleanup after
+    /// its connection dropped. An acquire clears it.
+    private(set) var ownerLeft = false
     /// The token of the renderer create in flight.
     private(set) var pendingCreate: Int?
     private(set) var hasRenderer = false
 
-    init(acquiredBy connection: Int? = nil) {
+    /// The role of the request that created the context; sharers are the
+    /// other role.
+    let ownerIsPreview: Bool
+
+    init(acquiredBy connection: Int? = nil, ownerIsPreview: Bool = false) {
         lastAcquirer = connection
+        self.ownerIsPreview = ownerIsPreview
     }
 
     enum Finish: Equatable {
@@ -44,9 +52,16 @@ struct SurfaceSlot: Equatable {
     /// its invalidate must not freeze the surface's real owner.
     mutating func acquired(by connection: Int?, replyOnly: Bool) -> Bool {
         if replyOnly {
-            sharedWithOtherRole = true
+            // A live request reacquiring on a new connection replaces the
+            // desktop's old one, which may have dropped without a word.
+            if let connection {
+                if ownerIsPreview { sharers = [connection] } else { sharers.insert(connection) }
+            }
         } else if let connection {
             lastAcquirer = connection
+            ownerLeft = false
+        } else {
+            ownerLeft = false
         }
         return setOpen(true)
     }
@@ -54,8 +69,9 @@ struct SurfaceSlot: Equatable {
     enum InvalidateAction: Equatable {
         /// The invalidate belongs to the latest acquisition: stop playback now.
         case close
-        /// It may belong to an earlier acquisition that another, still open
-        /// connection has since replaced: keep playing through the grace.
+        /// It belongs to an earlier acquisition another open connection has
+        /// since replaced, or another host still shows the surface: keep
+        /// playing, and keep the context past the grace.
         case graceOnly
 
         /// Whether the invalidate retires the surface's WallpaperID. A
@@ -64,19 +80,57 @@ struct SurfaceSlot: Equatable {
         var retiresWallpaperID: Bool { self == .close }
     }
 
-    /// The protocol names only the surface, so the connection decides. An
-    /// invalidate from the latest acquirer, or after the latest acquirer's
-    /// connection dropped (the agent cleaning up on a new connection), is
-    /// unambiguous, unless another role's host shares the surface: then this
-    /// invalidate may be that host's and takes the grace.
+    /// The protocol names only the surface, so the connection decides which
+    /// host left: a sharer's connection, the latest acquirer's, or another
+    /// one. Another connection is the agent cleaning up after a reconnect
+    /// when a host's connection has dropped (that host left), and otherwise
+    /// an older connection a reacquire replaced, which changes nothing. On a
+    /// connection that is both the acquirer's and a sharer's, the first
+    /// invalidate counts as the sharer's. The surface closes, and the slot
+    /// with it, once no host is left (`hosted`).
     mutating func invalidated(by connection: Int, openConnections: Set<Int>) -> InvalidateAction {
-        if sharedWithOtherRole {
-            sharedWithOtherRole = false
-            return .graceOnly
+        if sharers.remove(connection) != nil {
+            // That sharer left.
+        } else if lastAcquirer == nil || lastAcquirer == connection {
+            ownerLeft = true
+        } else {
+            let ownerDropped = lastAcquirer.map { !openConnections.contains($0) } ?? false
+            let droppedSharers = sharers.subtracting(openConnections)
+            guard ownerDropped || !droppedSharers.isEmpty else { return .graceOnly }
+            if ownerDropped { ownerLeft = true }
+            sharers.subtract(droppedSharers)
         }
-        guard let lastAcquirer, lastAcquirer != connection, openConnections.contains(lastAcquirer) else { return .close }
-        return .graceOnly
+        return closeIfUnhosted(openConnections: openConnections) ? .close : .graceOnly
     }
+
+    /// A connection closed. A preview host on it (the Settings app quitting
+    /// without an invalidate) is gone, and the surface closes when it was
+    /// the last host. Returns whether it closed.
+    mutating func connectionsChanged(openConnections: Set<Int>) -> Bool {
+        open && closeIfUnhosted(openConnections: openConnections)
+    }
+
+    /// Whether any host may still show the surface. A preview host counts
+    /// while its connection is open. A live host counts until its own
+    /// invalidate, the agent's cleanup, or a reacquire replaces it, even
+    /// with its connection dropped: the agent can keep the desktop showing
+    /// the context across a reconnect.
+    private func hosted(openConnections: Set<Int>) -> Bool {
+        let ownerHosts = lastAcquirer.map { !ownerLeft && (!ownerIsPreview || openConnections.contains($0)) } ?? false
+        let sharersHost = ownerIsPreview ? !sharers.isEmpty : !sharers.isDisjoint(with: openConnections)
+        return ownerHosts || sharersHost
+    }
+
+    private mutating func closeIfUnhosted(openConnections: Set<Int>) -> Bool {
+        guard !hosted(openConnections: openConnections) else { return false }
+        open = false
+        return true
+    }
+
+    /// The grace after an invalidate ran out with no reacquire. Only a closed
+    /// surface is torn down: one still open was kept playing by an ambiguous
+    /// invalidate, and its owner may still host the context.
+    var tearsDownAtGraceEnd: Bool { !open }
 
     /// Claim the slot's one renderer create for `token`.
     mutating func claimCreate(token: Int) -> Bool {

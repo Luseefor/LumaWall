@@ -139,6 +139,37 @@ final class RendererCopyTests: XCTestCase {
         XCTAssertNil(copy.loopReplacement(preloaded: url("a.full.mov"), current: url("a.full.mov"), tier: .paused, displayPixels: display), "paused keeps the current copy")
     }
 
+    /// Starts every reader except those in `failing`, recording each try.
+    private func loopReader(_ copy: RendererCopy, preloaded: URL?, tier: PlaybackPolicy, failing: Set<RendererCopy.LoopSource>) -> RendererCopy.LoopSource? {
+        copy.loopReader(preloaded: preloaded, current: url("a.full.mov"), tier: tier, displayPixels: display) { source -> RendererCopy.LoopSource? in
+            attempts.append("\(source)")
+            return failing.contains(source) ? nil : source
+        }?.source
+    }
+
+    func testALoopReplacementThatWontStartKeepsThePreload() {
+        // The swap dropped the preload before the replacement's reader
+        // started, so a failed start sent recovery to the replacement and
+        // the wallpaper could fall back to a still.
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        let replacement = RendererCopy.LoopSource.replacement(url("a.reduced.mov"))
+        XCTAssertEqual(loopReader(copy, preloaded: url("a.full.mov"), tier: .reduced, failing: [replacement]), .preload)
+        XCTAssertEqual(attempts, ["\(replacement)", "preload"])
+    }
+
+    func testALoopReplacementThatStartsIsPlayedWithoutTouchingThePreload() {
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(loopReader(copy, preloaded: url("a.full.mov"), tier: .reduced, failing: []), .replacement(url("a.reduced.mov")))
+        XCTAssertEqual(attempts.count, 1)
+    }
+
+    func testALoopWithNoUsablePreloadReadsTheCurrentFileAgain() {
+        let copy = RendererCopy(original: url("a.mp4"), selector: selector("a"))
+        XCTAssertEqual(loopReader(copy, preloaded: url("a.full.mov"), tier: .full, failing: [.preload]), .current)
+        XCTAssertEqual(loopReader(copy, preloaded: nil, tier: .reduced, failing: [.replacement(url("a.reduced.mov"))]), .current)
+        XCTAssertNil(loopReader(copy, preloaded: nil, tier: .full, failing: [.current]), "nothing starts: the feed reports the missing reader")
+    }
+
     // MARK: Tier changes
 
     func testPausedRendererResumingOnBatteryMovesToTheBatteryCopy() async {

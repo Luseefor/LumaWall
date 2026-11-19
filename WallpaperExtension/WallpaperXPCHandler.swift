@@ -128,12 +128,25 @@ private func scheduleTeardown(for key: DisplayKey) {
     let item = DispatchWorkItem {
         Lifecycle.teardownTimers[key] = nil
         let torn = WallpaperState.shared.tearDownContext(for: key)
-        failHeldReplies(for: key)
-        extensionLog("  [teardown] grace fired for display \(key.displayID) → \(torn ? "stopped renderer + invalidated CAContext" : "nothing to tear down")")
+        // A surface kept open still has its context; its waiters go out with
+        // its create's reply. Fail them only once the context is gone.
+        if WallpaperState.shared.context(for: key) == nil { failHeldReplies(for: key) }
+        extensionLog("  [teardown] grace fired for display \(key.displayID) → \(torn ? "stopped renderer + invalidated CAContext" : "nothing to tear down, or still open after an ambiguous invalidate")")
         ShuffleController.shared.syncActiveWithContexts()
     }
     Lifecycle.teardownTimers[key] = item
     Lifecycle.queue.asyncAfter(deadline: .now() + Lifecycle.teardownGrace, execute: item)
+}
+
+/// A connection closed: close the surfaces it left with no host and arm
+/// their teardown, as their last host's invalidate would have.
+func closeSurfacesLeftUnhosted() {
+    Lifecycle.queue.async {
+        for key in WallpaperState.shared.closeUnhostedSurfaces() {
+            scheduleTeardown(for: key)
+            extensionLog("  [teardown] last host of display \(key.displayID)'s surface quit without an invalidate, stopped playback")
+        }
+    }
 }
 
 /// Cancel a display's pending teardown because it was re-acquired (woke / switched).
@@ -609,7 +622,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // Install the persistent slot now (renderer added async) so a concurrent
         // acquire for the same display reuses this context instead of creating another.
         WallpaperState.shared.installContext(
-            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor, slot: SurfaceSlot(acquiredBy: connectionSerial)),
+            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor, slot: SurfaceSlot(acquiredBy: connectionSerial, ownerIsPreview: isPreview)),
             for: key,
         )
         extensionLog("  Created context \(contextId) for display \(key.displayID)")
@@ -881,15 +894,16 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         }
         // Nobody hosts the surface now: stop decoding at once, but keep the
         // context and its frame so a re-acquire within the grace is seamless.
-        // An ambiguous invalidate (another open connection reacquired since,
-        // or the picker shares the surface) keeps playing through the grace,
-        // as on main, and keeps the id so the owner's invalidate still lands.
+        // An invalidate that leaves a host (another open connection
+        // reacquired since, or another role shares the surface) keeps
+        // playing, keeps the id so the last host's invalidate still lands,
+        // and survives the grace.
         let action = WallpaperState.shared.invalidate(key, by: connectionSerial)
         if action?.retiresWallpaperID ?? true {
             WallpaperState.shared.forgetWallpaperID(uuid)
         }
         scheduleTeardown(for: key)
-        let stopped = action == .graceOnly ? "ambiguous (reacquired elsewhere or shared with the picker), keeps playing" : "stopped playback"
+        let stopped = action == .graceOnly ? "another host may still show it (reacquired elsewhere or shared by the other role), keeps playing and survives the grace" : "stopped playback"
         extensionLog("=== INVALIDATE === UUID \(uuid) → \(stopped), tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
         reply(nil)
     }

@@ -202,14 +202,30 @@ final class WallpaperState: Sendable {
         lock.withLock { _ = $0.openConnections.remove(serial) }
     }
 
+    /// Close every open surface whose hosts have all gone, after a
+    /// connection closed (`SurfaceSlot.connectionsChanged`). Returns their
+    /// keys so the caller can arm their teardown.
+    func closeUnhostedSurfaces() -> [DisplayKey] {
+        lock.withLock { state in
+            var closed: [DisplayKey] = []
+            for (key, var context) in state.contexts where context.slot.connectionsChanged(openConnections: state.openConnections) {
+                state.contexts[key] = context
+                context.renderer?.setSurfaceOpen(false)
+                closed.append(key)
+            }
+            return closed
+        }
+    }
+
     /// An invalidate from connection `serial` reached `key`'s context: close
     /// it unless the invalidate is ambiguous (`SurfaceSlot.invalidated`).
     /// Nil when the key has no context.
     func invalidate(_ key: DisplayKey, by serial: Int) -> SurfaceSlot.InvalidateAction? {
         lock.withLock { state in
             guard var context = state.contexts[key] else { return nil }
+            let wasOpen = context.slot.open
             let action = context.slot.invalidated(by: serial, openConnections: state.openConnections)
-            let closed = action == .close && context.slot.setOpen(false)
+            let closed = wasOpen && !context.slot.open
             state.contexts[key] = context
             if closed { context.renderer?.setSurfaceOpen(false) }
             return action
@@ -366,11 +382,13 @@ final class WallpaperState: Sendable {
     /// Per-surface teardown runs when the invalidate grace timer fires with no
     /// re-acquire (the Space closed, the preview dismissed, or the display
     /// slept). It stops ONLY this surface's renderer and invalidates its
-    /// `CAContext`, leaving other surfaces playing. Returns whether it tore
-    /// down.
+    /// `CAContext`, leaving other surfaces playing. A surface an ambiguous
+    /// invalidate left open is kept (`SurfaceSlot.tearsDownAtGraceEnd`).
+    /// Returns whether it tore down.
     @discardableResult
     func tearDownContext(for key: DisplayKey) -> Bool {
         let removed = lock.withLock { state -> ActiveWallpaper? in
+            guard state.contexts[key]?.slot.tearsDownAtGraceEnd == true else { return nil }
             // Ids kept through an ambiguous invalidate's grace retire here.
             for (uuid, mapped) in state.keyForWallpaperUUID where mapped == key {
                 Self.forget(uuid, in: &state)
