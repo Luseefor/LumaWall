@@ -122,6 +122,7 @@ targets:
       - path: WallpaperExtension/RendererLifecycle.swift
       - path: WallpaperExtension/RendererCopy.swift
       - path: WallpaperExtension/DisplaySleep.swift
+      - path: WallpaperExtension/SurfaceSlot.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:
