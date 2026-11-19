@@ -126,11 +126,10 @@ struct PowerSample {
 /// latest snapshot on `Lifecycle.queue` (where lock and unlock read power
 /// too), so a notification that waited behind a transition can't apply a
 /// sample older than the transition's. Redundant notifications coalesce
-/// into the queued read, and a snapshot already applied isn't applied again.
-/// `Lifecycle.queue` only.
+/// into the queued read. It always applies: another path may have applied a
+/// different reading since, and reapplying an unchanged tier does nothing.
 struct PowerSignal {
     private var queued = false
-    private var applied: PowerSnapshot?
 
     /// A notification arrived. True when the caller must queue a read;
     /// false when one is already queued.
@@ -140,16 +139,10 @@ struct PowerSignal {
         return true
     }
 
-    /// The queued read runs: the snapshot to apply, or nil when it already is.
-    mutating func take(latest: PowerSnapshot) -> PowerSnapshot? {
+    /// The queued read runs: the snapshot to apply. Taken under the same
+    /// lock as `notified`, so a notification after this read queues another.
+    mutating func take(latest: PowerSnapshot) -> PowerSnapshot {
         queued = false
-        guard latest != applied else { return nil }
-        applied = latest
         return latest
-    }
-
-    /// A transition applied `snapshot` itself.
-    mutating func applied(_ snapshot: PowerSnapshot) {
-        applied = snapshot
     }
 }

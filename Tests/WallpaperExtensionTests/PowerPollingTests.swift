@@ -128,25 +128,26 @@ final class PowerPollingTests: XCTestCase {
     func testANotificationQueuedBehindATransitionDoesntReplayAnOlderSample() {
         // Unplugged: the power-source notification is queued on the
         // lifecycle queue behind a lock update, which reads battery itself.
-        // The queued read finds that reading and applies nothing; it never
-        // reapplies the AC sample from before the unplug.
+        // The queued read applies that reading, never the AC sample from
+        // before the unplug.
         var battery = PowerSnapshot()
         battery.isOnBattery = true
         var signal = PowerSignal()
         XCTAssertTrue(signal.notified())
-        signal.applied(battery)
-        XCTAssertNil(signal.take(latest: battery))
+        XCTAssertEqual(signal.take(latest: battery), battery)
     }
 
-    func testANewerSampleAfterTheTransitionApplies() {
-        var battery = PowerSnapshot()
-        battery.isOnBattery = true
+    func testAQueuedReadAppliesASnapshotEvenIfItWasAppliedBefore() {
+        // The read applied normal brightness; a prefs reload then applied a
+        // zero-brightness reading and paused. Brightness comes back to the
+        // same value before the next queued read runs: it must still apply,
+        // or the wallpaper stays paused.
+        let normal = PowerSnapshot()
         var signal = PowerSignal()
-        signal.applied(battery)
         XCTAssertTrue(signal.notified())
-        XCTAssertEqual(signal.take(latest: PowerSnapshot()), PowerSnapshot(), "plugged back in")
+        XCTAssertEqual(signal.take(latest: normal), normal)
         XCTAssertTrue(signal.notified())
-        XCTAssertNil(signal.take(latest: PowerSnapshot()), "already applied")
+        XCTAssertEqual(signal.take(latest: normal), normal)
     }
 
     func testNotificationsCoalesceUntilTheQueuedReadRuns() {

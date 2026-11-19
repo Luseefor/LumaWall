@@ -155,19 +155,13 @@ final class LumaWallExtension: NSObject, AppExtension {
 
     /// `Lifecycle.queue` only.
     private static func applyLatestPower() {
-        guard let power = powerSignal.withLock({ $0.take(latest: PowerMonitor.shared.latestState) }) else { return }
+        let power = powerSignal.withLock { $0.take(latest: PowerMonitor.shared.latestState) }
         let state = WallpaperState.shared
         WallpaperPrefs.shared.applyPolicies(
             presentationMode: state.presentationMode,
             activityState: state.activityState,
             powerState: power,
         )
-    }
-
-    /// `updateBody` applied `power` itself; a notification queued behind it
-    /// for the same snapshot applies nothing. `Lifecycle.queue` only.
-    static func notePowerApplied(_ power: PowerMonitor.PowerState) {
-        powerSignal.withLock { $0.applied(power) }
     }
 
     /// Recompute playback policy from current state and apply to all renderers.
