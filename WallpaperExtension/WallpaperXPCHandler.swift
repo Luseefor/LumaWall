@@ -72,6 +72,24 @@ private func renewPreviewLease(for key: DisplayKey) {
     }
 }
 
+/// Reply to a deferred acquire with `contextId`, or fail it when teardown
+/// removed that context while the renderer loaded or played its first
+/// frame. Runs on `Lifecycle.queue`, where teardown runs, so the check and
+/// the reply can't straddle one.
+private func replyIfContextLive<Reply>(
+    _ boxedReply: SendableBox<Reply>, contextId: UInt32, key: DisplayKey,
+    reply: @escaping @Sendable (Any?, (any Error)?) -> Void,
+) {
+    Lifecycle.queue.async {
+        guard WallpaperState.shared.context(for: key)?.contextId == contextId else {
+            extensionLog("  [acquire] context \(contextId) was torn down before its reply, failing the acquire")
+            reply(nil, NSError(domain: "LumaWallExtension", code: 5, userInfo: [NSLocalizedDescriptionKey: "Surface was torn down before the acquire replied"]))
+            return
+        }
+        reply(boxedReply.value, nil)
+    }
+}
+
 /// Drop a surface's lease: it was invalidated or removed, or a live request
 /// now uses it. MUST be called on `Lifecycle.queue`.
 private func endPreviewLease(for key: DisplayKey) {
@@ -616,7 +634,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             // The reply object is non-Sendable; box it to cross into the render Task.
             let boxedReply = SendableBox(value: replyObj)
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
-            Task { [coldStart, boxedRoot, boxedReply, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
+            Task { [coldStart, boxedRoot, boxedReply, contextId, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview] in
                 let renderer: VideoRenderer
                 do {
                     renderer = try await VideoRenderer.create(
@@ -627,7 +645,8 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 } catch {
                     extensionLog("  [Renderer] Failed to create: \(error)")
                     WallpaperState.shared.clearRendererPending(for: key, token: token)
-                    reply(boxedReply.value, nil) // unblock the acquire regardless (create failed)
+                    // Unblock the acquire regardless (create failed).
+                    replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
                     return
                 }
                 guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
@@ -641,7 +660,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // layer, so reply. The agent hosts our context already showing the still
                 // (no black gap), and video plays over it.
                 if coldStart {
-                    reply(boxedReply.value, nil)
+                    replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply)
                     traceLog("  [acquire] cold start → replied after still seeded for \(videoURL.lastPathComponent)")
                 }
                 WallpaperPrefs.shared.setActive(true)
@@ -649,7 +668,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                 // already replied with the still). Either way, stop the old renderer once
                 // we've told the agent to swap off it.
                 renderer.start(onFirstFrameReady: {
-                    if !coldStart { reply(boxedReply.value, nil) }
+                    if !coldStart { replyIfContextLive(boxedReply, contextId: contextId, key: key, reply: reply) }
                     old?.stop()
                     // After the reply so a pre-first-frame pause can't stall the
                     // acquire: apply pause conditions that predate this process
