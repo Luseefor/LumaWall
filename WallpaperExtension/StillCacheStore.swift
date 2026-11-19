@@ -45,8 +45,8 @@ actor StillCacheStore {
     private let tag: @Sendable (URL, String, String) -> Int32
     /// Test seam: runs between eviction's scan and its deletes.
     private let onEvictionScan: @Sendable () -> Void
-    /// Test seam: runs as a seed is about to take the lock.
-    private let onSeedLocking: @Sendable () -> Void
+    /// Test seam: runs when a seed finds the lock held, before it waits.
+    private let onSeedBlocked: @Sendable () -> Void
     /// Test seam: runs after a seed picks its file, before it decodes.
     private let onSeedPicked: @Sendable () -> Void
     /// Directories that refused the attributes, by path, with the errno.
@@ -64,13 +64,13 @@ actor StillCacheStore {
         budget: Int = StillCache.byteBudget,
         tag: @escaping @Sendable (URL, String, String) -> Int32 = setStillAttribute,
         onEvictionScan: @escaping @Sendable () -> Void = {},
-        onSeedLocking: @escaping @Sendable () -> Void = {},
+        onSeedBlocked: @escaping @Sendable () -> Void = {},
         onSeedPicked: @escaping @Sendable () -> Void = {},
     ) {
         self.budget = budget
         self.tag = tag
         self.onEvictionScan = onEvictionScan
-        self.onSeedLocking = onSeedLocking
+        self.onSeedBlocked = onSeedBlocked
         self.onSeedPicked = onSeedPicked
     }
 
@@ -221,10 +221,9 @@ actor StillCacheStore {
         var tried: Set<StillCacheEntry> = []
         while true {
             let excluded = tried, tag = tag
-            onSeedLocking()
             // Mapped under the lock: the mapping keeps the bytes readable if
             // an eviction deletes the file before the decode below.
-            let pick: (entry: StillCacheEntry, bytes: Data?)? = refusals.withLock { refused in
+            let choose: @Sendable (inout [String: Int32]) -> (entry: StillCacheEntry, bytes: Data?)? = { refused in
                 guard refused[scope] == nil,
                       let file = StillCache.candidates(Self.scan(dir), choiceHash: choiceHash, version: version, size: size)
                           .first(where: { !excluded.contains($0.entry) }) else { return nil }
@@ -238,6 +237,10 @@ actor StillCacheStore {
                 }
                 return (file.entry, try? Data(contentsOf: url, options: .alwaysMapped))
             }
+            let pick = refusals.withLockIfAvailable(choose) ?? {
+                onSeedBlocked()
+                return refusals.withLock(choose)
+            }()
             guard let pick else { return nil }
             tried.insert(pick.entry)
             onSeedPicked()
