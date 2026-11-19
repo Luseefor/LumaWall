@@ -91,8 +91,9 @@ final class LumaWallExtension: NSObject, AppExtension {
             object: nil, queue: .main,
         ) { _ in
             WallpaperState.shared.noteDisplaySleepNotification(asleep: false)
-            // The Mac may have been unplugged while the displays slept.
-            PowerMonitor.shared.refreshNow()
+            // The Mac may have been unplugged while the displays slept. Only
+            // the power source: brightness catches up off the main thread.
+            PowerMonitor.shared.readPowerSource()
             // Recompute first: renderers still asleep only record the new tiers,
             // so the wake below resumes on fresh policy instead of briefly
             // playing on the one from before sleep. Wake also reaches the

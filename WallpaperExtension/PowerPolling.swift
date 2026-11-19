@@ -99,16 +99,12 @@ struct PowerSample {
     var state = PowerSnapshot()
     private(set) var batteryReadAt: Date?
 
-    /// Merge one read that started at `now`. `battery` nil (the read failed,
-    /// or only brightness was read) keeps the old battery fields and their
-    /// time, and so does a battery reading started before the one merged
-    /// last: a transition reads the power source off the poll queue, and an
-    /// older poll read landing after it must not undo it. `brightness` nil
-    /// (a power-source read) keeps the old brightness. True when `state`
-    /// changed.
+    /// Merge one read. `battery` nil (the read failed, or only brightness was
+    /// read) keeps the old battery fields and their time; `brightness` nil (a
+    /// power-source read) keeps the old brightness. True when `state` changed.
     mutating func merge(battery: (onBattery: Bool, level: Int)?, brightness: Float?, at now: Date) -> Bool {
         let before = state
-        if let battery, batteryReadAt.map({ now >= $0 }) ?? true {
+        if let battery {
             state.isOnBattery = battery.onBattery
             state.batteryLevel = battery.level
             batteryReadAt = now
