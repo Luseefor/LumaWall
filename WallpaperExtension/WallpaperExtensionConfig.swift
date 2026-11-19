@@ -107,6 +107,7 @@ struct WallpaperExtensionConfig: AppExtensionConfiguration {
         connection.interruptionHandler = { traceLog("XPC interrupted") }
         connection.invalidationHandler = { [weak handler] in
             WallpaperState.shared.connectionClosed(serial)
+            closeSurfacesLeftUnhosted()
             guard let handler else { extensionLog("XPC invalidated (handler gone)"); return }
             handler.agentProxy = nil
             SettingsPush.unregister(handler)

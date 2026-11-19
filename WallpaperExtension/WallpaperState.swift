@@ -202,6 +202,21 @@ final class WallpaperState: Sendable {
         lock.withLock { _ = $0.openConnections.remove(serial) }
     }
 
+    /// Close every open surface whose hosts have all gone, after a
+    /// connection closed (`SurfaceSlot.connectionsChanged`). Returns their
+    /// keys so the caller can arm their teardown.
+    func closeUnhostedSurfaces() -> [DisplayKey] {
+        lock.withLock { state in
+            var closed: [DisplayKey] = []
+            for (key, var context) in state.contexts where context.slot.connectionsChanged(openConnections: state.openConnections) {
+                state.contexts[key] = context
+                context.renderer?.setSurfaceOpen(false)
+                closed.append(key)
+            }
+            return closed
+        }
+    }
+
     /// An invalidate from connection `serial` reached `key`'s context: close
     /// it unless the invalidate is ambiguous (`SurfaceSlot.invalidated`).
     /// Nil when the key has no context.

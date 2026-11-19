@@ -138,6 +138,17 @@ private func scheduleTeardown(for key: DisplayKey) {
     Lifecycle.queue.asyncAfter(deadline: .now() + Lifecycle.teardownGrace, execute: item)
 }
 
+/// A connection closed: close the surfaces it left with no host and arm
+/// their teardown, as their last host's invalidate would have.
+func closeSurfacesLeftUnhosted() {
+    Lifecycle.queue.async {
+        for key in WallpaperState.shared.closeUnhostedSurfaces() {
+            scheduleTeardown(for: key)
+            extensionLog("  [teardown] last host of display \(key.displayID)'s surface quit without an invalidate, stopped playback")
+        }
+    }
+}
+
 /// Cancel a display's pending teardown because it was re-acquired (woke / switched).
 /// MUST be called on `Lifecycle.queue`.
 private func cancelTeardown(for key: DisplayKey) {

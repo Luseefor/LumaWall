@@ -240,6 +240,37 @@ final class SurfaceSlotTests: XCTestCase {
         XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .close)
     }
 
+    func testPickerDismissalDuringTheDesktopsReconnectLeavesItPlaying() {
+        // The agent can keep its desktop host across a reconnect. The
+        // picker's invalidate between the drop and the reacquire took the
+        // desktop for gone and stopped what it still showed.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 2, openConnections: [2]), .graceOnly)
+        XCTAssertTrue(slot.open)
+        XCTAssertEqual(slot.invalidated(by: 3, openConnections: [2, 3]), .close, "the reconnect cleanup still closes it")
+    }
+
+    func testASharerQuittingAfterTheOwnerLeftClosesTheSurface() {
+        // The desktop left while the picker shared; Settings then quit
+        // without an invalidate, so nothing closed the surface.
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1, 2]), .graceOnly)
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [1, 2]))
+        XCTAssertTrue(slot.connectionsChanged(openConnections: [1]))
+        XCTAssertTrue(slot.tearsDownAtGraceEnd)
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [1]), "closed once")
+    }
+
+    func testAConnectionDropAloneDoesNotCloseTheOwnersSurface() {
+        var slot = SurfaceSlot(acquiredBy: 1)
+        _ = slot.acquired(by: 2, replyOnly: true)
+        XCTAssertFalse(slot.connectionsChanged(openConnections: [2]))
+        XCTAssertFalse(slot.connectionsChanged(openConnections: []))
+        XCTAssertTrue(slot.open, "the reconnect cleanup or a reacquire decides")
+    }
+
     func testAReopenedSurfaceIsNotTornDown() {
         var slot = SurfaceSlot(acquiredBy: 1)
         XCTAssertEqual(slot.invalidated(by: 1, openConnections: [1]), .close)

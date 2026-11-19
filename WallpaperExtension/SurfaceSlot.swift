@@ -77,7 +77,9 @@ struct SurfaceSlot: Equatable {
     /// which changes nothing. On a connection that is both the acquirer's and
     /// a sharer's, the first invalidate counts as the sharer's. The surface
     /// closes, and the slot with it, once the acquirer has left and no sharer
-    /// on an open connection is left to host it.
+    /// on an open connection is left to host it. A dropped connection alone
+    /// doesn't mean the acquirer left: the agent can keep its host across a
+    /// reconnect, so a sharer's invalidate waits for the acquirer's own.
     mutating func invalidated(by connection: Int, openConnections: Set<Int>) -> InvalidateAction {
         if sharers.remove(connection) == nil {
             if let lastAcquirer, lastAcquirer != connection, openConnections.contains(lastAcquirer) {
@@ -85,10 +87,20 @@ struct SurfaceSlot: Equatable {
             }
             ownerLeft = true
         }
-        let ownerGone = ownerLeft || lastAcquirer.map { !openConnections.contains($0) } ?? true
-        guard ownerGone, sharers.isDisjoint(with: openConnections) else { return .graceOnly }
+        return closeIfUnhosted(openConnections: openConnections) ? .close : .graceOnly
+    }
+
+    /// A connection closed. A sharer that quits without an invalidate (the
+    /// Settings app exiting) leaves the surface to nobody once the acquirer
+    /// has left: close it. Returns whether it closed.
+    mutating func connectionsChanged(openConnections: Set<Int>) -> Bool {
+        open && closeIfUnhosted(openConnections: openConnections)
+    }
+
+    private mutating func closeIfUnhosted(openConnections: Set<Int>) -> Bool {
+        guard ownerLeft, sharers.isDisjoint(with: openConnections) else { return false }
         open = false
-        return .close
+        return true
     }
 
     /// The grace after an invalidate ran out with no reacquire. Only a closed
