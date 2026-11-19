@@ -19,20 +19,9 @@ final class StillCacheStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
-    private static let red: [UInt8] = [0, 0, 255]
-    private static let blue: [UInt8] = [255, 0, 0]
-    private static let green: [UInt8] = [0, 255, 0]
-
-    /// A 4x2 still of one colour: 54 + 16 * 2 = 86 bytes.
-    private static func bmp(_ bgr: [UInt8]) -> Data? {
-        (try? stillTestImage(width: 4, height: 2) { _, _ in bgr }).flatMap(StillCache.encodeBMP)
-    }
-
-    private static let fileBytes = 86
-
     /// A still at its final name, as an earlier write would have left it.
     @discardableResult
-    private func place(_ hash: String, _ size: StillSize, version: String?, usedAgo: TimeInterval, data: Data? = bmp(blue)) throws -> URL {
+    private func place(_ hash: String, _ size: StillSize, version: String?, usedAgo: TimeInterval, data: Data? = stillFixture(stillBlue)) throws -> URL {
         let entry = StillCacheEntry(key: StillCacheKey(choiceHash: hash, width: size.width, height: size.height), written: 1)
         let url = dir.appendingPathComponent(entry.fileName)
         try XCTUnwrap(data).write(to: url)
@@ -55,21 +44,16 @@ final class StillCacheStoreTests: XCTestCase {
         let store = StillCacheStore(budget: 10)
         let gate = StillTestGate()
         let dir = dir!, hashA = hashA, qhd = qhd
-        let v1 = Task {
-            await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
-                await gate.pass()
-                return Self.bmp(Self.red)
-            }
-        }
+        let v1 = startHeldWrite(store, in: dir, choiceHash: hashA, version: "v1", size: qhd, gate: gate, bgr: stillRed)
         guard await gate.reached() else { gate.open(); return XCTFail("V1 never started decoding") }
-        let v2 = await store.write(in: dir, choiceHash: hashA, version: "v2", size: qhd) { Self.bmp(Self.blue) }
+        let v2 = await store.write(in: dir, choiceHash: hashA, version: "v2", size: qhd) { stillFixture(stillBlue) }
         XCTAssertEqual(v2.outcome, .created)
         gate.open()
         let late = await v1.value
         XCTAssertEqual(late.outcome, .superseded)
         XCTAssertEqual(StillCacheStore.scan(dir).map(\.version), ["v2"])
         let seed = try XCTUnwrap(StillCacheStore().load(in: dir, choiceHash: hashA, version: "v2", size: qhd))
-        XCTAssertEqual(try stillTestPixel(seed, x: 0, y: 0), Self.blue)
+        XCTAssertEqual(try stillTestPixel(seed, x: 0, y: 0), stillBlue)
         XCTAssertNil(StillCacheStore().load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
     }
 
@@ -79,15 +63,10 @@ final class StillCacheStoreTests: XCTestCase {
         let other = dir.appendingPathComponent("other")
         try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
         let dir = dir!, hashA = hashA, qhd = qhd
-        let first = Task {
-            await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
-                await gate.pass()
-                return Self.bmp(Self.red)
-            }
-        }
+        let first = startHeldWrite(store, in: dir, choiceHash: hashA, version: "v1", size: qhd, gate: gate, bgr: stillRed)
         guard await gate.reached() else { gate.open(); return XCTFail("the first write never started decoding") }
-        let second = await store.write(in: other, choiceHash: hashA, version: "v2", size: qhd) { Self.bmp(Self.blue) }
-        let joined = await store.write(in: other, choiceHash: hashA, version: "v1", size: qhd) { Self.bmp(Self.red) }
+        let second = await store.write(in: other, choiceHash: hashA, version: "v2", size: qhd) { stillFixture(stillBlue) }
+        let joined = await store.write(in: other, choiceHash: hashA, version: "v1", size: qhd) { stillFixture(stillRed) }
         gate.open()
         XCTAssertEqual(second.outcome, .created)
         XCTAssertEqual(joined.outcome, .created)
@@ -109,7 +88,7 @@ final class StillCacheStoreTests: XCTestCase {
         let seedFound = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let seedWaited = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let seedDone = expectation(description: "seed returned")
-        let store = StillCacheStore(budget: 2 * Self.fileBytes, onEvictionScan: {
+        let store = StillCacheStore(budget: 2 * stillFixtureBytes, onEvictionScan: {
             DispatchQueue.global().async {
                 let image = shared.withLock { $0 }?.load(in: dir, choiceHash: hashA, version: "v1", size: qhd)
                 seedFound.withLock { $0 = image != nil }
@@ -123,10 +102,7 @@ final class StillCacheStoreTests: XCTestCase {
         shared.withLock { $0 = store }
         let writeDone = expectation(description: "write returned")
         let hashB = hashB, fourK = fourK
-        Task {
-            _ = await store.write(in: dir, choiceHash: hashB, version: "v1", size: fourK) { Self.bmp(Self.green) }
-            writeDone.fulfill()
-        }
+        startWrite(store, in: dir, choiceHash: hashB, version: "v1", size: fourK, bgr: stillGreen) { writeDone.fulfill() }
         wait(for: [writeDone, seedDone], timeout: 10)
         XCTAssertEqual(seedWaited.withLock { $0 }, true, "the seed ran while eviction held its scan")
         XCTAssertEqual(seedFound.withLock { $0 }, false, "the seed's only candidate was evicted before it could pick it")
@@ -136,21 +112,18 @@ final class StillCacheStoreTests: XCTestCase {
     func testASeedOutlivesAnEvictionAfterItsPick() throws {
         // A newer video's write removes the picked still before the seed
         // decodes it; the seed must still decode what it picked.
-        try place(hashA, qhd, version: "v1", usedAgo: 10, data: Self.bmp(Self.blue))
+        try place(hashA, qhd, version: "v1", usedAgo: 10, data: stillFixture(stillBlue))
         let dir = dir!, hashA = hashA, qhd = qhd
         let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
         let store = StillCacheStore(onSeedPicked: {
             guard let store = shared.withLock({ $0 }) else { return }
             let written = DispatchSemaphore(value: 0)
-            Task {
-                _ = await store.write(in: dir, choiceHash: hashA, version: "v2", size: qhd) { Self.bmp(Self.red) }
-                written.signal()
-            }
+            startWrite(store, in: dir, choiceHash: hashA, version: "v2", size: qhd, bgr: stillRed) { written.signal() }
             written.wait()
         })
         shared.withLock { $0 = store }
         let image = try XCTUnwrap(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
-        XCTAssertEqual(try stillTestPixel(image, x: 0, y: 0), Self.blue)
+        XCTAssertEqual(try stillTestPixel(image, x: 0, y: 0), stillBlue)
         XCTAssertEqual(StillCacheStore.scan(dir).map(\.version), ["v2"])
     }
 
@@ -169,7 +142,7 @@ final class StillCacheStoreTests: XCTestCase {
         let decodes = OSAllocatedUnfairLock(initialState: 0)
         let encode: @Sendable () async -> Data? = {
             decodes.withLock { $0 += 1 }
-            return Self.bmp(Self.blue)
+            return stillFixture(stillBlue)
         }
         let store = StillCacheStore(tag: { _, _, _ in EPERM })
         let first = await store.write(in: dir, choiceHash: hashA, version: "v2", size: qhd, encode: encode)
@@ -185,7 +158,7 @@ final class StillCacheStoreTests: XCTestCase {
         let decodes = OSAllocatedUnfairLock(initialState: 0)
         let encode: @Sendable () async -> Data? = {
             decodes.withLock { $0 += 1 }
-            return Self.bmp(Self.blue)
+            return stillFixture(stillBlue)
         }
         let store = StillCacheStore(tag: { _, name, _ in name == StillCacheStore.usedAttribute ? EACCES : 0 })
         let first = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd, encode: encode)
@@ -203,14 +176,9 @@ final class StillCacheStoreTests: XCTestCase {
         })
         let gate = StillTestGate()
         let dir = dir!, hashA = hashA, qhd = qhd
-        let suspended = Task {
-            await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
-                await gate.pass()
-                return Self.bmp(Self.blue)
-            }
-        }
+        let suspended = startHeldWrite(store, in: dir, choiceHash: hashA, version: "v1", size: qhd, gate: gate, bgr: stillBlue)
         guard await gate.reached() else { gate.open(); return XCTFail("the first write never started decoding") }
-        let refused = await store.write(in: dir, choiceHash: hashB, version: "v1", size: qhd) { Self.bmp(Self.red) }
+        let refused = await store.write(in: dir, choiceHash: hashB, version: "v1", size: qhd) { stillFixture(stillRed) }
         XCTAssertEqual(refused.outcome, .refused(errno: EPERM))
         gate.open()
         let late = await suspended.value
@@ -222,11 +190,11 @@ final class StillCacheStoreTests: XCTestCase {
     // MARK: Interrupted writes
 
     func testATruncatedStillIsNeitherAHitNorASeed() async throws {
-        try place(hashA, fourK, version: "v1", usedAgo: 10, data: Self.bmp(Self.blue))
-        let partial = try place(hashA, qhd, version: "v1", usedAgo: 0, data: Self.bmp(Self.red)?.prefix(70))
+        try place(hashA, fourK, version: "v1", usedAgo: 10, data: stillFixture(stillBlue))
+        let partial = try place(hashA, qhd, version: "v1", usedAgo: 0, data: stillFixture(stillRed)?.prefix(70))
         let seed = try XCTUnwrap(StillCacheStore().load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
         XCTAssertEqual(seed.width, 4)
-        XCTAssertEqual(try stillTestPixel(seed, x: 0, y: 0), Self.blue)
+        XCTAssertEqual(try stillTestPixel(seed, x: 0, y: 0), stillBlue)
 
         let report = await StillCacheStore().write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
             XCTFail("the complete 4K still should be copied, not decoded")
@@ -242,7 +210,7 @@ final class StillCacheStoreTests: XCTestCase {
     func testLeftoverTempFilesAreRemoved() async {
         let leftover = dir.appendingPathComponent(".lumawall-\(UUID().uuidString).tmp")
         FileManager.default.createFile(atPath: leftover.path, contents: Data(repeating: 1, count: 10))
-        _ = await StillCacheStore().write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { Self.bmp(Self.blue) }
+        _ = await StillCacheStore().write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { stillFixture(stillBlue) }
         XCTAssertEqual(names().filter { $0.hasSuffix(".tmp") }, [])
     }
 
@@ -254,7 +222,7 @@ final class StillCacheStoreTests: XCTestCase {
         let oldest = try place(hashB, fourK, version: "v1", usedAgo: 300)
         try place(hashB, qhd, version: "v1", usedAgo: 200)
         try place(hashA, qhd, version: "v1", usedAgo: 100)
-        let store = StillCacheStore(budget: 2 * Self.fileBytes)
+        let store = StillCacheStore(budget: 2 * stillFixtureBytes)
         let report = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { nil }
         XCTAssertEqual(report.outcome, .hit)
         XCTAssertEqual(names().count, 2)
@@ -265,8 +233,8 @@ final class StillCacheStoreTests: XCTestCase {
         let read = try place(hashA, qhd, version: "v1", usedAgo: 300)
         let unread = try place(hashB, qhd, version: "v1", usedAgo: 100)
         XCTAssertNotNil(StillCacheStore().load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
-        let store = StillCacheStore(budget: 2 * Self.fileBytes)
-        _ = await store.write(in: dir, choiceHash: hashB, version: "v1", size: fourK) { Self.bmp(Self.green) }
+        let store = StillCacheStore(budget: 2 * stillFixtureBytes)
+        _ = await store.write(in: dir, choiceHash: hashB, version: "v1", size: fourK) { stillFixture(stillGreen) }
         XCTAssertTrue(names().contains(read.lastPathComponent))
         XCTAssertFalse(names().contains(unread.lastPathComponent))
     }
@@ -278,7 +246,7 @@ final class StillCacheStoreTests: XCTestCase {
         let decodes = OSAllocatedUnfairLock(initialState: 0)
         let encode: @Sendable () async -> Data? = {
             decodes.withLock { $0 += 1 }
-            return Self.bmp(Self.blue)
+            return stillFixture(stillBlue)
         }
         let a = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK, encode: encode)
         let b = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd, encode: encode)
@@ -293,17 +261,11 @@ final class StillCacheStoreTests: XCTestCase {
         let gate = StillTestGate()
         let decodes = OSAllocatedUnfairLock(initialState: 0)
         let dir = dir!, hashA = hashA, qhd = qhd
-        let leader = Task {
-            await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
-                decodes.withLock { $0 += 1 }
-                await gate.pass()
-                return Self.bmp(Self.blue)
-            }
-        }
+        let leader = startHeldWrite(store, in: dir, choiceHash: hashA, version: "v1", size: qhd, gate: gate, bgr: stillBlue, decodes: decodes)
         guard await gate.reached() else { gate.open(); return XCTFail("the leader never started decoding") }
         let follower = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK) {
             decodes.withLock { $0 += 1 }
-            return Self.bmp(Self.blue)
+            return stillFixture(stillBlue)
         }
         XCTAssertEqual(follower.outcome, .joined)
         gate.open()
@@ -311,6 +273,46 @@ final class StillCacheStoreTests: XCTestCase {
         XCTAssertEqual(led, .init(outcome: .created, created: 2))
         XCTAssertEqual(decodes.withLock { $0 }, 1)
         XCTAssertEqual(Set(StillCacheStore.scan(dir).map(\.entry.key.width)), [2560, 3840])
+    }
+}
+
+private let stillRed: [UInt8] = [0, 0, 255]
+private let stillBlue: [UInt8] = [255, 0, 0]
+private let stillGreen: [UInt8] = [0, 255, 0]
+
+/// A 4x2 still of one colour: 54 + 16 * 2 = 86 bytes.
+private func stillFixture(_ bgr: [UInt8]) -> Data? {
+    (try? stillTestImage(width: 4, height: 2) { _, _ in bgr }).flatMap(StillCache.encodeBMP)
+}
+
+private let stillFixtureBytes = 86
+
+// Writes run in tasks built here, from Sendable arguments only: Xcode 26.3's
+// region-based isolation checker fails on a Task inside a test method whose
+// closure captures the decode closure and test locals.
+
+/// Starts a write whose encode counts itself in `decodes` and waits at `gate`.
+private func startHeldWrite(
+    _ store: StillCacheStore, in dir: URL, choiceHash: String, version: String, size: StillSize,
+    gate: StillTestGate, bgr: [UInt8], decodes: OSAllocatedUnfairLock<Int>? = nil,
+) -> Task<StillCacheStore.Report, Never> {
+    Task {
+        await store.write(in: dir, choiceHash: choiceHash, version: version, size: size) {
+            decodes?.withLock { $0 += 1 }
+            await gate.pass()
+            return stillFixture(bgr)
+        }
+    }
+}
+
+/// Starts a write and calls `done` when it returns.
+private func startWrite(
+    _ store: StillCacheStore, in dir: URL, choiceHash: String, version: String, size: StillSize,
+    bgr: [UInt8], done: @escaping @Sendable () -> Void,
+) {
+    Task {
+        _ = await store.write(in: dir, choiceHash: choiceHash, version: version, size: size) { stillFixture(bgr) }
+        done()
     }
 }
 
