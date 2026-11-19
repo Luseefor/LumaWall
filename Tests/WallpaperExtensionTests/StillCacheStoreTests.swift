@@ -246,6 +246,23 @@ final class StillCacheStoreTests: XCTestCase {
         XCTAssertEqual(tags.withLock { $0 }, 1, "the suspended write tried to publish after the load's touch was refused")
     }
 
+    func testASeedRefusedWhileAWritePublishesStopsThePublish() async throws {
+        // The write passed its refusal checks; a seed records the refusal
+        // while the write tags its temp file. The rename must not happen.
+        let placed = try place(hashA, qhd, version: "v1", usedAgo: 10)
+        let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
+        let dir = dir!, hashA = hashA, qhd = qhd
+        let store = StillCacheStore(tag: { url, _, _ in
+            guard url.lastPathComponent.hasPrefix(".lumawall-") else { return EACCES }
+            _ = shared.withLock { $0 }?.load(in: dir, choiceHash: hashA, version: "v1", size: qhd)
+            return 0
+        })
+        shared.withLock { $0 = store }
+        let report = await store.write(in: dir, choiceHash: hashB, version: "v1", size: qhd) { stillFixture(stillBlue) }
+        XCTAssertEqual(report.outcome, .refused(errno: EACCES))
+        XCTAssertEqual(names(), [placed.lastPathComponent])
+    }
+
     // MARK: Interrupted writes
 
     func testATruncatedStillIsNeitherAHitNorASeed() async throws {

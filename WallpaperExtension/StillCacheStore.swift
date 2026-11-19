@@ -120,7 +120,9 @@ actor StillCacheStore {
         guard let kept else { return Report(outcome: first ?? .failed, created: created) }
         let current = latest[wallpaper].map { (choiceHash: choiceHash, version: $0) }
         let budget = budget, onEvictionScan = onEvictionScan
-        refusals.withLock { _ in
+        refusals.withLock { refused in
+            // A seed can refuse the directory while this write runs.
+            guard refused[scope] == nil else { return }
             let files = Self.scan(dir)
             onEvictionScan()
             for stale in StillCache.evictions(files, current: current, keeping: kept, budget: budget) {
@@ -167,7 +169,7 @@ actor StillCacheStore {
         }
     }
 
-    private enum Published {
+    private enum Published: Sendable {
         case entry(StillCacheEntry)
         case refused(Int32)
         case failed
@@ -185,10 +187,15 @@ actor StillCacheStore {
             result = Self.permanentRefusals.contains(error) ? .refused(error) : .failed
         } else if case let error = tag(temp, Self.usedAttribute, String(now)), error != 0 {
             result = Self.permanentRefusals.contains(error) ? .refused(error) : .failed
-        } else if rename(temp.path, dir.appendingPathComponent(entry.fileName).path) != 0 {
-            result = .failed
         } else {
-            return .entry(entry)
+            // Renamed under the lock: a seed may have found the directory
+            // refused since this write last checked.
+            let scope = dir.standardizedFileURL.path, final = dir.appendingPathComponent(entry.fileName).path
+            result = refusals.withLock { refused -> Published in
+                if let errno = refused[scope] { return .refused(errno) }
+                return rename(temp.path, final) == 0 ? .entry(entry) : .failed
+            }
+            if case .entry = result { return result }
         }
         try? FileManager.default.removeItem(at: temp)
         return result
