@@ -1,3 +1,4 @@
+import Darwin
 import os
 import XCTest
 
@@ -35,9 +36,9 @@ final class StillCacheStoreTests: XCTestCase {
         let entry = StillCacheEntry(key: StillCacheKey(choiceHash: hash, width: size.width, height: size.height), written: 1)
         let url = dir.appendingPathComponent(entry.fileName)
         try XCTUnwrap(data).write(to: url)
-        if let version { XCTAssertTrue(setStillAttribute(url, StillCacheStore.versionAttribute, version)) }
+        if let version { XCTAssertEqual(setStillAttribute(url, StillCacheStore.versionAttribute, version), 0) }
         let used = Date().addingTimeInterval(-usedAgo).timeIntervalSinceReferenceDate
-        XCTAssertTrue(setStillAttribute(url, StillCacheStore.usedAttribute, String(used)))
+        XCTAssertEqual(setStillAttribute(url, StillCacheStore.usedAttribute, String(used)), 0)
         return url
     }
 
@@ -50,7 +51,8 @@ final class StillCacheStoreTests: XCTestCase {
     func testAnOlderVideoFinishingLastLeavesTheNewerOne() async throws {
         // V1 starts decoding, the wallpaper's video changes, V2 is written,
         // then V1's decode returns. V1 must not replace or evict V2.
-        let store = StillCacheStore()
+        // V2 alone is over budget, so only its own write may keep it.
+        let store = StillCacheStore(budget: 10)
         let gate = StillTestGate()
         let dir = dir!, hashA = hashA, qhd = qhd
         let v1 = Task {
@@ -66,9 +68,91 @@ final class StillCacheStoreTests: XCTestCase {
         let late = await v1.value
         XCTAssertEqual(late.outcome, .superseded)
         XCTAssertEqual(StillCacheStore.scan(dir).map(\.version), ["v2"])
-        let seed = try XCTUnwrap(StillCacheStore.load(in: dir, choiceHash: hashA, version: "v2", size: qhd))
+        let seed = try XCTUnwrap(StillCacheStore().load(in: dir, choiceHash: hashA, version: "v2", size: qhd))
         XCTAssertEqual(try stillTestPixel(seed, x: 0, y: 0), Self.blue)
-        XCTAssertNil(StillCacheStore.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        XCTAssertNil(StillCacheStore().load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+    }
+
+    func testDifferentCacheDirectoriesDontSupersedeEachOther() async throws {
+        let store = StillCacheStore()
+        let gate = StillTestGate()
+        let other = dir.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        let dir = dir!, hashA = hashA, qhd = qhd
+        let first = Task {
+            await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd) {
+                await gate.pass()
+                return Self.bmp(Self.red)
+            }
+        }
+        guard await gate.reached() else { gate.open(); return XCTFail("the first write never started decoding") }
+        let second = await store.write(in: other, choiceHash: hashA, version: "v2", size: qhd) { Self.bmp(Self.blue) }
+        let joined = await store.write(in: other, choiceHash: hashA, version: "v1", size: qhd) { Self.bmp(Self.red) }
+        gate.open()
+        XCTAssertEqual(second.outcome, .created)
+        XCTAssertEqual(joined.outcome, .created)
+        let late = await first.value
+        XCTAssertEqual(late.outcome, .created)
+    }
+
+    // MARK: Seeds and eviction
+
+    func testASeedIsNotDeletedByAnEvictionThatScannedBeforeIt() throws {
+        // Eviction picks the least recently used from its scan. A seed that
+        // lands between that scan and the delete must either wait for the
+        // delete or keep its file.
+        let seeded = try place(hashA, qhd, version: "v1", usedAgo: 300)
+        try place(hashB, qhd, version: "v1", usedAgo: 100)
+        let dir = dir!, hashA = hashA, qhd = qhd
+        let seed = OSAllocatedUnfairLock<Bool?>(initialState: nil)
+        let loaded = expectation(description: "seed load returned")
+        let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
+        let store = StillCacheStore(budget: 2 * Self.fileBytes, onEvictionScan: {
+            DispatchQueue.global().async {
+                let image = shared.withLock { $0 }?.load(in: dir, choiceHash: hashA, version: "v1", size: qhd)
+                seed.withLock { $0 = image != nil }
+                loaded.fulfill()
+            }
+            // The seed runs now, unless it has to wait for this eviction.
+            Thread.sleep(forTimeInterval: 0.3)
+        })
+        shared.withLock { $0 = store }
+        let done = expectation(description: "write returned")
+        let hashB = hashB, fourK = fourK
+        Task {
+            _ = await store.write(in: dir, choiceHash: hashB, version: "v1", size: fourK) { Self.bmp(Self.green) }
+            done.fulfill()
+        }
+        wait(for: [done, loaded], timeout: 10)
+        if seed.withLock({ $0 }) == true {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: seeded.path), "a seed was returned for a file the eviction then deleted")
+        }
+    }
+
+    // MARK: Failed writes
+
+    func testAFailedWriteRemovesNothing() async throws {
+        let legacy = try place(hashA, fourK, version: nil, usedAgo: 10)
+        let report = await StillCacheStore(budget: 0).write(in: dir, choiceHash: hashA, version: "v1", size: qhd) { nil }
+        XCTAssertEqual(report.outcome, .failed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path))
+    }
+
+    func testADirectoryThatRefusesAttributesIsBypassed() async throws {
+        let legacy = try place(hashA, qhd, version: nil, usedAgo: 10)
+        let decodes = OSAllocatedUnfairLock(initialState: 0)
+        let encode: @Sendable () async -> Data? = {
+            decodes.withLock { $0 += 1 }
+            return Self.bmp(Self.blue)
+        }
+        let store = StillCacheStore(tag: { _, _, _ in EPERM })
+        let first = await store.write(in: dir, choiceHash: hashA, version: "v1", size: qhd, encode: encode)
+        let again = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK, encode: encode)
+        XCTAssertEqual(first.outcome, .refused(errno: EPERM))
+        XCTAssertEqual(again.outcome, .refused(errno: EPERM))
+        XCTAssertEqual(decodes.withLock { $0 }, 1, "a refused directory must not be decoded for again")
+        XCTAssertNil(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        XCTAssertEqual(names(), [legacy.lastPathComponent])
     }
 
     // MARK: Interrupted writes
@@ -76,7 +160,7 @@ final class StillCacheStoreTests: XCTestCase {
     func testATruncatedStillIsNeitherAHitNorASeed() async throws {
         try place(hashA, fourK, version: "v1", usedAgo: 10, data: Self.bmp(Self.blue))
         let partial = try place(hashA, qhd, version: "v1", usedAgo: 0, data: Self.bmp(Self.red)?.prefix(70))
-        let seed = try XCTUnwrap(StillCacheStore.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        let seed = try XCTUnwrap(StillCacheStore().load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
         XCTAssertEqual(seed.width, 4)
         XCTAssertEqual(try stillTestPixel(seed, x: 0, y: 0), Self.blue)
 
@@ -116,7 +200,7 @@ final class StillCacheStoreTests: XCTestCase {
     func testALoadCountsAsAUse() async throws {
         let read = try place(hashA, qhd, version: "v1", usedAgo: 300)
         let unread = try place(hashB, qhd, version: "v1", usedAgo: 100)
-        XCTAssertNotNil(StillCacheStore.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        XCTAssertNotNil(StillCacheStore().load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
         let store = StillCacheStore(budget: 2 * Self.fileBytes)
         _ = await store.write(in: dir, choiceHash: hashB, version: "v1", size: fourK) { Self.bmp(Self.green) }
         XCTAssertTrue(names().contains(read.lastPathComponent))

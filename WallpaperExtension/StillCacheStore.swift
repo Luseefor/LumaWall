@@ -2,6 +2,7 @@ import CoreGraphics
 import Darwin
 import Foundation
 import ImageIO
+import os
 
 /// The still cache in WallpaperAgent's cache directory. File names keep the
 /// layout the extension has always written; the video a still came from and
@@ -20,6 +21,8 @@ actor StillCacheStore {
         /// A newer write for this wallpaper asked for another video while
         /// this one decoded; its result was dropped.
         case superseded
+        /// The directory won't take the extended attributes a still needs.
+        case refused(errno: Int32)
         case failed
     }
 
@@ -35,26 +38,46 @@ actor StillCacheStore {
     private static let tempPrefix = ".lumawall-"
     private static let tempSuffix = ".tmp"
 
+    /// setxattr errors that won't go away for a directory.
+    private static let permanentRefusals: Set<Int32> = [EPERM, EACCES, ENOTSUP]
+
     private let budget: Int
+    private let tag: @Sendable (URL, String, String) -> Int32
+    /// Test seam: runs between eviction's scan and its deletes.
+    private let onEvictionScan: @Sendable () -> Void
+    /// Directories that refused the attributes, by path, with the errno.
+    /// The lock also orders a seed's last-use touch against eviction's
+    /// scan-then-delete, since seeds run outside the actor.
+    private let refusals = OSAllocatedUnfairLock<[String: Int32]>(initialState: [:])
     private var flights = StillCacheFlights()
-    /// The video each wallpaper's most recent write asked for.
+    /// The video each wallpaper's most recent write asked for, keyed by
+    /// directory and choice.
     private var latest: [String: String] = [:]
     /// Directories already cleared of temp files a crash left behind.
     private var recovered: Set<String> = []
 
-    init(budget: Int = StillCache.byteBudget) {
+    init(
+        budget: Int = StillCache.byteBudget,
+        tag: @escaping @Sendable (URL, String, String) -> Int32 = setStillAttribute,
+        onEvictionScan: @escaping @Sendable () -> Void = {},
+    ) {
         self.budget = budget
+        self.tag = tag
+        self.onEvictionScan = onEvictionScan
     }
 
     /// Make sure `dir` holds this video's still at `size`. A copy of another
     /// size of the same video is used when there is one; otherwise `encode`
-    /// is called, at most once per call, for the BMP bytes. Every call
-    /// finishes by removing other videos of this wallpaper and trimming the
-    /// directory to the budget.
+    /// is called, at most once per call, for the BMP bytes. A call that hit
+    /// or wrote a still then removes other videos of this wallpaper and
+    /// trims the directory to the budget; any other outcome deletes nothing.
     func write(in dir: URL, choiceHash: String, version: String, size: StillSize, encode: @escaping @Sendable () async -> Data?) async -> Report {
-        recover(dir)
-        latest[choiceHash] = version
-        let group = "\(choiceHash)-\(version)"
+        let scope = dir.standardizedFileURL.path
+        if let refused = refusals.withLock({ $0[scope] }) { return Report(outcome: .refused(errno: refused), created: 0) }
+        recover(dir, scope: scope)
+        let wallpaper = "\(scope)\n\(choiceHash)"
+        latest[wallpaper] = version
+        let group = "\(wallpaper)\n\(version)"
         guard flights.join(group, size: size) else { return Report(outcome: .joined, created: 0) }
 
         var encoded: Data??
@@ -64,94 +87,136 @@ actor StillCacheStore {
         var next: StillSize? = size
         while let current = next {
             let key = StillCacheKey(choiceHash: choiceHash, width: current.width, height: current.height)
-            var result = settle(key, version: version, in: dir)
+            var result = settle(key, version: version, wallpaper: wallpaper, in: dir)
             if result == nil {
                 if encoded == nil { encoded = .some(await encode()) }
-                result = settle(key, version: version, in: dir) ?? publishEncoded(encoded ?? nil, key: key, version: version, in: dir)
+                result = settle(key, version: version, wallpaper: wallpaper, in: dir)
+                    ?? publishEncoded(encoded ?? nil, key: key, version: version, in: dir)
             }
             let (outcome, entry) = result ?? (.failed, nil)
             first = first ?? outcome
-            if outcome == .created { created += 1 }
-            if let entry { kept = entry }
-            if outcome == .superseded {
+            switch outcome {
+            case .created: created += 1
+            case .superseded, .refused:
+                // A newer video owns this wallpaper's entries, or nothing can
+                // be tagged here: leave the directory alone.
+                if case let .refused(errno) = outcome { refusals.withLock { $0[scope] = errno } }
                 while flights.next(group) != nil {}
-                break
+                return Report(outcome: first ?? outcome, created: created)
+            default: break
             }
+            if let entry { kept = entry }
             next = flights.next(group)
         }
 
-        let current = latest[choiceHash].map { (choiceHash: choiceHash, version: $0) }
-        for stale in StillCache.evictions(Self.scan(dir), current: current, keeping: kept, budget: budget) {
-            try? FileManager.default.removeItem(at: dir.appendingPathComponent(stale.fileName))
+        guard let kept else { return Report(outcome: first ?? .failed, created: created) }
+        let current = latest[wallpaper].map { (choiceHash: choiceHash, version: $0) }
+        let budget = budget, onEvictionScan = onEvictionScan
+        refusals.withLock { _ in
+            let files = Self.scan(dir)
+            onEvictionScan()
+            for stale in StillCache.evictions(files, current: current, keeping: kept, budget: budget) {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(stale.fileName))
+            }
         }
         return Report(outcome: first ?? .failed, created: created)
     }
 
     /// The outcome when no decode is needed, or nil when it is.
-    private func settle(_ key: StillCacheKey, version: String, in dir: URL) -> (Outcome, StillCacheEntry?)? {
-        guard latest[key.choiceHash] == version else { return (.superseded, nil) }
+    private func settle(_ key: StillCacheKey, version: String, wallpaper: String, in dir: URL) -> (Outcome, StillCacheEntry?)? {
+        guard latest[wallpaper] == version else { return (.superseded, nil) }
         switch StillCache.source(for: key, version: version, in: Self.scan(dir)) {
         case let .existing(entry):
-            Self.markUsed(dir.appendingPathComponent(entry.fileName))
+            _ = tag(dir.appendingPathComponent(entry.fileName), Self.usedAttribute, Self.nowString())
             return (.hit, entry)
         case let .copy(from: sibling):
             let source = dir.appendingPathComponent(sibling.fileName)
-            // A failed copy falls through to a decode.
-            return publish(key: key, version: version, in: dir) { try FileManager.default.copyItem(at: source, to: $0) }
-                .map { (.created, $0) }
+            switch publish(key: key, version: version, in: dir, fill: { try FileManager.default.copyItem(at: source, to: $0) }) {
+            case let .entry(entry): return (.created, entry)
+            case let .refused(errno): return (.refused(errno: errno), nil)
+            case .failed: return nil // A failed copy falls through to a decode.
+            }
         case .decode:
             return nil
         }
     }
 
     private func publishEncoded(_ data: Data?, key: StillCacheKey, version: String, in dir: URL) -> (Outcome, StillCacheEntry?) {
-        guard let data, let entry = publish(key: key, version: version, in: dir, fill: { try data.write(to: $0) }) else {
-            return (.failed, nil)
+        guard let data else { return (.failed, nil) }
+        switch publish(key: key, version: version, in: dir, fill: { try data.write(to: $0) }) {
+        case let .entry(entry): return (.created, entry)
+        case let .refused(errno): return (.refused(errno: errno), nil)
+        case .failed: return (.failed, nil)
         }
-        return (.created, entry)
+    }
+
+    private enum Published {
+        case entry(StillCacheEntry)
+        case refused(Int32)
+        case failed
     }
 
     /// Fill a temp file, tag it, and rename it to the entry's name.
-    private func publish(key: StillCacheKey, version: String, in dir: URL, fill: (URL) throws -> Void) -> StillCacheEntry? {
+    private func publish(key: StillCacheKey, version: String, in dir: URL, fill: (URL) throws -> Void) -> Published {
         let temp = dir.appendingPathComponent("\(Self.tempPrefix)\(UUID().uuidString)\(Self.tempSuffix)")
         let now = Date().timeIntervalSinceReferenceDate
         let entry = StillCacheEntry(key: key, written: now.bitPattern)
-        do {
-            try fill(temp)
-            guard setStillAttribute(temp, Self.versionAttribute, version),
-                  setStillAttribute(temp, Self.usedAttribute, String(now)),
-                  rename(temp.path, dir.appendingPathComponent(entry.fileName).path) == 0
-            else { throw CocoaError(.fileWriteUnknown) }
-            return entry
-        } catch {
-            try? FileManager.default.removeItem(at: temp)
-            return nil
+        let result: Published
+        if (try? fill(temp)) == nil {
+            result = .failed
+        } else if case let error = tag(temp, Self.versionAttribute, version), error != 0 {
+            result = Self.permanentRefusals.contains(error) ? .refused(error) : .failed
+        } else if tag(temp, Self.usedAttribute, String(now)) != 0 {
+            result = .failed
+        } else if rename(temp.path, dir.appendingPathComponent(entry.fileName).path) != 0 {
+            result = .failed
+        } else {
+            return .entry(entry)
         }
+        try? FileManager.default.removeItem(at: temp)
+        return result
     }
 
-    private func recover(_ dir: URL) {
-        guard recovered.insert(dir.standardizedFileURL.path).inserted,
+    private func recover(_ dir: URL, scope: String) {
+        guard recovered.insert(scope).inserted,
               let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
         for name in names where name.hasPrefix(Self.tempPrefix) && name.hasSuffix(Self.tempSuffix) {
             try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
         }
     }
 
-    /// This video's still to seed a renderer with, decoded, or nil. Skips
-    /// any candidate that fails to decode. Runs outside the actor: the
-    /// acquire path can't wait on a write, and a rename never exposes a
-    /// partial file.
-    nonisolated static func load(in dir: URL, choiceHash: String, version: String, size: StillSize) -> CGImage? {
-        for file in StillCache.candidates(scan(dir), choiceHash: choiceHash, version: version, size: size) {
-            let url = dir.appendingPathComponent(file.entry.fileName)
+    /// This video's still to seed a renderer with, decoded, or nil. A nil
+    /// `choiceHash` takes a still of this video cached under any choice.
+    /// Skips any candidate that fails to decode. Runs outside the actor (the
+    /// acquire path can't wait on a write; a rename never exposes a partial
+    /// file), but picks and touches each candidate under the lock eviction
+    /// holds, so an eviction can't delete it on a scan from before the touch.
+    nonisolated func load(in dir: URL, choiceHash: String?, version: String, size: StillSize) -> CGImage? {
+        let scope = dir.standardizedFileURL.path
+        var tried: Set<StillCacheEntry> = []
+        while true {
+            let excluded = tried, tag = tag
+            let pick: StillCacheEntry? = refusals.withLock { refused in
+                guard refused[scope] == nil,
+                      let file = StillCache.candidates(Self.scan(dir), choiceHash: choiceHash, version: version, size: size)
+                          .first(where: { !excluded.contains($0.entry) }) else { return nil }
+                _ = tag(dir.appendingPathComponent(file.entry.fileName), Self.usedAttribute, Self.nowString())
+                return file.entry
+            }
+            guard let pick else { return nil }
+            tried.insert(pick)
             // Decode now: an eviction may delete the file once this returns.
+            let url = dir.appendingPathComponent(pick.fileName)
             let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  let image = CGImageSourceCreateImageAtIndex(source, 0, options) else { continue }
-            markUsed(url)
-            return image
+            if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+               let image = CGImageSourceCreateImageAtIndex(source, 0, options) {
+                return image
+            }
         }
-        return nil
+    }
+
+    private nonisolated static func nowString() -> String {
+        String(Date().timeIntervalSinceReferenceDate)
     }
 
     /// The stills in `dir` with what eviction and lookup need to know.
@@ -178,11 +243,6 @@ actor StillCacheStore {
         defer { try? handle.close() }
         return try? handle.read(upToCount: StillCache.bmpHeaderSize)
     }
-
-    /// Eviction removes the least recently used first; a hit or a seed is a use.
-    private nonisolated static func markUsed(_ url: URL) {
-        setStillAttribute(url, usedAttribute, String(Date().timeIntervalSinceReferenceDate))
-    }
 }
 
 func stillAttribute(_ url: URL, _ name: String) -> String? {
@@ -196,11 +256,12 @@ func stillAttribute(_ url: URL, _ name: String) -> String? {
     }
 }
 
+/// 0, or the errno `setxattr` failed with.
 @discardableResult
-func setStillAttribute(_ url: URL, _ name: String, _ value: String) -> Bool {
-    url.withUnsafeFileSystemRepresentation { path -> Bool in
-        guard let path else { return false }
+func setStillAttribute(_ url: URL, _ name: String, _ value: String) -> Int32 {
+    url.withUnsafeFileSystemRepresentation { path -> Int32 in
+        guard let path else { return EINVAL }
         let bytes = Array(value.utf8)
-        return setxattr(path, name, bytes, bytes.count, 0, 0) == 0
+        return setxattr(path, name, bytes, bytes.count, 0, 0) == 0 ? 0 : errno
     }
 }

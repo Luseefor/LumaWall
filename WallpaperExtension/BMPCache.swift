@@ -32,7 +32,7 @@ func loadCachedSnapshotImage(forChoice videoID: String?, videoURL: URL, pixelWid
     let gained = cacheDir.startAccessingSecurityScopedResource()
     defer { if gained { cacheDir.stopAccessingSecurityScopedResource() } }
 
-    let image = StillCacheStore.load(
+    let image = stillStore.load(
         in: cacheDir,
         choiceHash: StillCache.choiceHash(stillIdentifier(videoID, videoURL)),
         version: stillVersion(of: videoURL),

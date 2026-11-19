@@ -119,6 +119,13 @@ final class StillCacheTests: XCTestCase {
         XCTAssertTrue(StillCache.candidates(files, choiceHash: hashA, version: "v1", size: qhd).isEmpty)
     }
 
+    func testAnyChoiceMatchesTheVideoItself() {
+        // The give-up still only knows the file; a version names one file.
+        let viaShuffle = file(hashB, fourK)
+        let files = [viaShuffle, file(hashA, qhd, version: "v0")]
+        XCTAssertEqual(StillCache.candidates(files, choiceHash: nil, version: "v1", size: qhd).map(\.entry), [viaShuffle.entry])
+    }
+
     // MARK: Encoding
 
     func testEncodesATopDownPaddedBGRBitmap() throws {

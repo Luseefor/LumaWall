@@ -48,8 +48,9 @@ struct StillCacheFile: Sendable {
     /// The BMP header's file size matches the bytes on disk.
     let isComplete: Bool
 
-    func holds(_ choiceHash: String, version: String) -> Bool {
-        isComplete && entry.key.choiceHash == choiceHash && self.version == version
+    /// A nil `choiceHash` matches any wallpaper: a version names one file.
+    func holds(_ choiceHash: String?, version: String) -> Bool {
+        isComplete && (choiceHash == nil || entry.key.choiceHash == choiceHash) && self.version == version
     }
 }
 
@@ -93,7 +94,7 @@ enum StillCache {
 
     /// Stills of this video that can seed a renderer, best first: this size,
     /// then other sizes (same pixels). Never another wallpaper or video.
-    static func candidates(_ files: [StillCacheFile], choiceHash: String, version: String, size: StillSize) -> [StillCacheFile] {
+    static func candidates(_ files: [StillCacheFile], choiceHash: String?, version: String, size: StillSize) -> [StillCacheFile] {
         files.filter { $0.holds(choiceHash, version: version) }.sorted { a, b in
             let aExact = a.entry.key.width == size.width && a.entry.key.height == size.height
             let bExact = b.entry.key.width == size.width && b.entry.key.height == size.height
