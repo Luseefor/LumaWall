@@ -45,6 +45,8 @@ actor StillCacheStore {
     private let tag: @Sendable (URL, String, String) -> Int32
     /// Test seam: runs between eviction's scan and its deletes.
     private let onEvictionScan: @Sendable () -> Void
+    /// Test seam: runs after a seed picks its file, before it decodes.
+    private let onSeedPicked: @Sendable () -> Void
     /// Directories that refused the attributes, by path, with the errno.
     /// The lock also orders a seed's last-use touch against eviction's
     /// scan-then-delete, since seeds run outside the actor.
@@ -60,10 +62,12 @@ actor StillCacheStore {
         budget: Int = StillCache.byteBudget,
         tag: @escaping @Sendable (URL, String, String) -> Int32 = setStillAttribute,
         onEvictionScan: @escaping @Sendable () -> Void = {},
+        onSeedPicked: @escaping @Sendable () -> Void = {},
     ) {
         self.budget = budget
         self.tag = tag
         self.onEvictionScan = onEvictionScan
+        self.onSeedPicked = onSeedPicked
     }
 
     /// Make sure `dir` holds this video's still at `size`. A copy of another
@@ -193,26 +197,30 @@ actor StillCacheStore {
     /// `choiceHash` takes a still of this video cached under any choice.
     /// Skips any candidate that fails to decode. Runs outside the actor (the
     /// acquire path can't wait on a write; a rename never exposes a partial
-    /// file), but picks and touches each candidate under the lock eviction
-    /// holds, so an eviction can't delete it on a scan from before the touch.
+    /// file), but picks, touches and maps each candidate under the lock
+    /// eviction holds, so an eviction can't delete it on a scan from before
+    /// the touch, and a later delete can't take the bytes from the decode.
     nonisolated func load(in dir: URL, choiceHash: String?, version: String, size: StillSize) -> CGImage? {
         let scope = dir.standardizedFileURL.path
         var tried: Set<StillCacheEntry> = []
         while true {
             let excluded = tried, tag = tag
-            let pick: StillCacheEntry? = refusals.withLock { refused in
+            // Mapped under the lock: the mapping keeps the bytes readable if
+            // an eviction deletes the file before the decode below.
+            let pick: (entry: StillCacheEntry, bytes: Data?)? = refusals.withLock { refused in
                 guard refused[scope] == nil,
                       let file = StillCache.candidates(Self.scan(dir), choiceHash: choiceHash, version: version, size: size)
                           .first(where: { !excluded.contains($0.entry) }) else { return nil }
-                _ = tag(dir.appendingPathComponent(file.entry.fileName), Self.usedAttribute, Self.nowString())
-                return file.entry
+                let url = dir.appendingPathComponent(file.entry.fileName)
+                _ = tag(url, Self.usedAttribute, Self.nowString())
+                return (file.entry, try? Data(contentsOf: url, options: .alwaysMapped))
             }
             guard let pick else { return nil }
-            tried.insert(pick)
-            // Decode now: an eviction may delete the file once this returns.
-            let url = dir.appendingPathComponent(pick.fileName)
+            tried.insert(pick.entry)
+            onSeedPicked()
             let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
-            if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            if let bytes = pick.bytes,
+               let source = CGImageSourceCreateWithData(bytes as CFData, nil),
                let image = CGImageSourceCreateImageAtIndex(source, 0, options) {
                 return image
             }

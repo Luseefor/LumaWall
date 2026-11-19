@@ -97,36 +97,61 @@ final class StillCacheStoreTests: XCTestCase {
 
     // MARK: Seeds and eviction
 
-    func testASeedIsNotDeletedByAnEvictionThatScannedBeforeIt() throws {
-        // Eviction picks the least recently used from its scan. A seed that
-        // lands between that scan and the delete must either wait for the
-        // delete or keep its file.
+    func testASeedWaitsForAnEvictionThatHasScanned() throws {
+        // Eviction picks the least recently used from its scan. A seed
+        // started between that scan and the delete must wait for the
+        // delete, not touch a file the eviction already chose.
         let seeded = try place(hashA, qhd, version: "v1", usedAgo: 300)
         try place(hashB, qhd, version: "v1", usedAgo: 100)
         let dir = dir!, hashA = hashA, qhd = qhd
-        let seed = OSAllocatedUnfairLock<Bool?>(initialState: nil)
-        let loaded = expectation(description: "seed load returned")
         let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
+        let seedReturned = DispatchSemaphore(value: 0)
+        let seedFound = OSAllocatedUnfairLock<Bool?>(initialState: nil)
+        let seedWaited = OSAllocatedUnfairLock<Bool?>(initialState: nil)
+        let seedDone = expectation(description: "seed returned")
         let store = StillCacheStore(budget: 2 * Self.fileBytes, onEvictionScan: {
             DispatchQueue.global().async {
                 let image = shared.withLock { $0 }?.load(in: dir, choiceHash: hashA, version: "v1", size: qhd)
-                seed.withLock { $0 = image != nil }
-                loaded.fulfill()
+                seedFound.withLock { $0 = image != nil }
+                seedReturned.signal()
+                seedDone.fulfill()
             }
-            // The seed runs now, unless it has to wait for this eviction.
-            Thread.sleep(forTimeInterval: 0.3)
+            // An unblocked load of an 86-byte file returns well within this.
+            let waited = seedReturned.wait(timeout: .now() + 1) == .timedOut
+            seedWaited.withLock { $0 = waited }
         })
         shared.withLock { $0 = store }
-        let done = expectation(description: "write returned")
+        let writeDone = expectation(description: "write returned")
         let hashB = hashB, fourK = fourK
         Task {
             _ = await store.write(in: dir, choiceHash: hashB, version: "v1", size: fourK) { Self.bmp(Self.green) }
-            done.fulfill()
+            writeDone.fulfill()
         }
-        wait(for: [done, loaded], timeout: 10)
-        if seed.withLock({ $0 }) == true {
-            XCTAssertTrue(FileManager.default.fileExists(atPath: seeded.path), "a seed was returned for a file the eviction then deleted")
-        }
+        wait(for: [writeDone, seedDone], timeout: 10)
+        XCTAssertEqual(seedWaited.withLock { $0 }, true, "the seed ran while eviction held its scan")
+        XCTAssertEqual(seedFound.withLock { $0 }, false, "the seed's only candidate was evicted before it could pick it")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: seeded.path))
+    }
+
+    func testASeedOutlivesAnEvictionAfterItsPick() throws {
+        // A newer video's write removes the picked still before the seed
+        // decodes it; the seed must still decode what it picked.
+        try place(hashA, qhd, version: "v1", usedAgo: 10, data: Self.bmp(Self.blue))
+        let dir = dir!, hashA = hashA, qhd = qhd
+        let shared = OSAllocatedUnfairLock<StillCacheStore?>(initialState: nil)
+        let store = StillCacheStore(onSeedPicked: {
+            guard let store = shared.withLock({ $0 }) else { return }
+            let written = DispatchSemaphore(value: 0)
+            Task {
+                _ = await store.write(in: dir, choiceHash: hashA, version: "v2", size: qhd) { Self.bmp(Self.red) }
+                written.signal()
+            }
+            written.wait()
+        })
+        shared.withLock { $0 = store }
+        let image = try XCTUnwrap(store.load(in: dir, choiceHash: hashA, version: "v1", size: qhd))
+        XCTAssertEqual(try stillTestPixel(image, x: 0, y: 0), Self.blue)
+        XCTAssertEqual(StillCacheStore.scan(dir).map(\.version), ["v2"])
     }
 
     // MARK: Failed writes
