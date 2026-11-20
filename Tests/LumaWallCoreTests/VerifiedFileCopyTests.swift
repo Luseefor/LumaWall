@@ -136,6 +136,12 @@ struct VerifiedFileCopyTests {
         }
         #expect(asked?.standardizedFileURL == dir.standardizedFileURL)
         #expect(!fm.fileExists(atPath: dest.path))
+
+        // Free space that can't be read doesn't count as enough.
+        #expect(throws: VerifiedFileCopy.CopyError.notEnoughSpace) {
+            try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: TrustedDirectory(url: dir), to: dest) { _ in nil }
+        }
+        #expect(!fm.fileExists(atPath: dest.path))
     }
 
     @Test func measuresFreeSpaceOnTheDestinationVolume() throws {

@@ -82,7 +82,8 @@ public enum VerifiedFileCopy {
     /// That process can also keep writing to the file, so the copy is held
     /// to the size the file had when it was opened: it doesn't start unless
     /// `availableSpace` reports room for that many bytes on the
-    /// destination's folder with `keepingFree` bytes to spare, and it fails
+    /// destination's folder with `keepingFree` bytes to spare (and not when
+    /// it reports nothing), and it fails
     /// with `sourceChangedSize`, deleting the partial copy, when the file
     /// ends up any other size. The floor matters for a sparse file, which
     /// costs its writer nothing but costs the copy its full size.
@@ -96,8 +97,9 @@ public enum VerifiedFileCopy {
         var info = stat()
         guard fstat(reader.fileDescriptor, &info) == 0 else { throw POSIXError.current }
         let expected = Int64(info.st_size)
-        // Subtracting can't overflow: both are at least zero.
-        if let free = availableSpace(destination.deletingLastPathComponent()), free - max(floor, 0) < expected {
+        // Free space that can't be read isn't taken as enough. Subtracting
+        // can't overflow: both are at least zero.
+        guard let free = availableSpace(destination.deletingLastPathComponent()), free - max(floor, 0) >= expected else {
             throw CopyError.notEnoughSpace
         }
         return try copy(from: reader, to: destination, limit: expected)
