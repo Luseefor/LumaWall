@@ -257,6 +257,14 @@ final class NativeWallpaperEngine {
                 failed.insert(assignment.displayID)
             }
         }
+        // A wallpaper removed while the loop above waited on another deploy
+        // must not be written back. Nothing from here to the write suspends,
+        // so a removal can't land in between.
+        let batch = Self.withoutRemoved(map, removed: NativeWallpaperDeployment.removedEntries)
+        map = batch.map
+        for display in connected where batch.dropped.contains(display.cgDisplayID) {
+            active.removeValue(forKey: display.displayID)
+        }
         guard !map.isEmpty else {
             nativeHostLog.info("restore: nothing to assign")
             return failed
@@ -300,6 +308,16 @@ final class NativeWallpaperEngine {
             for displayID in failed { active.removeValue(forKey: displayID) }
         }
         return failed
+    }
+
+    /// `map` without the entries in `removed`, and the displays they were
+    /// for. A dropped display isn't a failure to hand to the overlay: its
+    /// wallpaper is gone.
+    nonisolated static func withoutRemoved(
+        _ map: [UInt32: NativeWallpaperDeployment.EntryInfo], removed: Set<String>
+    ) -> (map: [UInt32: NativeWallpaperDeployment.EntryInfo], dropped: Set<UInt32>) {
+        let kept = map.filter { !removed.contains($0.value.id) }
+        return (kept, Set(map.keys).subtracting(kept.keys))
     }
 
     /// True when the overlay engine owns this assignment, so a native restore
