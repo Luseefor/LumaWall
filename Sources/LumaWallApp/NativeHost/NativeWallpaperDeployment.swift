@@ -223,6 +223,10 @@ enum NativeWallpaperDeployment {
     @MainActor
     private static var deploymentTasks: [String: Task<EntryInfo, Error>] = [:]
 
+    /// Entries with a deploy running now.
+    @MainActor
+    static var deployingEntryIDs: Set<String> { Set(deploymentTasks.keys) }
+
     /// Returns once no deploy of `entryID` is running; its result is ignored.
     @MainActor
     static func waitForDeployment(of entryID: String) async {
