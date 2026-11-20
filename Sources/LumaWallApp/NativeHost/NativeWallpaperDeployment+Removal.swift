@@ -68,61 +68,80 @@ extension NativeWallpaperDeployment {
     }
 
     /// Entries removed from the library whose deployed folder may still be
-    /// on disk. `AppModel.remove` adds one before the library row goes and
-    /// drops it once `removeDeployment` succeeds, so a quit or a failed
-    /// delete in between is finished at the next launch.
+    /// on disk, so a quit or a failed delete is finished at the next launch.
+    /// `AppModel.remove` records one before it removes the library row,
+    /// marks it once the row is gone, and drops it once `removeDeployment`
+    /// succeeds.
     struct PendingRemovals: Sendable {
+        enum Stage: String, Codable, Sendable {
+            /// The library row may or may not be gone.
+            case requested
+            /// The library row is gone.
+            case rowRemoved
+        }
+
         let fileURL: URL?
 
         private static let lock = OSAllocatedUnfairLock()
 
-        var ids: Set<String> { Self.lock.withLockUnchecked { read() } }
+        var stages: [String: Stage] { Self.lock.withLockUnchecked { read() } }
 
-        func add(_ id: String) { edit { $0.insert(id) } }
+        /// Records `id` as requested. Throws when the record can't be
+        /// written, and then the removal must not go ahead.
+        func add(_ id: String) throws { try edit { $0[id] = .requested } }
 
-        func remove(_ id: String) { edit { $0.remove(id) } }
+        func markRowRemoved(_ id: String) { try? edit { $0[id] = $0[id].map { _ in .rowRemoved } } }
 
-        private func edit(_ change: (inout Set<String>) -> Void) {
+        func remove(_ id: String) { try? edit { $0[id] = nil } }
+
+        private func edit(_ change: (inout [String: Stage]) -> Void) throws {
             guard let fileURL else { return }
-            Self.lock.withLockUnchecked {
-                var ids = read()
-                let before = ids
-                change(&ids)
-                guard ids != before else { return }
-                if ids.isEmpty {
+            try Self.lock.withLockUnchecked {
+                var stages = read()
+                let before = stages
+                change(&stages)
+                guard stages != before else { return }
+                if stages.isEmpty {
                     try? FileManager.default.removeItem(at: fileURL)
-                } else if let data = try? JSONEncoder().encode(ids.sorted()) {
-                    try? data.write(to: fileURL, options: .atomic)
+                } else {
+                    try JSONEncoder().encode(stages).write(to: fileURL, options: .atomic)
                 }
             }
         }
 
-        private func read() -> Set<String> {
-            guard let fileURL, let data = try? Data(contentsOf: fileURL),
-                let ids = try? JSONDecoder().decode([String].self, from: data)
-            else { return [] }
-            return Set(ids)
+        private func read() -> [String: Stage] {
+            guard let fileURL, let data = try? Data(contentsOf: fileURL) else { return [:] }
+            return (try? JSONDecoder().decode([String: Stage].self, from: data)) ?? [:]
         }
     }
 
     static let pendingRemovals = PendingRemovals(
         fileURL: (try? StorePaths.appSupportBase())?.appendingPathComponent("pending-removals.json"))
 
-    /// Finishes the removals a previous run left pending. An ID the library
-    /// still lists was never removed (the app quit before the row went, or
-    /// the row stayed), so it's dropped without touching the deployment.
-    /// One whose delete fails again stays for the next launch.
+    /// Finishes the removals a previous run left pending.
+    ///
+    /// - An ID in `removedThisRun` belongs to a removal running now, which
+    ///   recorded it again; it's left alone.
+    /// - An ID the library still lists was never removed, so it's dropped
+    ///   without touching the deployment.
+    /// - A `requested` ID waits while the library is empty: that's also
+    ///   what an unreadable index looks like, so its row may still exist.
+    /// - Anything else is deleted. One whose delete fails again stays.
     @MainActor
     static func finishPendingRemovals(
         libraryIDs: Set<String>,
         pending: PendingRemovals = pendingRemovals,
+        removedThisRun: @MainActor () -> Set<String> = { removedEntries },
         remove: @MainActor (String) async throws -> Void = { try await removeDeployment(entryID: $0) }
     ) async {
-        for id in pending.ids.sorted() {
-            guard !libraryIDs.contains(id) else {
+        for (id, stage) in pending.stages.sorted(by: { $0.key < $1.key }) {
+            // Checked after each delete's suspension, not once up front.
+            guard !removedThisRun().contains(id) else { continue }
+            if libraryIDs.contains(id) {
                 pending.remove(id)
                 continue
             }
+            if stage == .requested && libraryIDs.isEmpty { continue }
             do {
                 try await remove(id)
                 pending.remove(id)

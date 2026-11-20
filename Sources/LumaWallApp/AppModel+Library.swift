@@ -169,12 +169,18 @@ extension AppModel {
 
     func remove(_ asset: WallpaperAsset) {
         let entryID = asset.id.rawValue.uuidString
+        // Kept until the deployed copy is gone, so a quit or a failed delete
+        // is finished at the next launch. Without the record, a quit after
+        // the row goes would leave the copy for good, so don't start.
+        do {
+            try NativeWallpaperDeployment.pendingRemovals.add(entryID)
+        } catch {
+            present("LumaWall", "\(asset.name) couldn't be removed. " + error.localizedDescription)
+            return
+        }
         // Before any suspension: an apply or restore running meanwhile must
         // not deploy or assign the wallpaper being removed.
         NativeWallpaperDeployment.markRemoved(entryID: entryID)
-        // Kept until the deployed copy is gone, so a quit or a failed delete
-        // is finished at the next launch.
-        NativeWallpaperDeployment.pendingRemovals.add(entryID)
         Task {
             for (displayID, wallpaperID) in activeByDisplay where wallpaperID == asset.id {
                 try? await engine.clear(displayID)
@@ -199,6 +205,7 @@ extension AppModel {
                 NativeWallpaperDeployment.pendingRemovals.remove(entryID)
                 return
             }
+            NativeWallpaperDeployment.pendingRemovals.markRowRemoved(entryID)
             do {
                 try await NativeWallpaperDeployment.removeDeployment(entryID: entryID)
                 NativeWallpaperDeployment.pendingRemovals.remove(entryID)

@@ -44,43 +44,89 @@ final class NativeWallpaperRemovalTests: XCTestCase {
 
     // MARK: Pending removals
 
-    func testPendingRemovalsSurviveARelaunch() {
+    private typealias Pending = NativeWallpaperDeployment.PendingRemovals
+
+    func testPendingRemovalsSurviveARelaunch() throws {
         let first = UUID().uuidString
         let second = UUID().uuidString
-        let before = NativeWallpaperDeployment.PendingRemovals(fileURL: pendingFile)
-        before.add(first)
-        before.add(second)
+        let before = Pending(fileURL: pendingFile)
+        try before.add(first)
+        try before.add(second)
+        before.markRowRemoved(second)
         before.remove(first)
-        XCTAssertEqual(NativeWallpaperDeployment.PendingRemovals(fileURL: pendingFile).ids, [second])
+        XCTAssertEqual(Pending(fileURL: pendingFile).stages, [second: .rowRemoved])
     }
 
     func testAnUnreadableListReadsAsEmpty() throws {
         try Data("not json".utf8).write(to: pendingFile)
-        XCTAssertEqual(NativeWallpaperDeployment.PendingRemovals(fileURL: pendingFile).ids, [])
+        XCTAssertEqual(Pending(fileURL: pendingFile).stages, [:])
+    }
+
+    func testARemovalThatCantBeRecordedIsRefused() {
+        // A folder where the list goes: the write fails, and the caller must
+        // not remove the library row.
+        let blocked = Pending(fileURL: root.appendingPathComponent("missing/pending-removals.json"))
+        XCTAssertThrowsError(try blocked.add(UUID().uuidString))
     }
 
     @MainActor
-    func testTheNextLaunchFinishesARemovalTheLibraryCompleted() async {
-        let gone = UUID().uuidString
+    func testTheNextLaunchFinishesWhatThePreviousRunLeft() async throws {
+        let rowGone = UUID().uuidString
+        let requested = UUID().uuidString
         let kept = UUID().uuidString
-        let pending = NativeWallpaperDeployment.PendingRemovals(fileURL: pendingFile)
-        pending.add(gone)
-        pending.add(kept)
+        let pending = Pending(fileURL: pendingFile)
+        for id in [rowGone, requested, kept] { try pending.add(id) }
+        pending.markRowRemoved(rowGone)
         var deleted: [String] = []
-        await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: [kept], pending: pending) { deleted.append($0) }
+        await NativeWallpaperDeployment.finishPendingRemovals(
+            libraryIDs: [kept, UUID().uuidString], pending: pending, removedThisRun: { [] }
+        ) { deleted.append($0) }
         // The library still lists `kept`, so its removal never happened.
-        XCTAssertEqual(deleted, [gone])
-        XCTAssertEqual(pending.ids, [])
+        XCTAssertEqual(Set(deleted), [rowGone, requested])
+        XCTAssertEqual(pending.stages, [:])
     }
 
     @MainActor
-    func testARemovalThatFailsAgainStaysPending() async {
+    func testAnEmptyLibraryOnlyFinishesRemovalsWhoseRowIsKnownGone() async throws {
+        // An empty library is also what an unreadable index looks like, so a
+        // removal that may not have reached the library waits.
+        let rowGone = UUID().uuidString
+        let requested = UUID().uuidString
+        let pending = Pending(fileURL: pendingFile)
+        for id in [rowGone, requested] { try pending.add(id) }
+        pending.markRowRemoved(rowGone)
+        var deleted: [String] = []
+        await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: [], pending: pending, removedThisRun: { [] }) {
+            deleted.append($0)
+        }
+        XCTAssertEqual(deleted, [rowGone])
+        XCTAssertEqual(pending.stages, [requested: .requested])
+    }
+
+    @MainActor
+    func testARemovalStartedThisRunIsLeftToIt() async throws {
+        // The library snapshot still lists it, but a removal running now
+        // recorded it again; clearing the record would lose its retry.
+        let id = UUID().uuidString
+        let pending = Pending(fileURL: pendingFile)
+        try pending.add(id)
+        var deleted: [String] = []
+        await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: [id], pending: pending, removedThisRun: { [id] }) {
+            deleted.append($0)
+        }
+        XCTAssertEqual(deleted, [])
+        XCTAssertEqual(pending.stages, [id: .requested])
+    }
+
+    @MainActor
+    func testARemovalThatFailsAgainStaysPending() async throws {
         let gone = UUID().uuidString
-        let pending = NativeWallpaperDeployment.PendingRemovals(fileURL: pendingFile)
-        pending.add(gone)
-        await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: [], pending: pending) { _ in
+        let pending = Pending(fileURL: pendingFile)
+        try pending.add(gone)
+        pending.markRowRemoved(gone)
+        await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: [], pending: pending, removedThisRun: { [] }) { _ in
             throw CocoaError(.fileWriteNoPermission)
         }
-        XCTAssertEqual(pending.ids, [gone])
+        XCTAssertEqual(pending.stages, [gone: .rowRemoved])
     }
 }
