@@ -286,6 +286,46 @@ struct LibraryStoreTests {
         #expect(await LibraryStore.reopenedHasAsset(root: root, id: id))
     }
 
+    @Test func removeCanBeRetriedWhenTheIndexWriteFails() async throws {
+        // The row left memory before the index write, so a failed write
+        // made a retry report missingAsset while Library.json kept the row.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        let id = WallpaperID()
+        let folder = await store.folder(for: id)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        try await store.install(LibraryStore.entryAsset(id: id, folder: folder, hash: "retry"))
+        let index = root.appendingPathComponent("Library.json")
+        try fm.removeItem(at: index)
+        try fm.createDirectory(at: index.appendingPathComponent("blocker"), withIntermediateDirectories: true)
+
+        await #expect(throws: (any Error).self) { try await store.remove(id: id) }
+        #expect(await store.asset(id: id) != nil)
+        try fm.removeItem(at: index)
+        try await store.remove(id: id)
+        #expect(await store.asset(id: id) == nil)
+        #expect(!fm.fileExists(atPath: folder.path))
+    }
+
+    @Test func removeAcceptsALowercaseFolderName() async throws {
+        // A URL spelling the UUID in lower case names the same folder on a
+        // case-insensitive volume; it was rejected and the files kept.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        let store = try LibraryStore(rootURL: root)
+        let id = WallpaperID()
+        let folder = await store.folder(for: id)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let lower = root.appendingPathComponent(id.rawValue.uuidString.lowercased(), isDirectory: true)
+        try await store.install(LibraryStore.entryAsset(id: id, folder: lower, hash: "lower"))
+
+        try await store.remove(id: id)
+        #expect(!fm.fileExists(atPath: folder.path))
+    }
+
     @Test func duplicateIDsInTheIndexAreTreatedAsCorrupt() async throws {
         // Dictionary(uniqueKeysWithValues:) trapped on a repeated ID.
         let fm = FileManager.default
