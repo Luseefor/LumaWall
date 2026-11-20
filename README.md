@@ -102,10 +102,10 @@ production artifact.
 
 ## Author
 
-[Luseefor](https://github.com/Luseefor).
+Rijan Ghimire ([Luseefor](https://github.com/Luseefor)).
 
-Third-party notices for Phosphene reference code live in `THIRD_PARTY_NOTICES.md`.
+Project attribution and third-party notices for Phosphene reference code live in `NOTICE` and `THIRD_PARTY_NOTICES.md`.
 
 ## License
 
-This project is licensed under the MIT License. See `LICENSE`.
+Licensed under the Apache License, Version 2.0. See `LICENSE` and `NOTICE`.
