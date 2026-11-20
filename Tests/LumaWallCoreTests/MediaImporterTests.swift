@@ -19,7 +19,7 @@ struct MediaImporterTests {
     @Test func inspectsSynthesizedSilentVideo() async throws {
         let source = try await makeVideo(withAudio: false)
         defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
-        let importer = try MediaImporter(store: store(at: source.deletingLastPathComponent()))
+        let importer = try MediaImporter(store: store(at: source.deletingLastPathComponent()), probe: LocalMediaProbe())
 
         let inspection = try await importer.inspect(source)
         #expect(abs(inspection.duration - 1.0) < 0.25)
@@ -39,7 +39,7 @@ struct MediaImporterTests {
         let dir = isolatedDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = try await makeVideo(withAudio: false, in: dir, name: "clip.mov")
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
 
         let outcome = try await importer.importVideo(source, preferredName: "  Demo  ")
         #expect(outcome.asset.name == "Demo")
@@ -53,7 +53,7 @@ struct MediaImporterTests {
         let dir = isolatedDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = try await makeVideo(withAudio: false, in: dir, name: "myclip.mov")
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
 
         let outcome = try await importer.importVideo(source, preferredName: "   ")
         #expect(outcome.asset.name == "myclip")
@@ -63,7 +63,7 @@ struct MediaImporterTests {
         let dir = isolatedDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = try await makeVideo(withAudio: true, in: dir, name: "talkie.mov")
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
 
         let outcome = try await importer.importVideo(source)
         #expect(outcome.removedAudio)
@@ -77,7 +77,7 @@ struct MediaImporterTests {
         let dir = isolatedDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = try await makeVideo(withAudio: false, in: dir, name: "once.mov")
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
         _ = try await importer.importVideo(source)
 
         await #expect(throws: LibraryStore.StoreError.self) {
@@ -90,7 +90,7 @@ struct MediaImporterTests {
         // the server while probing it.
         let dir = isolatedDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
         let web = try #require(URL(string: "https://example.com/clip.mov"))
 
         await #expect(throws: VerifiedFileCopy.CopyError.notALocalFile) { try await importer.inspect(web) }
@@ -102,7 +102,7 @@ struct MediaImporterTests {
         let dir = isolatedDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = try await makeVideo(withAudio: false, in: dir, name: "clip.mov")
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
 
         let outcome = try await importer.importVideo(source)
         let stored = try Data(contentsOf: outcome.asset.mediaURL)
@@ -116,7 +116,7 @@ struct MediaImporterTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let folder = dir.appendingPathComponent("bundle.mov", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
 
         await #expect(throws: VerifiedFileCopy.CopyError.notARegularFile) { try await importer.importVideo(folder) }
         #expect(try await store(at: dir).assets().isEmpty)
@@ -126,7 +126,7 @@ struct MediaImporterTests {
         let dir = isolatedDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = try await makeVideo(withAudio: false, in: dir, name: "clip.mov")
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
         let first = try await importer.importVideo(source)
 
         await #expect(throws: LibraryStore.StoreError.self) { try await importer.importVideo(source) }
@@ -139,7 +139,7 @@ struct MediaImporterTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let text = dir.appendingPathComponent("notes.txt")
         try "hello".write(to: text, atomically: true, encoding: .utf8)
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
 
         // Unreadable media maps to the friendly error, not a raw AVError.
         await #expect(throws: MediaImporter.ImportError.self) {
@@ -157,7 +157,7 @@ struct MediaImporterTests {
         let dir = isolatedDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let audio = try await makeAudioOnly(in: dir)
-        let importer = try MediaImporter(store: store(at: dir))
+        let importer = try MediaImporter(store: store(at: dir), probe: LocalMediaProbe())
 
         do {
             _ = try await importer.inspect(audio)
