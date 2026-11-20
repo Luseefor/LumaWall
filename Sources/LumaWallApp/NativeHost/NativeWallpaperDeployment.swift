@@ -189,14 +189,14 @@ enum NativeWallpaperDeployment {
         // over it. Keyed by entry so different wallpapers still deploy in
         // parallel; awaiting a Task value never blocks the actor.
         if let running = deploymentTasks[entryID] {
-            return try await checkedNotRemoved(running.value, entryID: entryID)
+            return try await checkedNotRemoved(running, entryID: entryID)
         }
         let task = Task<EntryInfo, Error> {
             try await deploy(asset: asset, entryID: entryID, surfaces: surfaces)
         }
         deploymentTasks[entryID] = task
         defer { deploymentTasks.removeValue(forKey: entryID) }
-        return try await checkedNotRemoved(task.value, entryID: entryID)
+        return try await checkedNotRemoved(task, entryID: entryID)
     }
 
     /// Wallpapers removed this session. Removal marks the ID before its
@@ -206,10 +206,20 @@ enum NativeWallpaperDeployment {
     @MainActor
     static var removedEntries: Set<String> = []
 
-    /// `entry`, unless its wallpaper was removed while it deployed. Callers
-    /// assign the entry right after this returns, without suspending.
+    /// The deploy's entry, unless its wallpaper was removed while it ran.
+    /// Callers assign the entry right after this returns, without
+    /// suspending. A deploy that failed because the removal deleted its
+    /// files also throws `removed`, so it isn't taken for native mode
+    /// failing.
     @MainActor
-    private static func checkedNotRemoved(_ entry: EntryInfo, entryID: String) throws -> EntryInfo {
+    private static func checkedNotRemoved(_ deploy: Task<EntryInfo, Error>, entryID: String) async throws -> EntryInfo {
+        let entry: EntryInfo
+        do {
+            entry = try await deploy.value
+        } catch {
+            if removedEntries.contains(entryID) { throw DeploymentError.removed }
+            throw error
+        }
         guard !removedEntries.contains(entryID) else { throw DeploymentError.removed }
         return entry
     }
