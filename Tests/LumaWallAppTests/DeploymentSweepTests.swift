@@ -59,7 +59,7 @@ final class DeploymentSweepTests: XCTestCase {
         return folder
     }
 
-    private func sweep(referenced: Set<String> = [], activeStaging: Set<URL> = []) -> NativeWallpaperDeployment.SweepResult {
+    private func sweep(referenced: Set<String>? = [], activeStaging: Set<URL> = []) -> NativeWallpaperDeployment.SweepResult {
         NativeWallpaperDeployment.sweepAbandonedEntries(
             referenced: referenced, videosFolderURL: videos, trustedAncestor: root,
             stagingJournalURL: journal, activeStaging: activeStaging, now: now)
@@ -211,6 +211,35 @@ final class DeploymentSweepTests: XCTestCase {
         try fm.setAttributes([.modificationDate: old], ofItemAtPath: dir.path)
         XCTAssertEqual(sweep().entries, [])
         XCTAssertTrue(exists(dir))
+    }
+
+    func testAnUntrustedLibraryStillCleansStagingButKeepsEntryFolders() throws {
+        // An empty library (or a lost index) skipped the whole sweep, so
+        // staging a crash left stayed until a wallpaper was added.
+        let dir = try entry(UUID().uuidString, files: ["thumbnail.jpg"])
+        let stale = try stagingFolder("NSIRD_LumaWall_old123", modified: old)
+        let result = sweep(referenced: nil)
+        XCTAssertEqual(result.entries, [])
+        XCTAssertTrue(exists(dir))
+        XCTAssertEqual(result.stagingFolders, ["NSIRD_LumaWall_old123"])
+        XCTAssertFalse(exists(stale))
+    }
+
+    func testAFolderSkippedForItsAgeAsksForARetryWhenItIsOldEnough() throws {
+        // A folder skipped as too new waited for the next deploy or launch.
+        XCTAssertNil(sweep().retryAfter)
+        try entry(UUID().uuidString, files: ["metadata.json"], modified: now.addingTimeInterval(-600))
+        let entryWait = try XCTUnwrap(sweep().retryAfter)
+        XCTAssertEqual(entryWait, 3000, accuracy: 1)
+        try stagingFolder("NSIRD_LumaWall_new123", modified: now.addingTimeInterval(-3000))
+        let wait = try XCTUnwrap(sweep().retryAfter)
+        XCTAssertEqual(wait, 600, accuracy: 1)
+    }
+
+    func testARecentFolderHoldingAVideoAsksForNoRetry() throws {
+        try entry(UUID().uuidString, files: ["Wallpaper.mov"], modified: now.addingTimeInterval(-60))
+        XCTAssertNil(sweep().retryAfter)
+        XCTAssertNil(sweep(referenced: nil).retryAfter)
     }
 
     func testOldStagingIsRemovedAndFreshStagingKept() throws {
