@@ -72,6 +72,39 @@ struct MediaProbeTests {
         #expect(PosterFrame(width: 2, height: 2, bytesPerRow: 8, pixels: Data(count: 16)).makeImage() != nil)
     }
 
+    @Test func oversizedRepliesAreRefusedBeforeDecoding() throws {
+        // A compromised service could make the app parse an arbitrarily
+        // large reply; the byte count is checked first.
+        let big = Data(repeating: 0x20, count: 20_000)
+        #expect(throws: MediaProbeError.serviceUnavailable) {
+            try MediaServiceContract.decode(MediaInfo.self, reply: big, error: nil, maxReplyBytes: 16_384)
+        }
+        #expect(throws: MediaProbeError.serviceUnavailable) {
+            try MediaServiceContract.decode(MediaInfo.self, reply: nil, error: big, maxReplyBytes: 16_384)
+        }
+        let info = MediaInfo(
+            videoTrackCount: 1, audioTrackCount: 0, pixelSize: CGSize(width: 10, height: 10), duration: 1, framesPerSecond: 30)
+        let (reply, _) = MediaServiceContract.encode(Result<MediaInfo, MediaProbeError>.success(info))
+        #expect(try MediaServiceContract.decode(MediaInfo.self, reply: reply, error: nil, maxReplyBytes: 16_384) == info)
+        let (_, failure) = MediaServiceContract.encode(Result<MediaInfo, MediaProbeError>.failure(.noVideoTrack))
+        #expect(throws: MediaProbeError.noVideoTrack) {
+            try MediaServiceContract.decode(MediaInfo.self, reply: nil, error: failure, maxReplyBytes: 16_384)
+        }
+    }
+
+    @Test func aPosterReplyIsBoundedByTheSizeAsked() {
+        let box = CGSize(width: 640, height: 360)
+        // Pixels plus base64 overhead for the largest frame that fits.
+        #expect(MediaServiceContract.maxPosterReplyBytes(fitting: box) >= 640 * 360 * 4 * 4 / 3)
+        #expect(MediaServiceContract.maxPosterReplyBytes(fitting: box) < 640 * 360 * 4 * 2)
+        #expect(MediaServiceContract.maxPosterReplyBytes(fitting: nil) >= 4_096 * 4_096 * 4 * 4 / 3)
+        let fits = PosterFrame(width: 640, height: 360, bytesPerRow: 2_560, pixels: Data())
+        let wider = PosterFrame(width: 1_280, height: 360, bytesPerRow: 5_120, pixels: Data())
+        #expect(fits.fits(box))
+        #expect(!wider.fits(box))
+        #expect(wider.fits(nil))
+    }
+
     @Test func infoOutsideSaneBoundsIsRejected() {
         var info = MediaInfo(
             videoTrackCount: 1, audioTrackCount: 0, pixelSize: CGSize(width: 1920, height: 1080), duration: 10,

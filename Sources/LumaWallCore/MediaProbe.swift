@@ -105,6 +105,14 @@ public struct PosterFrame: Codable, Sendable {
         self.pixels = pixels
     }
 
+    /// Whether the frame is no larger than `box` (with a pixel of rounding),
+    /// or than the service's limit when no box was asked for.
+    public func fits(_ box: CGSize?) -> Bool {
+        let side = CGFloat(Self.maxSide)
+        let limit = box.map { CGSize(width: min($0.width, side), height: min($0.height, side)) } ?? CGSize(width: side, height: side)
+        return CGFloat(width) <= limit.width.rounded(.up) + 1 && CGFloat(height) <= limit.height.rounded(.up) + 1
+    }
+
     /// The frame as an image, or nil when the sizes don't describe the
     /// bytes exactly.
     public func makeImage() -> CGImage? {

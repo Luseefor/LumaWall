@@ -20,7 +20,9 @@ final class MediaServiceClient: MediaProbing {
     }
 
     func inspect(_ file: FileHandle, typeIdentifier: String) async throws -> MediaInfo {
-        let info = try await call(MediaInfo.self) { $0.inspect(file, typeIdentifier: typeIdentifier, reply: $1) }
+        let info = try await call(MediaInfo.self, maxReplyBytes: MediaServiceContract.maxInfoReplyBytes) {
+            $0.inspect(file, typeIdentifier: typeIdentifier, reply: $1)
+        }
         guard info.isPlausible else { throw MediaProbeError.unsupportedMedia }
         return info
     }
@@ -28,17 +30,18 @@ final class MediaServiceClient: MediaProbing {
     func posterFrame(_ file: FileHandle, typeIdentifier: String, maxPixelSize: CGSize?, nearStart: Bool) async throws
         -> PosterFrame
     {
-        let frame = try await call(PosterFrame.self) {
+        let limit = MediaServiceContract.maxPosterReplyBytes(fitting: maxPixelSize)
+        let frame = try await call(PosterFrame.self, maxReplyBytes: limit) {
             $0.posterFrame(
                 file, typeIdentifier: typeIdentifier, maxWidth: Double(maxPixelSize?.width ?? 0),
                 maxHeight: Double(maxPixelSize?.height ?? 0), nearStart: nearStart, reply: $1)
         }
-        guard frame.makeImage() != nil else { throw MediaProbeError.posterUnavailable }
+        guard frame.fits(maxPixelSize), frame.makeImage() != nil else { throw MediaProbeError.posterUnavailable }
         return frame
     }
 
     private func call<T: Decodable & Sendable>(
-        _ type: T.Type, _ send: (MediaServiceXPC, @escaping @Sendable (Data?, Data?) -> Void) -> Void
+        _ type: T.Type, maxReplyBytes: Int, _ send: (MediaServiceXPC, @escaping @Sendable (Data?, Data?) -> Void) -> Void
     ) async throws -> T {
         let connection = NSXPCConnection(serviceName: serviceName)
         connection.remoteObjectInterface = MediaServiceContract.interface()
@@ -59,7 +62,8 @@ final class MediaServiceClient: MediaProbing {
                 return
             }
             send(service) { reply, error in
-                pending.finish(Result { try MediaServiceContract.decode(T.self, reply: reply, error: error) })
+                pending.finish(
+                    Result { try MediaServiceContract.decode(T.self, reply: reply, error: error, maxReplyBytes: maxReplyBytes) })
             }
         }
     }
