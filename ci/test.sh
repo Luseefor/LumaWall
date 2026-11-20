@@ -79,7 +79,7 @@ stale=0
 for file in ${xcode_files[@]+"${xcode_files[@]}"}; do
     grep -Fq "$(basename "$file")" "$pbxproj" || stale=1
 done
-[[ "$stale" == 1 ]] && xcodegen generate
+[[ "$stale" == 1 ]] && "$project_root/ci/xcodegen.sh" generate
 
 output_root="${LUMAWALL_CHECK_OUTPUT_DIR:-$project_root/.derived/checks}"
 mkdir -p "$output_root"
