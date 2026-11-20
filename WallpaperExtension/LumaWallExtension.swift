@@ -63,7 +63,18 @@ final class LumaWallExtension: NSObject, AppExtension {
             "WallpaperSettingsViewModelsXPC",
             "WallpaperIDXPC",
         ]
-        let missing = critical.filter { objc_getClass($0) == nil }
+        var missing = critical.filter { objc_getClass($0) == nil }
+        // The ivars and selectors the raw writes in RuntimeHelpers rely on.
+        let slots = [("WallpaperRemoteContextXPC", "box", 4), ("WallpaperSnapshotXPC", "rawValue", 8)]
+        for (name, ivar, bytes) in slots {
+            if let cls = objc_getClass(name) as? AnyClass, RuntimeLayout.ivarSlot(named: ivar, in: cls, bytes: bytes) == nil {
+                missing.append("\(name).\(ivar)")
+            }
+        }
+        for selector in ["remoteContext", "remoteContextWithOptions:"]
+        where !RuntimeLayout.respondsToClassSelector(CAContext.self, selector) {
+            missing.append("CAContext.\(selector)")
+        }
         if missing.isEmpty {
             extensionLog("  [SelfCheck] Runtime layout OK, all \(critical.count) critical classes present")
         } else {

@@ -25,13 +25,7 @@ extension WallpaperXPCHandler {
             renderChoice = acquired.renderChoice
         let videoURL = acquired.videoURL, pixelWidth = acquired.pixelWidth, pixelHeight = acquired.pixelHeight,
             loadStill = acquired.loadStill
-        var contextOptions: [String: Any] = [:]
-        if let did = displayID { contextOptions["displayId"] = did }
-        let caContextRaw: Any? =
-            contextOptions.isEmpty
-            ? CAContext.remoteContext()
-            : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
-        guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
+        guard let caContext = makeRemoteCAContext(displayID: displayID) else {
             extensionLog("  ERROR: remote CAContext creation failed, failing acquire")
             reply(
                 nil,
