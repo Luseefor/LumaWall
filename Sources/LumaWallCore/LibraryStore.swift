@@ -114,12 +114,14 @@ public actor LibraryStore {
         guard let asset = assetsByID[id] else { throw StoreError.missingAsset }
         var remaining = assetsByID
         remaining[id] = nil
-        guard isEntryFolder(asset.mediaURL.deletingLastPathComponent(), of: id) else {
+        let folder = asset.mediaURL.deletingLastPathComponent().standardizedFileURL
+        guard isEntryFolder(folder, of: id) else {
             try persist(remaining)
             throw StoreError.invalidLocation
         }
         do {
-            try TrustedDirectory(url: rootURL).removeItem(named: id.rawValue.uuidString)
+            // The name as validated, which may be spelled in lower case.
+            try TrustedDirectory(url: rootURL).removeItem(named: folder.lastPathComponent)
         } catch POSIXError.ENOENT {
             // Already gone; nothing left to delete.
         }
@@ -134,7 +136,6 @@ public actor LibraryStore {
     /// and the parent is compared to the root by device and inode, so `/var`
     /// and `/private/var` spellings of the same root match too.
     private func isEntryFolder(_ folder: URL, of id: WallpaperID) -> Bool {
-        let folder = folder.standardizedFileURL
         guard UUID(uuidString: folder.lastPathComponent) == id.rawValue else { return false }
         var parent = stat()
         var root = stat()

@@ -97,6 +97,22 @@ struct SystemStatusTests {
         #expect(fm.fileExists(atPath: victim.appendingPathComponent("thesis.pages").path))
     }
 
+    @Test func clearDiskReportsACacheFolderItCannotOpen() throws {
+        // A permissions failure used to read as "nothing to remove".
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let locked = base.appendingPathComponent("Caches/LumaWall", isDirectory: true)
+        try fm.createDirectory(at: locked, withIntermediateDirectories: true)
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? fm.removeItem(at: base)
+        }
+        #expect(throws: POSIXError(.EACCES)) {
+            try CacheCleaner.clearDisk(preservingLibraryRoot: base, cachesURL: base.appendingPathComponent("Caches"))
+        }
+    }
+
     @Test func sessionLockReadsTheWindowServerFlag() {
         // The app may launch while the screen is already locked, when no
         // lock notification will arrive. Startup reads this flag instead.

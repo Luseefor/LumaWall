@@ -317,13 +317,12 @@ struct LibraryStoreTests {
         defer { try? fm.removeItem(at: root) }
         let store = try LibraryStore(rootURL: root)
         let id = WallpaperID()
-        let folder = await store.folder(for: id)
-        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         let lower = root.appendingPathComponent(id.rawValue.uuidString.lowercased(), isDirectory: true)
+        try fm.createDirectory(at: lower, withIntermediateDirectories: true)
         try await store.install(LibraryStore.entryAsset(id: id, folder: lower, hash: "lower"))
 
         try await store.remove(id: id)
-        #expect(!fm.fileExists(atPath: folder.path))
+        #expect(try fm.contentsOfDirectory(atPath: root.path) == ["Library.json"])
     }
 
     @Test func duplicateIDsInTheIndexAreTreatedAsCorrupt() async throws {

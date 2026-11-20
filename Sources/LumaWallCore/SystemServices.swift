@@ -45,7 +45,14 @@ public enum CacheCleaner {
         cachesURL: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
     ) throws -> Int {
         var removed = 0
-        if let caches = try? TrustedDirectory(url: cachesURL).subdirectory("LumaWall") {
+        let caches: TrustedDirectory?
+        do {
+            caches = try TrustedDirectory(url: cachesURL).subdirectory("LumaWall")
+        } catch let error as POSIXError where [.ENOENT, .ELOOP, .ENOTDIR].contains(error.code) {
+            // No cache folder, or a symlink in its place: nothing of ours to clear.
+            caches = nil
+        }
+        if let caches {
             for item in try caches.entries() where (try? caches.removeItem(named: item.name)) != nil {
                 removed += 1
             }
