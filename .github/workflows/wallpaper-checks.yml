@@ -63,13 +63,23 @@ jobs:
       - name: Check generated project is committed
         run: git diff --exit-code -- LumaWall.xcodeproj
       - name: Scrub local paths from failure logs
+        id: scrub
         if: failure()
         env:
           RUNNER_TEMP: ${{ runner.temp }}
         run: |
+          set -euo pipefail
           shopt -s nullglob
-          logs=("${{ runner.temp }}"/lumawall-checks/*/*.log)
+          sanitized_dir="$RUNNER_TEMP/lumawall-sanitized"
+          rm -rf "$sanitized_dir"
+          logs=("$RUNNER_TEMP"/lumawall-checks/*/*.log)
           if [ ${#logs[@]} -gt 0 ]; then
+            work_dir="$(mktemp -d "$RUNNER_TEMP/lumawall-scrub.XXXXXX")"
+            for log in "${logs[@]}"; do
+              rel="${log#"$RUNNER_TEMP/lumawall-checks/"}"
+              mkdir -p "$work_dir/$(dirname "$rel")"
+              cp "$log" "$work_dir/$rel"
+            done
             perl -i -pe '
               BEGIN {
                 our @pairs = map { [ $ENV{$_}, "<$_>" ] }
@@ -81,13 +91,14 @@ jobs:
                 my ($val, $tok) = @$p;
                 s/\Q$val\E/$tok/g;
               }
-            ' "${logs[@]}"
+            ' "$work_dir"/*/*.log
+            mv "$work_dir" "$sanitized_dir"
           fi
       - name: Save failure logs
-        if: failure()
+        if: failure() && steps.scrub.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wallpaper-results-${{ matrix.runner }}
-          path: ${{ runner.temp }}/lumawall-checks/*/*.log
+          path: ${{ runner.temp }}/lumawall-sanitized
           if-no-files-found: ignore
           retention-days: 14
