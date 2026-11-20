@@ -246,34 +246,33 @@ enum NativeWallpaperDeployment {
             PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
             ? asset.mediaURL.lastPathComponent
             : "Wallpaper.mov"
+        try FileManager.default.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
+        let stagingFolder = try makeStagingFolder(appropriateFor: videosFolderURL)
+        defer { try? FileManager.default.removeItem(at: stagingFolder) }
         let staged = try await Task.detached(priority: .utility) {
-            try stageDeployment(source: asset.mediaURL, entryID: entryID, filename: filename)
+            try stageDeployment(source: asset.mediaURL, entryID: entryID, filename: filename, stagingFolderURL: stagingFolder)
         }.value
-        let entry: EntryInfo
-        do {
-            let probe = try await probe(url: staged.videoURL)
-            // The copy and probe take a while too. Nothing is published yet;
-            // the staged copy is discarded below.
-            guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
-            entry = EntryInfo(
-                id: entryID,
-                name: asset.name,
-                filename: staged.filename,
-                duration: probe.duration,
-                fps: probe.fps,
-                resolution: probe.resolution,
-                dateAdded: asset.createdAt,
-                contentHash: staged.hash,
-                audioStripped: false
-            )
-            let data = try JSONEncoder().encode(entry)
-            try data.write(to: staged.directoryURL.appendingPathComponent("metadata.json"), options: .atomic)
-            await generateThumbnail(for: staged.videoURL, in: staged.directoryURL)
-            try await Task.detached(priority: .utility) { try publishDeployment(staged) }.value
-        } catch {
-            discardStaged(staged)
-            throw error
-        }
+        let probe = try await probe(url: staged.videoURL)
+        // The copy and probe take a while too. Nothing is published yet; the
+        // staging folder goes with the defer above.
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
+        let entry = EntryInfo(
+            id: entryID,
+            name: asset.name,
+            filename: staged.filename,
+            duration: probe.duration,
+            fps: probe.fps,
+            resolution: probe.resolution,
+            dateAdded: asset.createdAt,
+            contentHash: staged.hash,
+            audioStripped: false
+        )
+        let data = try JSONEncoder().encode(entry)
+        try data.write(to: staged.directoryURL.appendingPathComponent("metadata.json"), options: .atomic)
+        await generateThumbnail(for: staged.videoURL, in: staged.directoryURL)
+        try await Task.detached(priority: .utility) {
+            try publishDeployment(staged, stagingFolderURL: stagingFolder)
+        }.value
         notifyLibraryChanged()
         let deployed = videoURL(for: entry)
         Task.detached {
@@ -300,7 +299,10 @@ enum NativeWallpaperDeployment {
         } catch CocoaError.fileReadNoSuchFile {
             return nil
         }
-        return validated(try JSONDecoder().decode(EntryInfo.self, from: data), id: id)
+        // Bytes that don't decode (a truncated write, a hand edit) read as
+        // missing so the next deploy replaces them. Read errors still throw.
+        guard let decoded = try? JSONDecoder().decode(EntryInfo.self, from: data) else { return nil }
+        return validated(decoded, id: id)
     }
 
     /// The extension can write its container, so metadata.json is checked

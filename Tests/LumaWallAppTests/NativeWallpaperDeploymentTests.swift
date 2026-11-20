@@ -41,6 +41,35 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertLessThan(abs(modified.timeIntervalSinceNow), 5)
     }
 
+    func testTruncatedMetadataReadsAsMissingSoItCanBeRedeployed() throws {
+        // A decode failure threw before staging, so applying the wallpaper
+        // again could never replace the broken entry.
+        let fm = FileManager.default
+        let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: videos) }
+        let id = UUID().uuidString
+        try fm.createDirectory(at: videos.appendingPathComponent(id), withIntermediateDirectories: true)
+        try Data("{\"id\":\"\(id)\",\"na".utf8).write(to: videos.appendingPathComponent(id).appendingPathComponent("metadata.json"))
+        XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos))
+    }
+
+    func testDefaultDeployStagingIsOnTheVideosVolumeAndFresh() throws {
+        let fm = FileManager.default
+        let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: videos, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: videos) }
+        let first = try NativeWallpaperDeployment.makeStagingFolder(appropriateFor: videos)
+        let second = try NativeWallpaperDeployment.makeStagingFolder(appropriateFor: videos)
+        defer { for url in [first, second] { try? fm.removeItem(at: url) } }
+        XCTAssertNotEqual(first, second)
+        var a = stat()
+        var b = stat()
+        XCTAssertEqual(stat(first.path, &a), 0)
+        XCTAssertEqual(stat(videos.path, &b), 0)
+        XCTAssertEqual(a.st_dev, b.st_dev)
+        XCTAssertFalse(first.path.hasPrefix(videos.path))
+    }
+
     func testMissingDeploymentCanBeCreated() throws {
         let videos = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: UUID().uuidString, videosFolderURL: videos))
