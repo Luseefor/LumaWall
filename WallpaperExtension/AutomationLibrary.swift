@@ -55,7 +55,7 @@ enum ExtensionAutomationLibrary {
         return ids.compactMap { $0 }.filter(available.contains)
     }
 
-    static func resolve(_ choiceID: String, at date: Date = Date()) -> String? {
+    static func resolve(_ choiceID: String, at date: Date = Date(), isDarkAppearance: Bool? = nil) -> String? {
         guard let configuration = load() else { return nil }
         switch choiceID {
         case dayNightChoiceID:
@@ -71,11 +71,21 @@ enum ExtensionAutomationLibrary {
             }
             return isDay ? configuration.dayVideoID : configuration.nightVideoID
         case appearanceChoiceID:
-            let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+            let isDark = isDarkAppearance ?? isSystemDarkAppearance()
             return isDark ? configuration.darkVideoID : configuration.lightVideoID
         default:
             return choiceID
         }
+    }
+
+    static func isSystemDarkAppearance() -> Bool {
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated {
+                (NSApp?.effectiveAppearance ?? NSAppearance.currentDrawing())
+                    .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            }
+        }
+        return NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 }
 
@@ -116,7 +126,18 @@ final class AutomationController: NSObject, @unchecked Sendable {
     }
 
     @objc private func appearanceChanged() {
-        queue.async { [self] in refresh(choiceID: ExtensionAutomationLibrary.appearanceChoiceID, reason: "appearance") }
+        // Let AppKit finish updating effectiveAppearance after the theme
+        // notification lands before sampling on main.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [self] in
+            let isDark = ExtensionAutomationLibrary.isSystemDarkAppearance()
+            queue.async { [self] in
+                refresh(
+                    choiceID: ExtensionAutomationLibrary.appearanceChoiceID,
+                    reason: "appearance",
+                    isDarkAppearance: isDark
+                )
+            }
+        }
     }
 
     @objc private func dayChanged() {
@@ -161,8 +182,8 @@ final class AutomationController: NSObject, @unchecked Sendable {
         return calendar.date(byAdding: .day, value: 1, to: today)
     }
 
-    private func refresh(choiceID: String, reason: String) {
-        guard let videoID = ExtensionAutomationLibrary.resolve(choiceID),
+    private func refresh(choiceID: String, reason: String, isDarkAppearance: Bool? = nil) {
+        guard let videoID = ExtensionAutomationLibrary.resolve(choiceID, isDarkAppearance: isDarkAppearance),
             let url = VideoLibrary.shared.videoURL(for: videoID)
         else { return }
         let renderers = WallpaperState.shared.renderers(forVideoID: choiceID)
