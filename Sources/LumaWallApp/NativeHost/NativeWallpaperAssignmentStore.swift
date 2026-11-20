@@ -118,18 +118,26 @@ enum NativeWallpaperAssignmentStore {
 // MARK: Backup and restore
 
 extension NativeWallpaperAssignmentStore {
-    /// Paths of the surfaces that differ between `original` and `root`.
+    /// Paths of the surfaces that differ between `original` and `root`,
+    /// including ones only one of them counts as a surface.
     static func changedSurfacePaths(from original: NSDictionary, to root: NSDictionary) -> [[String]] {
-        surfacePaths(in: root).filter { path in
-            !((value(at: path, in: root) as? NSDictionary)?.isEqual(value(at: path, in: original)) ?? false)
+        var seen = Set<[String]>()
+        return (surfacePaths(in: root) + surfacePaths(in: original)).filter { path in
+            guard seen.insert(path).inserted else { return false }
+            let now = value(at: path, in: root) as? NSDictionary
+            let then = value(at: path, in: original) as? NSDictionary
+            return now.map { !$0.isEqual(then) } ?? (then != nil)
         }
     }
 
-    /// True when every surface at `paths` in `check` equals the one in `expected`.
-    static func surfaces(at paths: [[String]], in check: NSDictionary, match expected: NSDictionary) -> Bool {
+    /// True when the `Content` of every surface at `paths` in `check` equals
+    /// the one in `expected`. Timestamps such as `LastUse` aren't compared:
+    /// WallpaperAgent updates them on its own.
+    static func contents(at paths: [[String]], in check: NSDictionary, match expected: NSDictionary) -> Bool {
         paths.allSatisfy { path in
-            guard let wanted = value(at: path, in: expected) as? NSDictionary else { return true }
-            return wanted.isEqual(value(at: path, in: check))
+            let wanted = (value(at: path, in: expected) as? NSDictionary)?["Content"] as? NSDictionary
+            let found = (value(at: path, in: check) as? NSDictionary)?["Content"] as? NSDictionary
+            return wanted.map { $0.isEqual(found) } ?? (found == nil)
         }
     }
 

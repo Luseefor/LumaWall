@@ -25,6 +25,8 @@ final class FakeSystemWallpaperFiles: SystemWallpaperFiles {
     /// What a failed write leaves behind, when it isn't LumaWall's own cut-off write.
     var failureLeaves: Data?
     /// The URL the coordinator grants, and every URL the store was read or written through.
+    /// Read errors for given read numbers, standing in for transient failures.
+    var readErrors: [Int: any Error] = [:]
     var grantedURL = URL(fileURLWithPath: "/granted/Index.plist")
     var usedURLs: [URL] = []
 
@@ -37,6 +39,7 @@ final class FakeSystemWallpaperFiles: SystemWallpaperFiles {
         if let readError { throw readError }
         guard let current = store else { throw CocoaError(.fileReadNoSuchFile) }
         reads += 1
+        if let error = readErrors[reads] { throw error }
         afterRead?(reads)
         return current
     }
@@ -450,5 +453,72 @@ final class NativeWallpaperAssignmentServiceTests: XCTestCase {
         files.afterRead = nil
         XCTAssertEqual(provider(try files.storeRoot(), "DISPLAY-A"), ours)
         XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-B"), "desert")
+    }
+
+    func testAFailedWriteLeavesTheAgentsTruncatedFileAlone() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.failNextWrite = true
+        // Only the plist header: it matches LumaWall's write too, but proves nothing.
+        files.failureLeaves = Data("bplist00".utf8)
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry]))
+        XCTAssertEqual(files.store, Data("bplist00".utf8))
+    }
+
+    func testRestoresASurfaceWhoseSavedCopyHadNoChoices() throws {
+        var store = appleStore()
+        store["Displays"] = [
+            "DISPLAY-A": ["Desktop": ["Content": ["Shuffle": "$null"]]],
+            "DISPLAY-B": ["Desktop": surface(provider: "com.apple.wallpaper.choice.image", config: "forest")],
+        ]
+        let files = FakeSystemWallpaperFiles(store: store)
+        let service = service(files, nativeModeEnabled: true)
+        try service.apply(assignments: ["DISPLAY-A": entry])
+        files.agentRestarts = 0
+
+        _ = try service.restoreOriginalWallpaper()
+
+        XCTAssertNil(provider(try files.storeRoot(), "DISPLAY-A"))
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testRestoreStillRestartsTheAgentWhenItsCheckReadFailedOnce() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        let service = service(files, nativeModeEnabled: true)
+        try service.apply(assignments: ["DISPLAY-A": entry])
+        files.agentRestarts = 0
+        // Restore reads: 1 before, 2 conflict check, 3 the check after writing.
+        files.readErrors = [files.reads + 3: CocoaError(.fileReadUnknown)]
+
+        let result = try service.restoreOriginalWallpaper()
+
+        XCTAssertEqual(result, .init(restored: 1, missing: 0))
+        XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-A"), "beach")
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testTheAgentBumpingLastUseDoesNotFailTheCheck() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.afterWrite = { _ in
+            files.replaceStore { root in
+                var displays = root["Displays"] as? [String: Any] ?? [:]
+                var display = displays["DISPLAY-A"] as? [String: Any] ?? [:]
+                var desktop = display["Desktop"] as? [String: Any] ?? [:]
+                desktop["LastUse"] = Date(timeIntervalSinceNow: 60)
+                display["Desktop"] = desktop
+                displays["DISPLAY-A"] = display
+                root["Displays"] = displays
+            }
+        }
+        try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])
+        XCTAssertEqual(files.storeWrites, 1)
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testAPermissionErrorOnTheCheckReadReachesTheCaller() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.readErrors = [3: CocoaError(.fileReadNoPermission)]
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])) {
+            XCTAssertTrue(WallpaperHostCapabilities.isPermissionError($0), "\($0)")
+        }
     }
 }

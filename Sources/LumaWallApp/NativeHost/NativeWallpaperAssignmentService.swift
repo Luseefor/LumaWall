@@ -172,7 +172,10 @@ struct NativeWallpaperAssignmentService {
             } ?? [:]
         var result = RestoreResult(restored: 0, missing: 0)
         try transact(savingBackup: false) { root in
-            result = NativeWallpaperAssignmentStore.restoreOriginal(root: root, backup: backup, ownedFolders: ownedFolders)
+            let attempt = NativeWallpaperAssignmentStore.restoreOriginal(root: root, backup: backup, ownedFolders: ownedFolders)
+            // A retry after a write that landed finds nothing left to restore;
+            // keep what that write restored.
+            if attempt.restored > 0 || result.restored == 0 { result = attempt }
         }
         if result.restored > 0 {
             nativeHostLog.info("restore original: \(result.restored) surface(s) restored, \(result.missing) without a backup")
@@ -201,6 +204,9 @@ struct NativeWallpaperAssignmentService {
     @discardableResult
     private func transact(savingBackup: Bool, merge: (NSMutableDictionary) throws -> Void) throws -> Bool {
         var sawConflict = false
+        // An earlier attempt's write may have landed even though its check
+        // couldn't confirm it.
+        var wrote = false
         for attempt in 1...Self.maxAttempts {
             var outcome = Attempt.nothingToWrite
             try files.coordinateStore { url in
@@ -222,7 +228,7 @@ struct NativeWallpaperAssignmentService {
                 guard !changed.isEmpty else { return }
                 let encoded = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
                 if savingBackup { try saveBackup(before) }
-                guard (try? files.readStore(at: url)) == before else {
+                guard try reread(at: url) == before else {
                     outcome = .conflict
                     return
                 }
@@ -234,13 +240,16 @@ struct NativeWallpaperAssignmentService {
                     if WallpaperHostCapabilities.isPermissionError(error) { throw error }
                     throw AssignmentError.writeFailed(error.localizedDescription)
                 }
-                let check = (try? files.readStore(at: url)).flatMap { try? parse($0) }
-                let kept = check.map { NativeWallpaperAssignmentStore.surfaces(at: changed, in: $0, match: root) } ?? false
+                wrote = true
+                let check = try reread(at: url).flatMap { try? parse($0) }
+                let kept = check.map { NativeWallpaperAssignmentStore.contents(at: changed, in: $0, match: root) } ?? false
                 outcome = kept ? .written : .conflict
             }
             switch outcome {
             case .nothingToWrite:
-                return false
+                guard wrote else { return false }
+                files.restartWallpaperAgent()
+                return true
             case .written:
                 files.restartWallpaperAgent()
                 return true
@@ -254,13 +263,26 @@ struct NativeWallpaperAssignmentService {
     }
 
     /// After a failed write, puts back the copy this transaction read, but
-    /// only when the file is a cut-off copy of LumaWall's own write. Anything
-    /// else (a readable file, or another writer's half-written one) stays.
+    /// only when the file is a cut-off copy of LumaWall's own write: it
+    /// doesn't parse, and it runs past the first byte where LumaWall's write
+    /// differs from the file it read, which another writer wouldn't produce.
+    /// Anything else stays. If the agent finishes a write of its own between
+    /// this check and the put-back, that write is lost.
     private func repairAfterFailedWrite(before: Data, written: Data, at url: URL) {
-        guard let current = try? files.readStore(at: url), (try? parse(current)) == nil,
-            written.starts(with: current)
+        let shared = zip(before, written).prefix { $0 == $1 }.count
+        guard let current = try? files.readStore(at: url), current.count > shared,
+            (try? parse(current)) == nil, written.starts(with: current)
         else { return }
         try? files.writeStore(before, to: url)
+    }
+
+    /// Reads the store again inside a transaction. Nil when it can't be read
+    /// right now; permission errors still reach the caller.
+    private func reread(at url: URL) throws -> Data? {
+        do { return try files.readStore(at: url) } catch {
+            if WallpaperHostCapabilities.isPermissionError(error) { throw error }
+            return nil
+        }
     }
 
     private func readStoreData(at url: URL) throws -> Data {
