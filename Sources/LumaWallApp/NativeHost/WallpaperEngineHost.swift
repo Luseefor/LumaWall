@@ -129,6 +129,11 @@ final class WallpaperEngine {
         {
             do {
                 try await native.apply(asset, to: displayID, composition: composition)
+                // Native mode went off meanwhile: the overlay plays it instead.
+                guard generation == hostGeneration else {
+                    try await overlay.apply(asset, to: displayID, composition: composition)
+                    return
+                }
                 overlay.dismantleSession(displayID)
                 return
             } catch {
@@ -145,18 +150,26 @@ final class WallpaperEngine {
             let connected = Set(displays.refresh().map(\.displayID))
             let fellBack = connected.intersection(nativeFallbackDisplayIDs)
             if fellBack != connected {
+                let missing: Set<DisplayID>
                 do {
-                    let missing = try await native.applyToAll(asset, composition: composition, excluding: fellBack)
-                    if !missing.isEmpty, generation == hostGeneration {
-                        fallBack(missing, after: NativeWallpaperAssignmentService.AssignmentError.unknownDisplay)
-                    }
-                    let overlayIDs = fellBack.union(missing)
-                    for id in connected.subtracting(overlayIDs) { overlay.dismantleSession(id) }
-                    for id in overlayIDs { try await overlay.apply(asset, to: id, composition: composition) }
-                    return
+                    missing = try await native.applyToAll(asset, composition: composition, excluding: fellBack)
                 } catch {
                     try await handleNativeFailure(error, on: connected, since: generation)
+                    try await overlay.applyToAll(asset, composition: composition)
+                    return
                 }
+                guard generation == hostGeneration else {
+                    try await overlay.applyToAll(asset, composition: composition)
+                    return
+                }
+                if !missing.isEmpty {
+                    fallBack(missing, after: NativeWallpaperAssignmentService.AssignmentError.unknownDisplay)
+                }
+                // Overlay errors from here on leave the native displays alone.
+                let overlayIDs = fellBack.union(missing)
+                for id in connected.subtracting(overlayIDs) { overlay.dismantleSession(id) }
+                for id in overlayIDs { try await overlay.apply(asset, to: id, composition: composition) }
+                return
             }
         }
         try await overlay.applyToAll(asset, composition: composition)

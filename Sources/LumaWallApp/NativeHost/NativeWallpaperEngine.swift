@@ -250,6 +250,16 @@ final class NativeWallpaperEngine {
             nativeHostLog.info("restore: nothing to assign")
             return failed
         }
+        // The store is keyed by stable UUID; a display without one can't be
+        // assigned and goes to the overlay.
+        for (cg, _) in map where stableUUID(for: cg) == nil {
+            map.removeValue(forKey: cg)
+            if let display = connected.first(where: { $0.cgDisplayID == cg }) {
+                failed.insert(display.displayID)
+                active.removeValue(forKey: display.displayID)
+            }
+        }
+        guard !map.isEmpty else { return failed }
         let fingerprint = Dictionary(
             uniqueKeysWithValues: map.compactMap { cg, entry in
                 stableUUID(for: cg).map { ($0, entry.id) }

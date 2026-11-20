@@ -221,6 +221,7 @@ struct NativeWallpaperAssignmentService {
             try files.writeBackup(PropertyListSerialization.data(fromPropertyList: merged, format: .binary, options: 0))
         } catch {
             logFailure("backup", error)
+            if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             throw AssignmentError.writeFailed("Its safety backup could not be created: \(error.localizedDescription)")
         }
     }

@@ -137,6 +137,8 @@ extension AppModel {
                 asset: asset,
                 surfaces: displays.map { .init(pixelSize: $0.pixelSize, tier: .full) }
             )
+            // A newer pick may have landed while this one deployed.
+            guard automations.lockScreenWallpaperID == asset.id else { return }
             try NativeWallpaperAssignmentService.applyLockScreen(entry: entry)
         } catch {
             present("Lock Screen", error.localizedDescription)
