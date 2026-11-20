@@ -1,26 +1,26 @@
-// Validates the identity of processes connecting to the extension's XPC surface.
-//
-// The exported handler can change extension state, drive renderer/snapshot work,
-// and reach library-mutation paths, so connections should only be served to the
-// expected Apple wallpaper host. We derive the peer's code signature from its
-// audit token (never trusting the PID alone, which is reusable) and require an
-// Apple-signed platform binary.
-//
-// Posture: reject callers we can positively identify as non-Apple. Accept Apple
-// platform binaries, logging when the signer isn't the expected WallpaperAgent
-// rather than rejecting, since the settings surfaces are also Apple-hosted.
-// Fail *open* only when peer identity genuinely can't be obtained, so an OS
-// change to the audit-token SPI degrades to today's behavior instead of
-// bricking the wallpaper.
+// Reads a connecting process's code signature and admits it only if it's one
+// of Apple's wallpaper hosts (see CallerAdmission). The signature comes from
+// the peer's audit token, never the PID alone, which can be reused. Every
+// failure to read it rejects the connection.
 
 import Foundation
 import Security
 
 enum CallerValidation {
     static func isAcceptable(_ connection: NSXPCConnection) -> Bool {
-        guard connection.responds(to: NSSelectorFromString("auditToken")) else {
-            extensionLog("  [Caller] auditToken SPI unavailable, accepting (fail-open)")
+        switch CallerAdmission.verdict(for: peer(of: connection)) {
+        case let .accepted(host):
+            traceLog("  [Caller] Accepted \(host) (pid \(connection.processIdentifier))")
             return true
+        case let .rejected(reason):
+            extensionLog("  [Caller] REJECTED pid \(connection.processIdentifier): \(reason)")
+            return false
+        }
+    }
+
+    private static func peer(of connection: NSXPCConnection) -> CallerPeer {
+        guard connection.responds(to: NSSelectorFromString("auditToken")) else {
+            return .unidentified("auditToken SPI unavailable")
         }
 
         var token = connection.auditToken
@@ -30,34 +30,10 @@ enum CallerValidation {
         var code: SecCode?
         let status = SecCodeCopyGuestWithAttributes(nil, attrs, [], &code)
         guard status == errSecSuccess, let code else {
-            extensionLog("  [Caller] Could not derive peer SecCode (status \(status)), accepting (fail-open)")
-            return true
+            return .unidentified("could not derive peer SecCode (status \(status))")
         }
-
-        guard let appleReq = requirement("anchor apple") else {
-            extensionLog("  [Caller] Could not build anchor-apple requirement, accepting (fail-open)")
-            return true
+        return .signed { text in
+            CallerAdmission.satisfies(requirement: text) { SecCodeCheckValidity(code, [], $0) }
         }
-
-        let appleStatus = SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), appleReq)
-        guard appleStatus == errSecSuccess else {
-            extensionLog("  [Caller] REJECTED non-Apple caller (status \(appleStatus))")
-            return false
-        }
-
-        if let agentReq = requirement("identifier \"com.apple.wallpaper.agent\""),
-            SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), agentReq) != errSecSuccess
-        {
-            extensionLog("  [Caller] Apple caller is not WallpaperAgent, accepting with note")
-        }
-        return true
-    }
-
-    private static func requirement(_ text: String) -> SecRequirement? {
-        var req: SecRequirement?
-        guard SecRequirementCreateWithString(text as CFString, SecCSFlags(rawValue: 0), &req) == errSecSuccess else {
-            return nil
-        }
-        return req
     }
 }

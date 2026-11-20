@@ -98,6 +98,7 @@
 		8820F1AFAE8A698F8D25920D /* SettingsPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3356D91BBD799E937B744B65 /* SettingsPush.swift */; };
 		886F7E37B23CB775D315FF59 /* AppModel+Playback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C6731C377E9CD3FA6FDBF8 /* AppModel+Playback.swift */; };
 		8A4831559DC806990F454612 /* PowerPolling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CCABA65DE0140AE89ACA2C7 /* PowerPolling.swift */; };
+		8A54D4952F3E2EC16EF04C25 /* CallerAdmissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 347DA87458F226FC35DB6607 /* CallerAdmissionTests.swift */; };
 		8B8E11602AE9327D45C02D9B /* WallpaperXPCHandler+Bisect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12E79817FBE1B773BA2DECB6 /* WallpaperXPCHandler+Bisect.swift */; };
 		8C09DCA63328F27D47290EAD /* ShuffleController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FC740A5E83119D4F75B4580 /* ShuffleController.swift */; };
 		8CDBF90169E7CE006A35D05D /* WallpaperEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5B1F8A1BAB00B4E3496E6B2 /* WallpaperEngineTests.swift */; };
@@ -158,6 +159,7 @@
 		D9A6C2C9B0E9AEC614ADD52E /* LumaWallApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A30AF2E839F9A4C376A239 /* LumaWallApp.swift */; };
 		DAB2D9B16055FD6B4D3B167E /* SpanningGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE0B943653B35FEFE4EF4AE /* SpanningGeometry.swift */; };
 		DC17146B2DC45373FE887719 /* AssignmentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ECDCAA211A4E80FA3F84F59 /* AssignmentStore.swift */; };
+		DD31B3A033A74B237C2FE1C0 /* CallerAdmission.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF01453730C6CF91504C5A8A /* CallerAdmission.swift */; };
 		DE00DC045A6FED36F224CB11 /* WallpaperXPCHandler+AcquireCreate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B626ADE930FE51D5D8881BB0 /* WallpaperXPCHandler+AcquireCreate.swift */; };
 		E0269FE7AA28E374BEB02DBD /* WallpaperXPCHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0485771336EE0E0CEAF54E0 /* WallpaperXPCHandler.swift */; };
 		E078EDD2385207B9771A33DC /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 027886082E4CDA90C200E2DE /* Brand.swift */; };
@@ -169,6 +171,7 @@
 		F008A9C9C3E2FF0FB62B28DF /* NativeWallpaperDeployment+Variants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 387E46C3996E8B20210061DF /* NativeWallpaperDeployment+Variants.swift */; };
 		F2321BFBC53A293166DE79AF /* PosterCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C3F45CEBDAFB58C3461CEE7 /* PosterCacheTests.swift */; };
 		F30ECB95D30CEE5981367B97 /* DiagnosticsVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8678A3384385BBD349B0722E /* DiagnosticsVisibility.swift */; };
+		F712510A6DE507B06146990D /* CallerAdmission.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF01453730C6CF91504C5A8A /* CallerAdmission.swift */; };
 		F7327F9028585F0432488052 /* EnergyLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B19454371AFEB8BC36A88B6 /* EnergyLogStore.swift */; };
 		F773182235EEBFC864716901 /* CodableSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB998F5FA3CED4AD4C9CA8E /* CodableSupport.swift */; };
 		F7D23350D476220B0719FAA1 /* QHDFitFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA84D2FA80712CAC64877115 /* QHDFitFixtures.swift */; };
@@ -271,6 +274,7 @@
 		2FF4FA464A03E68138FE9D37 /* WallpaperPrefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperPrefs.swift; sourceTree = "<group>"; };
 		32DFB08F9FEC701E681168B2 /* SpiralRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpiralRecovery.swift; sourceTree = "<group>"; };
 		3356D91BBD799E937B744B65 /* SettingsPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPush.swift; sourceTree = "<group>"; };
+		347DA87458F226FC35DB6607 /* CallerAdmissionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallerAdmissionTests.swift; sourceTree = "<group>"; };
 		3585626DC78EB09766574FAF /* RendererCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererCopy.swift; sourceTree = "<group>"; };
 		35FF8A83D914B69BA40512EA /* AppChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppChrome.swift; sourceTree = "<group>"; };
 		371BCDB4A844F28D29156BCC /* PlaylistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistStore.swift; sourceTree = "<group>"; };
@@ -363,6 +367,7 @@
 		C96DE55EDE615F840EF93CC7 /* AppModel+Library.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Library.swift"; sourceTree = "<group>"; };
 		CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperDeploymentTests.swift; sourceTree = "<group>"; };
 		CBB5B8AF41A333E38BE8B0EA /* CrashMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashMonitor.swift; sourceTree = "<group>"; };
+		CF01453730C6CF91504C5A8A /* CallerAdmission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallerAdmission.swift; sourceTree = "<group>"; };
 		D0485771336EE0E0CEAF54E0 /* WallpaperXPCHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperXPCHandler.swift; sourceTree = "<group>"; };
 		D13194882DEF1C3D99D95706 /* DiagnosticsVisibilityReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsVisibilityReader.swift; sourceTree = "<group>"; };
 		D1B6A4CEB349504DF60AA4A3 /* PlaybackPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackPolicyTests.swift; sourceTree = "<group>"; };
@@ -559,6 +564,7 @@
 		95B5D566193E4E6EE4CB192D /* WallpaperExtensionTests */ = {
 			isa = PBXGroup;
 			children = (
+				347DA87458F226FC35DB6607 /* CallerAdmissionTests.swift */,
 				18D08255D90687C8795D375F /* DisplaySleepTests.swift */,
 				C3BAACEAF479E304EF601611 /* LibraryScanRecordTests.swift */,
 				907BF2B1A5B38311B4AC6A19 /* LogFileTests.swift */,
@@ -583,6 +589,7 @@
 			children = (
 				217AB2E4539D5FEB6508DF44 /* AutomationLibrary.swift */,
 				1E89568A09F72A1703DCB178 /* BMPCache.swift */,
+				CF01453730C6CF91504C5A8A /* CallerAdmission.swift */,
 				C8DEB9D119449BFF32A668D1 /* CallerValidation.swift */,
 				2A643467ECEEFF2A13F77F82 /* CodableShims.swift */,
 				972E22AA71E714394D396642 /* ColorDiag.swift */,
@@ -868,6 +875,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DD31B3A033A74B237C2FE1C0 /* CallerAdmission.swift in Sources */,
+				8A54D4952F3E2EC16EF04C25 /* CallerAdmissionTests.swift in Sources */,
 				E4F44AFBF736E9B1D20318CF /* DisplaySleep.swift in Sources */,
 				3B85579BC4EC8944233BCA90 /* DisplaySleepTests.swift in Sources */,
 				ABE21D4A0AABC3D636B9992F /* LibraryScanRecord.swift in Sources */,
@@ -959,6 +968,7 @@
 			files = (
 				76F534D7ECC1C4246F075425 /* AutomationLibrary.swift in Sources */,
 				FEA7EEBEFBC251F58E2B3107 /* BMPCache.swift in Sources */,
+				F712510A6DE507B06146990D /* CallerAdmission.swift in Sources */,
 				499FDCA82D4AA14E6638D2C5 /* CallerValidation.swift in Sources */,
 				6F898A5700FBE9BD29C6F3E4 /* CodableShims.swift in Sources */,
 				5E4E2E458C7CEC1E174924CB /* ColorDiag.swift in Sources */,
