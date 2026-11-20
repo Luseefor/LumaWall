@@ -148,7 +148,7 @@ extension NativeWallpaperDeployment {
     /// a symlink already fails the transcode before it starts.
     static func transcode(sourceURL: URL, to output: URL, spec: VariantSpec, proceed: () -> Bool) async -> TranscodeResult {
         guard let folder = try? trustedFolder(output.deletingLastPathComponent()) else { return .failed }
-        let source = AVURLAsset(url: sourceURL)
+        let source = transcodeAsset(sourceURL)
         guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return .failed }
         let partial = output.deletingPathExtension().appendingPathExtension("\(UUID().uuidString).partial.mov")
         do {

@@ -65,4 +65,36 @@ struct VerifiedFileCopyTests {
         #expect(throws: (any Error).self) { try VerifiedFileCopy.copy(from: source, to: victim) }
         #expect(try Data(contentsOf: victim) == Data("keep".utf8))
     }
+
+    @Test func copiesAFileOutOfATrustedFolder() throws {
+        let dir = try makeDir()
+        defer { try? fm.removeItem(at: dir) }
+        let bytes = Data("deployed".utf8)
+        try bytes.write(to: dir.appendingPathComponent("Wallpaper.mov"))
+        let dest = dir.appendingPathComponent("private.mov")
+
+        let result = try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: TrustedDirectory(url: dir), to: dest)
+        #expect(try Data(contentsOf: dest) == bytes)
+        #expect(result == (try VerifiedFileCopy.sha256(ofFileAt: dest)))
+    }
+
+    /// The extension can swap a deployed video for a symlink to a user's
+    /// file. The target here has the same bytes, so only a refusal to follow
+    /// the link, not a hash check, makes the copy fail.
+    @Test func neverReadsThroughASymlinkInATrustedFolder() throws {
+        let dir = try makeDir()
+        defer { try? fm.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("user-file.mov")
+        try Data("private".utf8).write(to: target)
+        try fm.createSymbolicLink(at: dir.appendingPathComponent("Wallpaper.mov"), withDestinationURL: target)
+        let fifo = dir.appendingPathComponent("pipe.mov")
+        #expect(mkfifo(fifo.path, 0o600) == 0)
+        let dest = dir.appendingPathComponent("private.mov")
+
+        let folder = try TrustedDirectory(url: dir)
+        for name in ["Wallpaper.mov", "pipe.mov", "missing.mov", ".."] {
+            #expect(throws: (any Error).self) { try VerifiedFileCopy.copy(named: name, in: folder, to: dest) }
+            #expect(!fm.fileExists(atPath: dest.path))
+        }
+    }
 }

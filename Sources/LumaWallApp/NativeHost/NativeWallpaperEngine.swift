@@ -346,6 +346,9 @@ final class NativeWallpaperEngine {
         active.removeAll()
         lastWrittenMap.removeAll()
         reportSurfaces(ofAll: previous)
+        // An encode can run with nothing on the desktop (a Lock Screen
+        // deploy); it has to stop too.
+        NativeWallpaperDeployment.copyConditionsChanged()
     }
 
     func reapplyAssignments() {
