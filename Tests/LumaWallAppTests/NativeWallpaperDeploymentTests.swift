@@ -25,6 +25,21 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: metadata.path))
     }
 
+    func testASnapshotCacheClearLeavesTheRequestFileTheExtensionChecks() throws {
+        // The extension ignores clearCaches unless this file is there and fresh
+        // (WallpaperExtension/NotificationGuards.swift, CacheClearRequest).
+        let documents = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: documents) }
+
+        NativeWallpaperDeployment.requestSnapshotCacheClear(documentsURL: documents, post: {})
+
+        let request = documents.appendingPathComponent("clear-caches.request")
+        let modified = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: request.path)[.modificationDate] as? Date)
+        XCTAssertLessThan(abs(modified.timeIntervalSinceNow), 5)
+    }
+
     func testMissingDeploymentCanBeCreated() throws {
         let videos = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: UUID().uuidString, videosFolderURL: videos))

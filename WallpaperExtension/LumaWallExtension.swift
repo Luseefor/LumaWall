@@ -130,22 +130,47 @@ final class LumaWallExtension: NSObject, AppExtension {
     /// Track screen lock state via distributed notifications from loginwindow.
     /// This lets us know the lock screen is showing even before the WallpaperAgent
     /// sends a presentation mode update, fixing the race where a video paused
-    /// on the desktop doesn't resume on the lock screen after lid open.
+    /// on the desktop doesn't resume on the lock screen after lid open. Any
+    /// process can post these names, so each hint is checked against the
+    /// login session first (`ScreenLockHint`).
     private func observeScreenLockState() {
         let dnc = DistributedNotificationCenter.default()
         dnc.addObserver(
             forName: .init("com.apple.screenIsLocked"),
             object: nil, queue: .main,
         ) { _ in
-            WallpaperState.shared.isScreenLocked = true
-            extensionLog("[Extension] Screen locked")
+            Self.applyLockHint(locked: true, retries: 1)
         }
         dnc.addObserver(
             forName: .init("com.apple.screenIsUnlocked"),
             object: nil, queue: .main,
         ) { _ in
-            WallpaperState.shared.isScreenLocked = false
-            Self.recomputeAndApplyPolicy()
+            Self.applyLockHint(locked: false, retries: 1)
+        }
+    }
+
+    /// Main queue. The session flag can trail loginwindow's notification, so
+    /// a hint the session doesn't confirm yet is checked again a second later
+    /// before it's dropped.
+    private static func applyLockHint(locked: Bool, retries: Int) {
+        let session = ScreenLockHint.sessionIsLocked()
+        guard ScreenLockHint.shouldApply(claimsLocked: locked, sessionLocked: session) else {
+            if retries > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    applyLockHint(locked: locked, retries: retries - 1)
+                }
+            } else {
+                extensionLog(
+                    "[Extension] Ignored screen \(locked ? "lock" : "unlock") hint: session says locked=\(session.map(String.init) ?? "unknown")"
+                )
+            }
+            return
+        }
+        WallpaperState.shared.isScreenLocked = locked
+        if locked {
+            extensionLog("[Extension] Screen locked")
+        } else {
+            recomputeAndApplyPolicy()
             ShuffleController.shared.noteWake()
             extensionLog("[Extension] Screen unlocked, recomputed policy")
         }

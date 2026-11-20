@@ -138,6 +138,7 @@ targets:
       - path: WallpaperExtension/StillCacheStore.swift
       - path: WallpaperExtension/CallerAdmission.swift
       - path: WallpaperExtension/ChoiceRemoval.swift
+      - path: WallpaperExtension/NotificationGuards.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:

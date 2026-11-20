@@ -309,14 +309,7 @@ final class WallpaperEngine {
         overlay.releaseWorkingMemory()
         if mode == .native {
             NativeWallpaperDeployment.notifyLibraryChanged()
-            let center = CFNotificationCenterGetDarwinNotifyCenter()
-            CFNotificationCenterPostNotification(
-                center,
-                CFNotificationName("app.lumawall.personal.clearCaches" as CFString),
-                nil,
-                nil,
-                true
-            )
+            NativeWallpaperDeployment.requestSnapshotCacheClear()
         }
     }
 
