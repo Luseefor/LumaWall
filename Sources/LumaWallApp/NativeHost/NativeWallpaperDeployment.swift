@@ -206,6 +206,12 @@ enum NativeWallpaperDeployment {
     @MainActor
     private static var deploymentTasks: [String: Task<EntryInfo, Error>] = [:]
 
+    /// Returns once no deploy of `entryID` is running; its result is ignored.
+    @MainActor
+    static func waitForDeployment(of entryID: String) async {
+        if let running = deploymentTasks[entryID] { _ = try? await running.value }
+    }
+
     @MainActor
     private static func deploy(asset: WallpaperAsset, entryID: String, surfaces: [Surface]) async throws -> EntryInfo {
         let displayPixels = surfaces.map(\.pixelSize)

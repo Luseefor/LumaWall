@@ -523,6 +523,72 @@ final class DeploymentStagingTests: XCTestCase {
     }
 }
 
+/// Removing a wallpaper from the library has to take its deployed copy
+/// with it, or System Settings keeps offering it.
+final class DeploymentRemovalTests: XCTestCase {
+    private var root: URL!
+    private var videos: URL { root.appendingPathComponent("videos") }
+    private var staging: URL { root.appendingPathComponent("copy-staging") }
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func deployed(_ id: String) throws -> URL {
+        let dir = videos.appendingPathComponent(id)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for name in ["Wallpaper.mov", "Wallpaper.minimal.mov", "thumbnail.jpg", "metadata.json"] {
+            try Data("x".utf8).write(to: dir.appendingPathComponent(name))
+        }
+        return dir
+    }
+
+    func testRemovalDeletesTheEntryAndItsStagedCopies() throws {
+        let fm = FileManager.default
+        let gone = UUID().uuidString
+        let kept = UUID().uuidString
+        let goneDir = try deployed(gone)
+        let keptDir = try deployed(kept)
+        let goneExport = staging.appendingPathComponent("\(gone).abc.Wallpaper.reduced.mov")
+        let keptExport = staging.appendingPathComponent("\(kept).abc.Wallpaper.reduced.mov")
+        for url in [goneExport, keptExport] { try Data("x".utf8).write(to: url) }
+
+        NativeWallpaperDeployment.deleteDeployedFiles(
+            entryID: gone, videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+        XCTAssertFalse(fm.fileExists(atPath: goneDir.path))
+        XCTAssertFalse(fm.fileExists(atPath: goneExport.path))
+        XCTAssertTrue(fm.fileExists(atPath: keptDir.appendingPathComponent("Wallpaper.mov").path))
+        XCTAssertTrue(fm.fileExists(atPath: keptExport.path))
+    }
+
+    func testRemovalOfASymlinkedEntryLeavesItsTarget() throws {
+        let fm = FileManager.default
+        let id = UUID().uuidString
+        let victim = root.appendingPathComponent("Documents", isDirectory: true)
+        try fm.createDirectory(at: victim, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: victim.appendingPathComponent("thesis.pages"))
+        try fm.createDirectory(at: videos, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: videos.appendingPathComponent(id), withDestinationURL: victim)
+
+        NativeWallpaperDeployment.deleteDeployedFiles(
+            entryID: id, videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+        XCTAssertTrue(fm.fileExists(atPath: victim.appendingPathComponent("thesis.pages").path))
+        XCTAssertNil(try? fm.destinationOfSymbolicLink(atPath: videos.appendingPathComponent(id).path))
+    }
+
+    func testRemovalRefusesAnInvalidID() throws {
+        let dir = try deployed(UUID().uuidString)
+        NativeWallpaperDeployment.deleteDeployedFiles(
+            entryID: "..", videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path))
+    }
+}
+
 final class VariantPublicationTests: XCTestCase {
     private var root: URL!
     private var videos: URL { root.appendingPathComponent("videos") }

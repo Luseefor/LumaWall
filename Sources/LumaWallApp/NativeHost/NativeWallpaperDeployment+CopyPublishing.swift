@@ -72,6 +72,12 @@ extension NativeWallpaperDeployment {
         Task { await encodeQueue.wake() }
     }
 
+    /// Stops and forgets every copy encode for a removed entry.
+    static func forgetCopies(for entryID: String) async {
+        surfacesLock.withLock { surfacesByEntry[entryID] = nil }
+        await encodeQueue.cancel(entryID: entryID)
+    }
+
     private static func surfaces(for entryID: String) -> [Surface] {
         surfacesLock.withLock { surfacesByEntry[entryID] ?? [] }
     }

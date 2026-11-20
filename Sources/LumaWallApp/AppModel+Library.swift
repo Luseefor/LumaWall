@@ -185,6 +185,11 @@ extension AppModel {
             } catch {
                 present("LumaWall", error.localizedDescription)
             }
+            // Once the row is gone (removed, or dropped as invalid), its
+            // deployed copy goes too, so System Settings stops offering it.
+            if await store.asset(id: asset.id) == nil {
+                await NativeWallpaperDeployment.removeDeployment(entryID: asset.id.rawValue.uuidString)
+            }
         }
     }
 }
