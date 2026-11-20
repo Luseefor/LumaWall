@@ -108,8 +108,7 @@ struct MediaImporterTests {
         let stored = try Data(contentsOf: outcome.asset.mediaURL)
         #expect(stored == (try Data(contentsOf: source)))
         #expect(outcome.asset.contentHash == SHA256.hash(data: stored).map { String(format: "%02x", $0) }.joined())
-        let scratch = dir.appendingPathComponent("Library/Importing")
-        #expect(((try? FileManager.default.contentsOfDirectory(atPath: scratch.path)) ?? []).isEmpty)
+        #expect(try libraryItems(in: dir) == Set(["Library.json", outcome.asset.id.rawValue.uuidString]))
     }
 
     @Test func importRefusesAFolderNamedLikeAVideo() async throws {
@@ -128,11 +127,10 @@ struct MediaImporterTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = try await makeVideo(withAudio: false, in: dir, name: "clip.mov")
         let importer = try MediaImporter(store: store(at: dir))
-        _ = try await importer.importVideo(source)
+        let first = try await importer.importVideo(source)
 
         await #expect(throws: LibraryStore.StoreError.self) { try await importer.importVideo(source) }
-        let scratch = dir.appendingPathComponent("Library/Importing")
-        #expect(((try? FileManager.default.contentsOfDirectory(atPath: scratch.path)) ?? []).isEmpty)
+        #expect(try libraryItems(in: dir) == Set(["Library.json", first.asset.id.rawValue.uuidString]))
     }
 
     @Test func inspectRejectsNonVideo() async throws {
@@ -206,6 +204,11 @@ struct MediaImporterTests {
 
     private func isolatedDir() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    /// What the library folder holds, so a stray staged copy shows.
+    private func libraryItems(in dir: URL) throws -> Set<String> {
+        Set(try FileManager.default.contentsOfDirectory(atPath: dir.appendingPathComponent("Library").path))
     }
 
     private func store(at dir: URL) throws -> LibraryStore {
