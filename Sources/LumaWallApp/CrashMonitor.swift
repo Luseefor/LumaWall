@@ -57,7 +57,7 @@ private func handleFatalSignal(_ sig: Int32) {
 extension CrashMonitor {
     fileprivate static func writeSignalDump(_ sig: Int32) {
         guard !dumpPath.isEmpty else { return }
-        let fd = open(dumpPath, O_CREAT | O_WRONLY | O_TRUNC, 0o644)
+        let fd = dumpPath.withUnsafeBufferPointer { openDumpFile($0.baseAddress!) }
         guard fd >= 0 else { return }
         defer { close(fd) }
 
@@ -69,6 +69,15 @@ extension CrashMonitor {
         if count > 0 {
             backtrace_symbols_fd(&frames, count, fd)
         }
+    }
+
+    /// Opens the dump for writing, readable only by the user, and never
+    /// through a symlink planted at `path`. Async-signal-safe: open and
+    /// fchmod only. fchmod covers a dump an older version left 0644.
+    static func openDumpFile(_ path: UnsafePointer<CChar>) -> Int32 {
+        let fd = open(path, O_CREAT | O_WRONLY | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        if fd >= 0 { _ = fchmod(fd, 0o600) }
+        return fd
     }
 
     private static func writeLine(_ fd: Int32, _ text: StaticString) {

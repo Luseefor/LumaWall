@@ -151,6 +151,7 @@
 		AF87D1007EFA29B80A62DD3E /* NativeModeSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = D35CD0B55EC357EFE75CE44D /* NativeModeSetting.swift */; };
 		B073828306294C374D3CFAB6 /* NOTICE in Resources */ = {isa = PBXBuildFile; fileRef = 7315FC91D5C820BE6B0B85F1 /* NOTICE */; };
 		B0C3C26B2C3C7EE160D6223E /* DisplayOcclusion.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6DBB8701C014457564B3EB5 /* DisplayOcclusion.swift */; };
+		B0DEFDC528BA232A85009344 /* CrashMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5451A297044A0F52081418CD /* CrashMonitorTests.swift */; };
 		B2AA086AFA9BEA942DD3AEE4 /* LogFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6867E7274898FBDA1C18147D /* LogFile.swift */; };
 		B513A3FFD42A219D59B38C47 /* WallpaperHostCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B4F704A5C929E798E5FD1B /* WallpaperHostCapabilities.swift */; };
 		B6BC69F8BC30188A7266E325 /* SurfaceSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C35E00FD97E3EBEDDBF43278 /* SurfaceSlot.swift */; };
@@ -337,6 +338,7 @@
 		4FF1ED95271EE1A26353D97E /* NOTICE */ = {isa = PBXFileReference; path = NOTICE; sourceTree = "<group>"; };
 		50AC3950C30CCB658EF253D0 /* ThermalHoldTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalHoldTests.swift; sourceTree = "<group>"; };
 		530306DC8CCBF37F8C074112 /* NativeModeSettingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeModeSettingTests.swift; sourceTree = "<group>"; };
+		5451A297044A0F52081418CD /* CrashMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashMonitorTests.swift; sourceTree = "<group>"; };
 		54C6731C377E9CD3FA6FDBF8 /* AppModel+Playback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Playback.swift"; sourceTree = "<group>"; };
 		5521AC1A8196EE62B0D65EB0 /* SolarSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SolarSchedule.swift; sourceTree = "<group>"; };
 		56588EB8C99158192CB3EA63 /* LogRedactionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogRedactionTests.swift; sourceTree = "<group>"; };
@@ -484,6 +486,7 @@
 			children = (
 				C9EEFD46DC73969C28CBE0D4 /* AboutInfoTests.swift */,
 				DA921C83D761AB7785CB1D0D /* ContentHashStoreTests.swift */,
+				5451A297044A0F52081418CD /* CrashMonitorTests.swift */,
 				EDCB9B96D2A6A4DE581A711D /* LoopingVideoViewTests.swift */,
 				BD4499F3700AB6ABE624CB85 /* NativeModeGateTests.swift */,
 				530306DC8CCBF37F8C074112 /* NativeModeSettingTests.swift */,
@@ -1083,6 +1086,7 @@
 			files = (
 				4F52B949A4B93075B7108DD4 /* AboutInfoTests.swift in Sources */,
 				0339CF069DEAE2F5ECC7E7C0 /* ContentHashStoreTests.swift in Sources */,
+				B0DEFDC528BA232A85009344 /* CrashMonitorTests.swift in Sources */,
 				94DFC3618AA4027FA1230638 /* LoopingVideoViewTests.swift in Sources */,
 				3F1627267353E30E8618D6C9 /* NativeModeGateTests.swift in Sources */,
 				523F027301B001A2049EFA27 /* NativeModeSettingTests.swift in Sources */,
