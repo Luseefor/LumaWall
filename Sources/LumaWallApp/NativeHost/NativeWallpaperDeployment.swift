@@ -173,6 +173,7 @@ enum NativeWallpaperDeployment {
     /// and which battery copy to encode first.
     @MainActor
     static func ensureDeployed(asset: WallpaperAsset, surfaces: [Surface]) async throws -> EntryInfo {
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
@@ -211,6 +212,8 @@ enum NativeWallpaperDeployment {
         let displayPixels = surfaces.map(\.pixelSize)
         playbackChanged(entryID: entryID, surfaces: surfaces)
         let hash = try await hashStore.hash(for: asset.mediaURL)
+        // Hashing a large file takes a while; native mode may be off by now.
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         if let existing = try entry(id: entryID),
             FileManager.default.fileExists(atPath: videoURL(for: existing).path),
             existing.contentHash == hash
@@ -262,6 +265,12 @@ enum NativeWallpaperDeployment {
         }.value
 
         let probe = try await probe(url: staged.dest)
+        // The copy and probe take a while too. Without metadata the partial
+        // entry is redeployed from scratch next time.
+        guard NativeModeSetting.isEnabledNow else {
+            try? FileManager.default.removeItem(at: staged.dir)
+            throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff
+        }
         let entry = EntryInfo(
             id: entryID,
             name: asset.name,
@@ -357,7 +366,9 @@ enum NativeWallpaperDeployment {
         generator.maximumSize = CGSize(width: 640, height: 360)
         guard let cgImage = try? await generator.image(at: .zero).image else { return }
         let rep = NSBitmapImageRep(cgImage: cgImage)
-        guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else { return }
+        guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]),
+            NativeModeSetting.isEnabledNow
+        else { return }
         try? jpeg.write(to: directory.appendingPathComponent("thumbnail.jpg"), options: .atomic)
     }
 

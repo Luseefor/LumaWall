@@ -156,7 +156,7 @@ func buildSettingsViewModelsXPC(rescan: Bool = true) async -> AnyObject? {
         localizedName: "LumaWall \u{2014} Video Wallpapers",
         disposability: .none,
         sortOrder: -100,
-        sortID: GroupSortID(id: "com.apple.wallpaper.aerials"),
+        sortID: GroupSortID(id: "\(bundleID).video-wallpapers"),
         allChoiceID: nil,
         shouldHideItemLabels: false,
         contextMenu: addVideoMenu,

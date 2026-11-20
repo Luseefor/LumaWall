@@ -164,6 +164,33 @@ final class VariantEncodeQueueTests: XCTestCase {
         XCTAssertEqual(log.completed, ["a/Wallpaper.qhd.mov"])
     }
 
+    func testRunningBatteryCopyStopsOnceDropped() async {
+        // Turning native mode off drops every job. A battery copy that keeps
+        // encoding would still write into the extension's container.
+        let log = EncodeLog()
+        let queue = queue(log)
+        await queue.enqueue([job("a", "Wallpaper.minimal.mov")])
+        await log.waitUntilStarted("a/Wallpaper.minimal.mov")
+        log.set("a/Wallpaper.minimal.mov", .drop)
+        await queue.wake()
+        let preempted = await queue.runningJobWasPreempted
+        XCTAssertTrue(preempted)
+        log.openAll()
+        await queue.drained()
+    }
+
+    func testRunningBatteryCopyFinishesWhenOnlyHeld() async {
+        let log = EncodeLog()
+        let queue = queue(log)
+        await queue.enqueue([job("a", "Wallpaper.minimal.mov")])
+        await log.waitUntilStarted("a/Wallpaper.minimal.mov")
+        log.set("a/Wallpaper.minimal.mov", .hold)
+        await queue.wake()
+        log.openAll()
+        await queue.drained()
+        XCTAssertEqual(log.completed, ["a/Wallpaper.minimal.mov"])
+    }
+
     func testDroppedJobsDoNotRun() async {
         let log = EncodeLog()
         log.openAll()
