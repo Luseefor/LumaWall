@@ -33,24 +33,32 @@ for name in "$@"; do
     IFS=/ read -r first rest <<< "$name"
     if [[ -d "Tests/$first" ]]; then
         target="$first"
+        search_dir="Tests/$first"
         IFS=/ read -r type_name method <<< "$rest"
     else
+        target=""
+        search_dir=Tests
         type_name="$first"
         method="$rest"
+    fi
+    if [[ -n "$type_name" ]]; then
         matches=()
         while IFS= read -r file; do
             matches+=("$file")
-        done < <(grep -rlE "(class|struct)[[:space:]]+${type_name}([^[:alnum:]_]|$)" Tests 2>/dev/null || true)
+        done < <(grep -rlE "(class|struct)[[:space:]]+${type_name}([^[:alnum:]_]|$)" "$search_dir" 2>/dev/null || true)
         if [[ ${#matches[@]} -eq 0 ]]; then
-            printf 'No test class or suite named %s under Tests/.\n' "$type_name" >&2
+            printf 'No test class or suite named %s under %s/.\n' "$type_name" "$search_dir" >&2
             exit 2
         fi
-        targets="$(printf '%s\n' "${matches[@]}" | cut -d/ -f2 | sort -u)"
-        if [[ "$(printf '%s\n' "$targets" | wc -l)" -gt 1 ]]; then
-            printf '%s is in more than one target; prefix one of:\n%s\n' "$type_name" "$targets" >&2
-            exit 2
+        if [[ -z "$target" ]]; then
+            targets="$(printf '%s\n' "${matches[@]}" | cut -d/ -f2 | sort -u)"
+            if [[ "$(printf '%s\n' "$targets" | wc -l)" -gt 1 ]]; then
+                printf '%s is in more than one target; prefix one of:\n%s\n' "$type_name" "$targets" >&2
+                exit 2
+            fi
+            target="$targets"
         fi
-        target="$targets"
+        # Checked against the project below, so a new file regenerates it.
         xcode_files+=("${matches[@]}")
     fi
     if [[ "$target" == LumaWallCoreTests ]]; then
