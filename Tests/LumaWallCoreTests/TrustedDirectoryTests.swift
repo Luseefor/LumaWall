@@ -92,6 +92,36 @@ struct TrustedDirectoryTests {
         #expect(fm.fileExists(atPath: victim.appendingPathComponent("precious.txt").path))
     }
 
+    @Test func aSymlinkAboveTheFolderIsRefusedBelowATrustedAncestor() throws {
+        // O_NOFOLLOW guards only the last component. A sandboxed process that
+        // swaps its own Data/Documents for a symlink must not redirect the
+        // app into a real folder elsewhere.
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        let staging = victim.appendingPathComponent("copy-staging", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Documents"), withDestinationURL: victim)
+        let path = root.appendingPathComponent("Documents/copy-staging", isDirectory: true)
+
+        #expect(throws: (any Error).self) { try TrustedDirectory(url: path, below: root) }
+        try fm.createDirectory(at: root.appendingPathComponent("Real/copy-staging"), withIntermediateDirectories: true)
+        _ = try TrustedDirectory(url: root.appendingPathComponent("Real/copy-staging"), below: root)
+        _ = try TrustedDirectory(url: root, below: root)
+        #expect(throws: (any Error).self) { try TrustedDirectory(url: victim, below: root) }
+    }
+
+    @Test func readsAFileButNotThroughASymlink() throws {
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        try Data("{}".utf8).write(to: root.appendingPathComponent("metadata.json"))
+        try fm.createSymbolicLink(
+            at: root.appendingPathComponent("linked.json"), withDestinationURL: victim.appendingPathComponent("precious.txt"))
+        let dir = try TrustedDirectory(url: root)
+        #expect(try dir.readFile(named: "metadata.json") == Data("{}".utf8))
+        #expect(throws: (any Error).self) { try dir.readFile(named: "linked.json") }
+        #expect(throws: (any Error).self) { try dir.readFile(named: "..") }
+    }
+
     @Test func removingAMissingItemThrowsNoSuchFile() throws {
         let (root, _, cleanup) = try makeTree()
         defer { cleanup() }
