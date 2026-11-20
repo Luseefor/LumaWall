@@ -558,7 +558,7 @@ final class DeploymentRemovalTests: XCTestCase {
         let keptExport = staging.appendingPathComponent("\(kept).abc.Wallpaper.reduced.mov")
         for url in [goneExport, keptExport] { try Data("x".utf8).write(to: url) }
 
-        NativeWallpaperDeployment.deleteDeployedFiles(
+        try NativeWallpaperDeployment.deleteDeployedFiles(
             entryID: gone, videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
         XCTAssertFalse(fm.fileExists(atPath: goneDir.path))
         XCTAssertFalse(fm.fileExists(atPath: goneExport.path))
@@ -575,17 +575,50 @@ final class DeploymentRemovalTests: XCTestCase {
         try fm.createDirectory(at: videos, withIntermediateDirectories: true)
         try fm.createSymbolicLink(at: videos.appendingPathComponent(id), withDestinationURL: victim)
 
-        NativeWallpaperDeployment.deleteDeployedFiles(
+        try NativeWallpaperDeployment.deleteDeployedFiles(
             entryID: id, videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
         XCTAssertTrue(fm.fileExists(atPath: victim.appendingPathComponent("thesis.pages").path))
         XCTAssertNil(try? fm.destinationOfSymbolicLink(atPath: videos.appendingPathComponent(id).path))
     }
 
-    func testRemovalRefusesAnInvalidID() throws {
-        let dir = try deployed(UUID().uuidString)
-        NativeWallpaperDeployment.deleteDeployedFiles(
-            entryID: "..", videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+    func testRemovalRefusesANameThatIsNotAnEntryID() throws {
+        let dir = try deployed("Wallpapers")
+        let export = staging.appendingPathComponent("Wallpapers.abc.Wallpaper.reduced.mov")
+        try Data("x".utf8).write(to: export)
+        XCTAssertThrowsError(
+            try NativeWallpaperDeployment.deleteDeployedFiles(
+                entryID: "Wallpapers", videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root))
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: export.path))
+    }
+
+    func testRemovalReportsAFolderItCannotDelete() throws {
+        let fm = FileManager.default
+        let id = UUID().uuidString
+        let dir = try deployed(id)
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
+        XCTAssertThrowsError(
+            try NativeWallpaperDeployment.deleteDeployedFiles(
+                entryID: id, videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root))
+        // A wallpaper already gone is not an error.
+        XCTAssertNoThrow(
+            try NativeWallpaperDeployment.deleteDeployedFiles(
+                entryID: UUID().uuidString, videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root))
+    }
+
+    @MainActor
+    func testARemovedWallpaperIsNotDeployedAgain() async throws {
+        let id = WallpaperID()
+        NativeWallpaperDeployment.markRemoved(entryID: id.rawValue.uuidString)
+        defer { NativeWallpaperDeployment.unmarkRemoved(entryID: id.rawValue.uuidString) }
+        let asset = WallpaperAsset(
+            id: id, name: "Gone", mediaURL: root.appendingPathComponent("gone.mov"), duration: 5,
+            framesPerSecond: 30, pixelSize: CGSize(width: 1920, height: 1080), contentHash: "gone", containsAudio: false)
+        do {
+            _ = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, surfaces: [])
+            XCTFail("expected the removed wallpaper to be refused")
+        } catch NativeWallpaperDeployment.DeploymentError.removed {}
     }
 }
 

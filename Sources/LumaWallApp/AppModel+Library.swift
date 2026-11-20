@@ -168,6 +168,10 @@ extension AppModel {
     }
 
     func remove(_ asset: WallpaperAsset) {
+        let entryID = asset.id.rawValue.uuidString
+        // Before any suspension: an apply or restore running meanwhile must
+        // not deploy or assign the wallpaper being removed.
+        NativeWallpaperDeployment.markRemoved(entryID: entryID)
         Task {
             for (displayID, wallpaperID) in activeByDisplay where wallpaperID == asset.id {
                 try? await engine.clear(displayID)
@@ -187,8 +191,17 @@ extension AppModel {
             }
             // Once the row is gone (removed, or dropped as invalid), its
             // deployed copy goes too, so System Settings stops offering it.
-            if await store.asset(id: asset.id) == nil {
-                await NativeWallpaperDeployment.removeDeployment(entryID: asset.id.rawValue.uuidString)
+            guard await store.asset(id: asset.id) == nil else {
+                NativeWallpaperDeployment.unmarkRemoved(entryID: entryID)
+                return
+            }
+            do {
+                try await NativeWallpaperDeployment.removeDeployment(entryID: entryID)
+            } catch {
+                present(
+                    "LumaWall",
+                    "\(asset.name) was removed from the library, but its copy for System Settings couldn't be deleted. "
+                        + error.localizedDescription)
             }
         }
     }

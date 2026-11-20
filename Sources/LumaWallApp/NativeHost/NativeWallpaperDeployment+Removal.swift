@@ -7,38 +7,62 @@ import LumaWallCore
 /// video, thumbnail and copies stayed in the container, so System Settings
 /// kept offering it, and its queued copy encodes kept running.
 extension NativeWallpaperDeployment {
+    /// Marks the entry removed, so no new deploy or assignment of it starts.
+    /// Call before the first suspension of a removal; see `removedEntries`.
+    @MainActor
+    static func markRemoved(entryID: String) {
+        removedEntries.insert(entryID)
+    }
+
+    /// Undoes `markRemoved` when the library kept the wallpaper after all.
+    @MainActor
+    static func unmarkRemoved(entryID: String) {
+        removedEntries.remove(entryID)
+    }
+
     /// Waits for a deploy of the entry still running, stops its copy
     /// encodes, deletes its deployed folder and staged exports, and tells
-    /// the extension to rescan so the picker drops it.
+    /// the extension to rescan so the picker drops it. Throws when the
+    /// deployed folder couldn't be deleted, so the caller can say so.
     @MainActor
-    static func removeDeployment(entryID: String) async {
+    static func removeDeployment(entryID: String) async throws {
         guard PathSafety.isValidEntryID(entryID) else { return }
+        markRemoved(entryID: entryID)
         // A deploy still running would publish the entry after the delete.
         await waitForDeployment(of: entryID)
         await forgetCopies(for: entryID)
-        await Task.detached(priority: .utility) {
-            deleteDeployedFiles(entryID: entryID)
+        defer { notifyLibraryChanged() }
+        try await Task.detached(priority: .utility) {
+            try deleteDeployedFiles(entryID: entryID)
         }.value
-        notifyLibraryChanged()
     }
 
     /// Deletes `videos/<entryID>` and the entry's exports in copy staging,
     /// without following symlinks. Under `entryLock`, so a copy published
     /// at the same time either lands first and is deleted with the entry,
-    /// or finds the entry gone and is discarded.
+    /// or finds the entry gone and is discarded. A missing entry is fine;
+    /// any other failure deleting it is thrown. Staged exports are best
+    /// effort: startup cleanup removes any left.
     static func deleteDeployedFiles(
         entryID: String,
         videosFolderURL: URL = videosFolderURL,
         stagingFolderURL: URL = stagingFolderURL,
         trustedAncestor: URL = containerURL
-    ) {
-        guard PathSafety.isValidEntryID(entryID) else { return }
-        entryLock.withLock {
-            try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor).removeItem(named: entryID)
-            guard let staging = try? TrustedDirectory(url: stagingFolderURL, below: trustedAncestor) else { return }
-            for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasPrefix(entryID + ".") {
-                try? staging.removeFile(named: file.name)
+    ) throws {
+        guard PathSafety.isValidEntryID(entryID) else { throw DeploymentError.invalidEntry }
+        try entryLock.withLock {
+            if let staging = try? TrustedDirectory(url: stagingFolderURL, below: trustedAncestor) {
+                for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasPrefix(entryID + ".") {
+                    try? staging.removeFile(named: file.name)
+                }
             }
+            let videos: TrustedDirectory
+            do {
+                videos = try TrustedDirectory(url: videosFolderURL, below: trustedAncestor)
+            } catch POSIXError.ENOENT {
+                return
+            }
+            do { try videos.removeItem(named: entryID) } catch POSIXError.ENOENT {}
         }
     }
 }
