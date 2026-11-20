@@ -100,6 +100,54 @@ import Testing
         #expect(remaining.isEmpty)
     }
 
+    private func mode(of url: URL) throws -> Int {
+        try #require(FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int)
+    }
+
+    @Test func diagnosticsAreReadableOnlyByTheUser() throws {
+        // Crash reports carry backtraces and paths; they were created 0644
+        // in a 0755 folder.
+        let store = try makeStore()
+        store.save(CrashReport(kind: .signal, name: "SIGSEGV", reason: "x", appVersion: "1", osVersion: "26"))
+        _ = store.beginSession(appVersion: "1", osVersion: "26")
+        #expect(try mode(of: store.directoryURL) == 0o700)
+        let files = try FileManager.default.contentsOfDirectory(at: store.directoryURL, includingPropertiesForKeys: nil)
+        #expect(files.count == 2)
+        for file in files { #expect(try mode(of: file) == 0o600) }
+    }
+
+    @Test func aReportIsNeverWrittenThroughASymlink() throws {
+        let store = try makeStore()
+        let victim = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: victim) }
+        try Data("keep".utf8).write(to: victim)
+        try FileManager.default.createSymbolicLink(
+            at: store.directoryURL.appendingPathComponent("session.current"), withDestinationURL: victim)
+        _ = store.beginSession(appVersion: "1", osVersion: "26")
+        #expect(try Data(contentsOf: victim) == Data("keep".utf8))
+        // The link was replaced by a real sentinel, not left in place.
+        let sentinel = store.directoryURL.appendingPathComponent("session.current")
+        let attributes = try FileManager.default.attributesOfItem(atPath: sentinel.path)
+        #expect(attributes[.type] as? FileAttributeType == .typeRegular)
+        #expect(try mode(of: sentinel) == 0o600)
+        #expect(store.beginSession(appVersion: "1", osVersion: "26")?.kind == .uncleanShutdown)
+    }
+
+    @Test func ingestDoesNotFollowASymlinkedDump() throws {
+        // A pending.stack symlinked to another file copied that file into a
+        // report shown in Settings.
+        let store = try makeStore()
+        let secret = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: secret) }
+        try "SIGSEGV\n1700000000\nsecret-token\n".write(to: secret, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: store.directoryURL.appendingPathComponent("pending.stack"), withDestinationURL: secret)
+
+        store.ingestRawDumps(appVersion: "1.0", osVersion: "26.0")
+        #expect(store.reports().isEmpty)
+        #expect(FileManager.default.fileExists(atPath: secret.path))
+    }
+
     @Test func formattedTextCarriesKeyFields() {
         let report = CrashReport(
             kind: .signal, name: "SIGBUS", reason: "The app was terminated by SIGBUS.",

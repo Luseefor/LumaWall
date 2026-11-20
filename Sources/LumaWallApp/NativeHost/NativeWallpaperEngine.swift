@@ -5,6 +5,15 @@ import os
 
 let nativeHostLog = Logger(subsystem: "app.lumawall.personal", category: "native-host")
 
+/// What a log line may show of an error in public: its domain and code.
+/// Descriptions can name files and folders, so log them `.private`.
+enum LogRedaction {
+    static func code(of error: any Error) -> String {
+        let ns = error as NSError
+        return "domain=\(ns.domain) code=\(ns.code)"
+    }
+}
+
 @MainActor
 final class NativeWallpaperEngine {
     private let displays: DisplayCoordinator
@@ -63,11 +72,11 @@ final class NativeWallpaperEngine {
         } catch {
             let cocoa = error as NSError
             nativeHostLog.error(
-                "apply: failed domain=\(cocoa.domain, privacy: .public) code=\(cocoa.code) description=\(cocoa.localizedDescription, privacy: .public)"
+                "apply: failed domain=\(cocoa.domain, privacy: .public) code=\(cocoa.code) description=\(cocoa.localizedDescription, privacy: .private)"
             )
             throw error
         }
-        nativeHostLog.info("apply: \(asset.name, privacy: .public) → display \(displayID.rawValue, privacy: .public)")
+        nativeHostLog.info("apply: \(asset.id.rawValue.uuidString, privacy: .public) → display \(displayID.rawValue, privacy: .public)")
         libraryByID[asset.id] = asset
         let replaced = active[displayID]?.0
         active[displayID] = (asset.id, composition)
@@ -99,7 +108,7 @@ final class NativeWallpaperEngine {
         let connected = all.filter { !unassigned.contains($0.cgDisplayID) }
         let previous = Set(active.values.map(\.0))
         defer { reportSurfaces(ofAll: previous) }
-        nativeHostLog.info("applyToAll: \(asset.name, privacy: .public) → \(connected.count) display(s)")
+        nativeHostLog.info("applyToAll: \(asset.id.rawValue.uuidString, privacy: .public) → \(connected.count) display(s)")
         libraryByID[asset.id] = asset
         for display in connected {
             active[display.displayID] = (asset.id, composition)
@@ -242,7 +251,9 @@ final class NativeWallpaperEngine {
                 active[assignment.displayID] = (asset.id, assignment.composition)
             } catch {
                 if WallpaperHostCapabilities.isPermissionError(error) { throw error }
-                nativeHostLog.error("restore: deploy failed for \(asset.name, privacy: .public): \(error, privacy: .public)")
+                nativeHostLog.error(
+                    "restore: deploy failed for \(asset.id.rawValue.uuidString, privacy: .public): \(LogRedaction.code(of: error), privacy: .public) \(error.localizedDescription, privacy: .private)"
+                )
                 failed.insert(assignment.displayID)
             }
         }
@@ -281,7 +292,9 @@ final class NativeWallpaperEngine {
             nativeHostLog.info("restore: assigned \(map.count - unassigned.count) display(s)")
         } catch {
             if WallpaperHostCapabilities.isPermissionError(error) { throw error }
-            nativeHostLog.error("restore: assignment failed: \(error, privacy: .public)")
+            nativeHostLog.error(
+                "restore: assignment failed: \(LogRedaction.code(of: error), privacy: .public) \(error.localizedDescription, privacy: .private)"
+            )
             let assigned = Set(map.keys)
             failed.formUnion(connected.filter { assigned.contains($0.cgDisplayID) }.map(\.displayID))
             for displayID in failed { active.removeValue(forKey: displayID) }

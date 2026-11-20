@@ -42,6 +42,38 @@ public enum StoreIO {
         try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
     }
 
+    /// Writes `value` readable only by the user (0600), for diagnostics. The
+    /// bytes go to a new `O_EXCL | O_NOFOLLOW` temp file renamed over `url`,
+    /// so an existing file or symlink at `url` is replaced, never written
+    /// through.
+    public static func writePrivateJSON<T: Encodable>(_ value: T, to url: URL) throws {
+        let data = try JSONEncoder.lumaWall.encode(value)
+        let temp = url.deletingLastPathComponent()
+            .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+        let fd = open(temp.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        do {
+            try handle.write(contentsOf: data)
+            try handle.close()
+            guard rename(temp.path, url.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        } catch {
+            unlink(temp.path)
+            throw error
+        }
+    }
+
+    /// The bytes of the regular file at `url`, refusing a symlink or anything
+    /// else in its place.
+    public static func readRegularFile(at url: URL) throws -> Data {
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EFTYPE) }
+        return try handle.readToEnd() ?? Data()
+    }
+
     /// Best-effort variant for contexts that must not throw (crash-time saves).
     @discardableResult
     public static func tryWriteJSON<T: Encodable>(_ value: T, to url: URL) -> Bool {

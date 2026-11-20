@@ -274,7 +274,8 @@ extension AppModel {
     }
 
     func present(_ title: String, _ message: String) {
-        nativeHostLog.error("alert: \(title, privacy: .public), \(message, privacy: .public)")
+        // Messages name files and folders; only the title is public.
+        nativeHostLog.error("alert: \(title, privacy: .public), \(message, privacy: .private)")
         let alert = AppAlert(title: title, message: message)
         if activeAlert == nil {
             activeAlert = alert
