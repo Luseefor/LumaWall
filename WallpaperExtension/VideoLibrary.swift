@@ -108,7 +108,9 @@ final class VideoLibrary: Sendable {
                 }
                 discovered.append(entry)
             case let .skipped(reason):
-                extensionLog("[VideoLibrary] Skipping \(dir.lastPathComponent): \(reason)")
+                // Entry names are UUIDs; anything else could be a user's name.
+                let name = PathSafety.isValidEntryID(dir.lastPathComponent) ? dir.lastPathComponent : "a non-UUID item"
+                extensionLog("[VideoLibrary] Skipping \(name): \(reason)")
             }
         }
 
