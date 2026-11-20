@@ -47,8 +47,11 @@ extension NativeWallpaperDeployment {
                     kept[job.sourceKey] = nil
                 }
                 let source = job.sourceURL
-                // AVFoundation goes by the extension to pick a reader.
-                let name = UUID().uuidString + "." + (source.pathExtension.isEmpty ? "mov" : source.pathExtension)
+                // Named for this process, so another running LumaWall's
+                // cleanup leaves it alone. AVFoundation goes by the
+                // extension to pick a reader.
+                let ext = source.pathExtension.isEmpty ? "mov" : source.pathExtension
+                let name = "\(getpid()).\(UUID().uuidString).\(ext)"
                 let destination = folderURL.appendingPathComponent(name)
                 let entry = try openFolder(source.deletingLastPathComponent())
                 let copied = try VerifiedFileCopy.copy(named: source.lastPathComponent, in: entry, to: destination)
@@ -70,15 +73,29 @@ extension NativeWallpaperDeployment {
         }
 
         /// Deletes the copies a previous run left behind, keeping the ones
-        /// in use, so it is safe to call while an encode runs.
+        /// in use, so it is safe to call while an encode runs. Copies named
+        /// for another running process are kept too: a second LumaWall (a
+        /// dev build next to the installed one) shares this folder.
         func removeLeftovers() {
             lock.withLock {
                 guard let folder = try? TrustedDirectory(url: folderURL) else { return }
                 let inUse = Set(kept.values)
                 for item in (try? folder.entries()) ?? [] where !inUse.contains(item.name) {
+                    if let owner = Self.owner(of: item.name), owner != getpid(), Self.isRunning(owner) { continue }
                     try? folder.removeItem(named: item.name)
                 }
             }
+        }
+
+        /// The process ID a copy's name starts with, if any.
+        private static func owner(of name: String) -> pid_t? {
+            name.split(separator: ".", maxSplits: 1).first.flatMap { pid_t($0) }.flatMap { $0 > 0 ? $0 : nil }
+        }
+
+        /// Whether a process with this ID exists. A reused ID only keeps a
+        /// leftover until a later launch.
+        private static func isRunning(_ pid: pid_t) -> Bool {
+            kill(pid, 0) == 0 || errno == EPERM
         }
 
         private func privateFolder() throws -> TrustedDirectory {

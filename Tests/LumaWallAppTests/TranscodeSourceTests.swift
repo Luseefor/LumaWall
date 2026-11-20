@@ -133,6 +133,24 @@ final class TranscodeSourceTests: XCTestCase {
         XCTAssertEqual(privateFiles(), [inUse])
     }
 
+    func testCleanupSparesTheCopiesOfAnotherRunningInstance() async throws {
+        // A dev build running next to the installed app shares this folder;
+        // its launch cleanup deleted the other's copy mid-encode.
+        try bytes.write(to: deployed)
+        let log = SourceLog()
+        _ = await export(job(), log: log)
+        let inUse = try XCTUnwrap(log.sources.first).lastPathComponent
+        XCTAssertTrue(inUse.hasPrefix("\(getpid())."))
+        // PIDs top out below 100000 on macOS, so 999999 never runs.
+        let otherRunning = "\(getppid()).\(UUID().uuidString).mov"
+        let leftovers = ["999999.\(UUID().uuidString).mov", "\(getpid()).\(UUID().uuidString).mov", "\(UUID().uuidString).mov"]
+        for name in [otherRunning] + leftovers {
+            try Data("x".utf8).write(to: sources.folderURL.appendingPathComponent(name))
+        }
+        sources.removeLeftovers()
+        XCTAssertEqual(Set(privateFiles()), [inUse, otherRunning])
+    }
+
     func testASymlinkedFolderAboveTheEntryIsRefused() async throws {
         // The extension can swap videos (or Documents) for a link to a folder
         // holding a file with the published bytes.
