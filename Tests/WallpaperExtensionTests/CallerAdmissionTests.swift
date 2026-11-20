@@ -75,10 +75,11 @@ final class CallerAdmissionTests: XCTestCase {
             var code: SecCode?
             return (SecCodeCopySelf([], &code), code)
         }
-        guard case let .rejected(reason) = CallerAdmission.verdict(for: peer) else {
-            return XCTFail("the test runner was admitted")
-        }
-        XCTAssertTrue(reason.hasPrefix("signature matches no wallpaper host"), reason)
+        // xctest is Apple-signed, so every host requirement fails as a plain
+        // mismatch rather than a signature error.
+        XCTAssertEqual(
+            CallerAdmission.verdict(for: peer),
+            .rejected("signature matches no wallpaper host (status \(errSecCSReqFailed))"))
     }
 
     private func runningPIDs(named name: String) throws -> [Int32] {
@@ -90,9 +91,10 @@ final class CallerAdmissionTests: XCTestCase {
         try pgrep.run()
         pgrep.waitUntilExit()
         let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        let pids = text.split(separator: "\n").compactMap { Int32($0) }
-        try XCTSkipIf(pids.isEmpty, "WallpaperAgent isn't running here")
-        return pids
+        // pgrep exits 1 for no match and 2 or more when it couldn't look.
+        try XCTSkipIf(pgrep.terminationStatus == 1, "\(name) isn't running here")
+        XCTAssertEqual(pgrep.terminationStatus, 0, "pgrep failed")
+        return text.split(separator: "\n").compactMap { Int32($0) }
     }
 
     /// A peer backed by the code signature of a bundle on disk, checked the

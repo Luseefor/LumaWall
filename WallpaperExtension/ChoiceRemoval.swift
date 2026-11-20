@@ -8,7 +8,9 @@
 // and the configuration names a video in the library. Scanning the request's
 // description for `identifier: "` could pick up any field that contained that
 // text. A request that holds no descriptor, such as the add-style
-// WallpaperChoiceRequest enum, deletes nothing.
+// WallpaperChoiceRequest enum, deletes nothing. On macOS 27.2 the host's
+// remove call appears to send that enum, so a Settings removal is refused
+// and logged; the verbose log dumps the payload for when a new shape turns up.
 
 import Foundation
 
