@@ -58,6 +58,22 @@ if (( publish )) && ! command -v gh >/dev/null 2>&1; then
 fi
 
 cd "${project_root}"
+if ! git_status="$(git -C "${project_root}" status --porcelain 2>&1)"; then
+    print -u2 "Refusing release: unable to inspect git working tree in ${project_root}."
+    print -u2 "${git_status}"
+    exit 2
+fi
+if [[ -n "${git_status}" ]]; then
+    print -u2 "Refusing release: git working tree is dirty; commit or stash changes first."
+    print -u2 "${git_status}"
+    exit 2
+fi
+if ! release_commit="$(git -C "${project_root}" rev-parse --verify HEAD 2>&1)"; then
+    print -u2 "Refusing release: unable to resolve HEAD commit."
+    print -u2 "${release_commit}"
+    exit 2
+fi
+
 "${project_root}/ci/check.sh"
 
 mkdir -p "${output_dir}"
@@ -202,11 +218,48 @@ print "Checksums ready: ${checksums_path}"
 if (( publish )); then
     app_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${app_path}/Contents/Info.plist")"
     release_tag="v${app_version}"
+
+    if git -C "${project_root}" show-ref --verify --quiet "refs/tags/${release_tag}"; then
+        if ! local_tag_commit="$(git -C "${project_root}" rev-parse --verify "refs/tags/${release_tag}^{commit}" 2>&1)"; then
+            print -u2 "Refusing --publish: local tag ${release_tag} does not resolve to a commit."
+            print -u2 "${local_tag_commit}"
+            exit 2
+        fi
+        if [[ "${local_tag_commit}" != "${release_commit}" ]]; then
+            print -u2 "Refusing --publish: local tag ${release_tag} resolves to ${local_tag_commit}, expected ${release_commit}."
+            exit 2
+        fi
+    fi
+
+    if git -C "${project_root}" remote get-url origin >/dev/null 2>&1; then
+        if ! remote_tag_refs="$(git -C "${project_root}" ls-remote --tags origin "refs/tags/${release_tag}" "refs/tags/${release_tag}^{}" 2>&1)"; then
+            print -u2 "Refusing --publish: failed to inspect remote tags on origin."
+            print -u2 "${remote_tag_refs}"
+            exit 2
+        fi
+        if [[ -n "${remote_tag_refs}" ]]; then
+            remote_tag_commit=""
+            while IFS=$'\t' read -r ref_sha ref_name; do
+                if [[ "${ref_name}" == "refs/tags/${release_tag}^{}" ]]; then
+                    remote_tag_commit="${ref_sha}"
+                    break
+                elif [[ "${ref_name}" == "refs/tags/${release_tag}" && -z "${remote_tag_commit}" ]]; then
+                    remote_tag_commit="${ref_sha}"
+                fi
+            done <<< "${remote_tag_refs}"
+            if [[ "${remote_tag_commit}" != "${release_commit}" ]]; then
+                print -u2 "Refusing --publish: remote tag ${release_tag} resolves to ${remote_tag_commit}, expected ${release_commit}."
+                exit 2
+            fi
+        fi
+    fi
+
     gh release create "${release_tag}" \
         --draft \
+        --target "${release_commit}" \
         --title "LumaWall ${app_version}" \
         --generate-notes \
         "${dmg_path}" \
         "${checksums_path}"
-    print "Draft GitHub Release created: ${release_tag}"
+    print "Draft GitHub Release created: ${release_tag} (${release_commit})"
 fi
