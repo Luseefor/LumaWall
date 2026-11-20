@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "indentation": {
+    "spaces": 4
+  },
+  "lineLength": 140,
+  "rules": {
+    "DoNotUseSemicolons": false,
+    "GroupNumericLiterals": false,
+    "NoAccessLevelOnExtensionDeclaration": false,
+    "OneVariableDeclarationPerLine": false,
+    "ReplaceForEachWithForLoop": false,
+    "UseLetInEveryBoundCaseVariable": false
+  }
+}
