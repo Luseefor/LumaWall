@@ -275,7 +275,11 @@ enum NativeWallpaperDeployment {
             : "Wallpaper.mov"
         try FileManager.default.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
         let stagingFolder = try makeStagingFolder(appropriateFor: videosFolderURL)
-        defer { try? FileManager.default.removeItem(at: stagingFolder) }
+        beginStaging(stagingFolder)
+        defer {
+            try? FileManager.default.removeItem(at: stagingFolder)
+            endStaging(stagingFolder)
+        }
         let staged = try await Task.detached(priority: .utility) {
             try stageDeployment(source: asset.mediaURL, entryID: entryID, filename: filename, stagingFolderURL: stagingFolder)
         }.value
@@ -301,6 +305,7 @@ enum NativeWallpaperDeployment {
             try publishDeployment(staged, stagingFolderURL: stagingFolder)
         }.value
         notifyLibraryChanged()
+        scheduleSweep()
         let deployed = videoURL(for: entry)
         Task.detached {
             await ensureVariants(
