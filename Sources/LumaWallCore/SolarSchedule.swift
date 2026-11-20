@@ -127,15 +127,38 @@ public enum SolarSchedule: Sendable {
     }
 }
 
+/// Minimal Core Location surface needed for coarse daylight fixes; abstracted
+/// so tests can verify the location lifecycle without waking system hardware.
+public protocol DaylightLocationClient: AnyObject {
+    var delegate: (any CLLocationManagerDelegate)? { get set }
+    var desiredAccuracy: CLLocationAccuracy { get set }
+    var authorizationStatus: CLAuthorizationStatus { get }
+    func requestWhenInUseAuthorization()
+    func requestLocation()
+    func stopUpdatingLocation()
+}
+
+extension CLLocationManager: DaylightLocationClient {}
+
 /// Rough location for sunrise/sunset. Safe to call from the main actor app model.
+/// Core Location is created only while solar scheduling is active and torn down
+/// as soon as it is turned off.
 public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
     public static let shared = LocationDaylightProvider()
 
-    private let manager = CLLocationManager()
+    private let makeClient: @Sendable () -> any DaylightLocationClient
     private let lock = NSLock()
+    private var _client: (any DaylightLocationClient)?
+    private var _isActive = false
     private var _coordinate: CLLocationCoordinate2D?
     private var _lastRequestAt: Date?
     private var _onFirstFix: (() -> Void)?
+
+    public var isActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isActive
+    }
 
     /// Called once, when the first location fix arrives. The app uses it to
     /// re-evaluate solar automations immediately: the fix lands
@@ -161,46 +184,100 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
         return _coordinate
     }
 
-    private override init() {
+    public init(makeClient: @escaping @Sendable () -> any DaylightLocationClient = { CLLocationManager() }) {
+        self.makeClient = makeClient
         super.init()
-        manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyKilometer
     }
 
     /// Minimum age of the last fix before asking again. Coordinates only feed
-    /// sunrise/sunset math, which barely moves within minutes, without this,
+    /// sunrise/sunset math, which barely moves within minutes; without this,
     /// every automation evaluation (clock, appearance, workspace events) wakes
     /// location hardware for a fix we already have.
     private static let fixThrottle: TimeInterval = 15 * 60
 
+    public func setActive(_ active: Bool) {
+        if active {
+            let newlyCreated: (any DaylightLocationClient)? = {
+                lock.lock()
+                defer { lock.unlock() }
+                _isActive = true
+                guard _client == nil else { return nil }
+                let client = makeClient()
+                _client = client
+                return client
+            }()
+            if let newlyCreated {
+                newlyCreated.desiredAccuracy = kCLLocationAccuracyKilometer
+                newlyCreated.delegate = self
+            }
+            requestIfNeeded()
+        } else {
+            let previous: (any DaylightLocationClient)? = {
+                lock.lock()
+                defer { lock.unlock() }
+                _isActive = false
+                _coordinate = nil
+                _lastRequestAt = nil
+                let current = _client
+                _client = nil
+                return current
+            }()
+            previous?.stopUpdatingLocation()
+            previous?.delegate = nil
+        }
+    }
+
     public func requestIfNeeded() {
-        switch manager.authorizationStatus {
+        let client: (any DaylightLocationClient)? = {
+            lock.lock()
+            defer { lock.unlock() }
+            guard _isActive else { return nil }
+            return _client
+        }()
+        guard let client else { return }
+
+        switch client.authorizationStatus {
         case .notDetermined:
             // When-In-Use is all sunrise/sunset needs (one coarse fix), and it
             // matches the declared plist keys + settings copy. Requesting Always
             // here could never be granted (no Always usage-description key), so
             // the status stayed `.notDetermined` and the system re-prompted on
             // every launch.
-            manager.requestWhenInUseAuthorization()
+            client.requestWhenInUseAuthorization()
         case .authorized, .authorizedAlways:
-            lock.lock()
-            let haveFix = _coordinate != nil
-            let recent = _lastRequestAt.map { Date().timeIntervalSince($0) < Self.fixThrottle } ?? false
-            if !recent { _lastRequestAt = Date() }
-            lock.unlock()
-            // Always take the first fix (automation has nothing without it);
-            // afterwards at most one fix per throttle window.
-            if haveFix, recent { return }
-            manager.requestLocation()
+            requestThrottledLocation(on: client)
         default:
             break
         }
     }
 
+    private func requestThrottledLocation(on client: any DaylightLocationClient) {
+        let shouldRequest: Bool = {
+            lock.lock()
+            defer { lock.unlock() }
+            guard _isActive else { return false }
+            let recent = _lastRequestAt.map { Date().timeIntervalSince($0) < Self.fixThrottle } ?? false
+            if recent { return false }
+            _lastRequestAt = Date()
+            return true
+        }()
+        if shouldRequest {
+            client.requestLocation()
+        }
+    }
+
     public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        switch manager.authorizationStatus {
+        let client: (any DaylightLocationClient)? = {
+            lock.lock()
+            defer { lock.unlock() }
+            guard _isActive else { return nil }
+            return _client
+        }()
+        guard let client else { return }
+
+        switch client.authorizationStatus {
         case .authorized, .authorizedAlways:
-            manager.requestLocation()
+            requestThrottledLocation(on: client)
         default:
             break
         }
@@ -215,5 +292,9 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
         if isFirst { handler?() }
     }
 
-    public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+    public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        lock.lock()
+        if _coordinate == nil { _lastRequestAt = nil }
+        lock.unlock()
+    }
 }

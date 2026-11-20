@@ -85,4 +85,112 @@ struct SolarScheduleTests {
         #expect(abs((provider.coordinate?.latitude ?? 0) - 52.37) < 0.001)
         #expect(abs((provider.coordinate?.longitude ?? 0) - 4.9) < 0.001)
     }
+
+    @Test func initAndInactiveCallsDoNotStartLocationManager() {
+        final class Box: @unchecked Sendable {
+            var created = 0
+        }
+        let box = Box()
+        let provider = LocationDaylightProvider {
+            box.created += 1
+            return FakeLocationClient(authorizationStatus: .authorized)
+        }
+        #expect(!provider.isActive)
+        #expect(box.created == 0)
+
+        provider.onFirstFix = {}
+        provider.requestIfNeeded()
+        provider.locationManagerDidChangeAuthorization(CLLocationManager())
+        #expect(box.created == 0)
+    }
+
+    @Test func activatingAuthorizedProviderRequestsSingleFixAndStopsOnDeactivate() {
+        let client = FakeLocationClient(authorizationStatus: .authorized, fireAuthOnDelegateAssign: true)
+        final class Box: @unchecked Sendable {
+            var created = 0
+        }
+        let box = Box()
+        let provider = LocationDaylightProvider {
+            box.created += 1
+            return client
+        }
+
+        provider.setActive(true)
+        #expect(provider.isActive)
+        #expect(box.created == 1)
+        #expect(client.delegate === provider)
+        #expect(client.desiredAccuracy == kCLLocationAccuracyKilometer)
+        #expect(client.locationRequests == 1)
+        #expect(client.authorizationRequests == 0)
+
+        // Repeated requests within the throttle window do not wake location again.
+        provider.requestIfNeeded()
+        #expect(client.locationRequests == 1)
+
+        // Deliver a fix, then deactivate: location stops and cached coordinate clears.
+        var firstFixFired = 0
+        provider.onFirstFix = { firstFixFired += 1 }
+        provider.locationManager(
+            CLLocationManager(),
+            didUpdateLocations: [CLLocation(latitude: 37.77, longitude: -122.42)]
+        )
+        #expect(firstFixFired == 1)
+        #expect(provider.coordinate != nil)
+
+        provider.setActive(false)
+        #expect(!provider.isActive)
+        #expect(client.stopCalls == 1)
+        #expect(client.delegate == nil)
+        #expect(provider.coordinate == nil)
+
+        // Late authorization callbacks while inactive must not request a fix.
+        provider.locationManagerDidChangeAuthorization(CLLocationManager())
+        #expect(client.locationRequests == 1)
+    }
+
+    @Test func activatingUndeterminedProviderRequestsAuthorizationThenFixOnGrant() {
+        let client = FakeLocationClient(authorizationStatus: .notDetermined, fireAuthOnDelegateAssign: true)
+        let provider = LocationDaylightProvider { client }
+
+        provider.setActive(true)
+        #expect(client.authorizationRequests == 1)
+        #expect(client.locationRequests == 0)
+
+        client.authorizationStatus = .authorized
+        provider.locationManagerDidChangeAuthorization(CLLocationManager())
+        #expect(client.locationRequests == 1)
+    }
+}
+
+private final class FakeLocationClient: DaylightLocationClient, @unchecked Sendable {
+    var delegate: (any CLLocationManagerDelegate)? {
+        didSet {
+            if let delegate, fireAuthOnDelegateAssign {
+                delegate.locationManagerDidChangeAuthorization?(CLLocationManager())
+            }
+        }
+    }
+    var desiredAccuracy: CLLocationAccuracy = kCLLocationAccuracyBest
+    var authorizationStatus: CLAuthorizationStatus
+    let fireAuthOnDelegateAssign: Bool
+    var authorizationRequests = 0
+    var locationRequests = 0
+    var stopCalls = 0
+
+    init(authorizationStatus: CLAuthorizationStatus, fireAuthOnDelegateAssign: Bool = true) {
+        self.authorizationStatus = authorizationStatus
+        self.fireAuthOnDelegateAssign = fireAuthOnDelegateAssign
+    }
+
+    func requestWhenInUseAuthorization() {
+        authorizationRequests += 1
+    }
+
+    func requestLocation() {
+        locationRequests += 1
+    }
+
+    func stopUpdatingLocation() {
+        stopCalls += 1
+    }
 }

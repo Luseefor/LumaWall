@@ -119,4 +119,11 @@ struct AutomationStoreTests {
         #expect(calendar.component(.day, from: first) == 5)
         #expect((14...16).contains(calendar.component(.hour, from: first)))
     }
+
+    @Test func solarScheduleActiveRequiresBothDayNightAndSunriseSunset() {
+        #expect(!WallpaperAutomations().isSolarScheduleActive)
+        #expect(!WallpaperAutomations(dayNightEnabled: true, useSunriseSunset: false).isSolarScheduleActive)
+        #expect(!WallpaperAutomations(dayNightEnabled: false, useSunriseSunset: true).isSolarScheduleActive)
+        #expect(WallpaperAutomations(dayNightEnabled: true, useSunriseSunset: true).isSolarScheduleActive)
+    }
 }

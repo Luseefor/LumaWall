@@ -43,7 +43,6 @@ extension AppModel {
 
     func setUseSunriseSunset(_ enabled: Bool) {
         automations.useSunriseSunset = enabled
-        if enabled { LocationDaylightProvider.shared.requestIfNeeded() }
         persistAutomations()
         evaluateAutomations(force: true)
     }
@@ -141,7 +140,20 @@ extension AppModel {
 
     func persistAutomations() {
         Task { try? await automationStore.save(automations) }
+        syncSolarLocation()
         syncDayNightTimer()
+    }
+
+    /// Starts Core Location only while both Day/Night and Sunrise/Sunset are
+    /// on, and tears it down as soon as either is turned off.
+    func syncSolarLocation() {
+        if automations.isSolarScheduleActive {
+            observeFirstLocationFix()
+            LocationDaylightProvider.shared.setActive(true)
+        } else {
+            LocationDaylightProvider.shared.onFirstFix = nil
+            LocationDaylightProvider.shared.setActive(false)
+        }
     }
 
     func syncDayNightTimer() {
@@ -150,7 +162,7 @@ extension AppModel {
         guard automations.dayNightEnabled else { return }
         let now = Date()
         let calendar = Calendar.autoupdatingCurrent
-        let coordinate = LocationDaylightProvider.shared.coordinate
+        let coordinate = automations.isSolarScheduleActive ? LocationDaylightProvider.shared.coordinate : nil
         // The timer used to arm only the fixed day/night hours, but the
         // verdict can also flip on solar transitions, quiet-hours end, and
         // weekday re-entry — none of which that covered, so switches landed
@@ -258,7 +270,7 @@ extension AppModel {
             if automations.useSunriseSunset {
                 LocationDaylightProvider.shared.requestIfNeeded()
             }
-            let coordinate = LocationDaylightProvider.shared.coordinate
+            let coordinate = automations.useSunriseSunset ? LocationDaylightProvider.shared.coordinate : nil
             targetID =
                 automations.isDayPeriod(
                     latitude: coordinate?.latitude,
