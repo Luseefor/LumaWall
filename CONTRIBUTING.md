@@ -6,13 +6,13 @@ Contributions are welcome under the terms below. Please also read [CODE_OF_CONDU
 
 LumaWall is licensed under the [Apache License 2.0](LICENSE). Under Section 5 of the Apache License 2.0, any contribution you submit for inclusion in LumaWall is licensed under the Apache License 2.0 unless you explicitly state otherwise.
 
-Every commit must carry a Developer Certificate of Origin ([DCO 1.1](https://developercertificate.org/)) sign-off certifying that you wrote the contribution or otherwise have the right to submit it under the project's license:
+Outside contributors must sign off every commit with a Developer Certificate of Origin ([DCO 1.1](https://developercertificate.org/)) certifying that you wrote the contribution or otherwise have the right to submit it under the project's license:
 
 ```sh
 git commit -s
 ```
 
-This adds a `Signed-off-by: Your Name <you@example.com>` trailer to your commit message. Do not submit third-party code or media unless its license is compatible with Apache 2.0 and its attribution is added to `NOTICE` and `THIRD_PARTY_NOTICES.md`.
+This adds a `Signed-off-by: Your Name <you@example.com>` trailer to your commit message. (The project maintainer's and automated coding agents' commits follow the trailer rule in [AGENTS.md](AGENTS.md).) Do not submit third-party code or media unless its license is compatible with Apache 2.0 and its attribution is added to `NOTICE` and `THIRD_PARTY_NOTICES.md`.
 
 ## Development setup and checks
 
