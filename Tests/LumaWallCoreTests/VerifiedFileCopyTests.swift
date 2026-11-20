@@ -145,4 +145,21 @@ struct VerifiedFileCopyTests {
         #expect(free > 0)
         #expect(VerifiedFileCopy.availableSpace(in: dir.appendingPathComponent("missing")) == nil)
     }
+
+    /// A sparse file costs the extension nothing but its full size here, so
+    /// a copy that would leave less than the floor free never starts.
+    @Test func leavesAFloorOfFreeSpace() throws {
+        let dir = try makeDir()
+        defer { try? fm.removeItem(at: dir) }
+        try Data(repeating: 1, count: 1_000).write(to: dir.appendingPathComponent("Wallpaper.mov"))
+        let folder = try TrustedDirectory(url: dir)
+        let dest = dir.appendingPathComponent("private.mov")
+
+        #expect(throws: VerifiedFileCopy.CopyError.notEnoughSpace) {
+            try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: folder, to: dest, keepingFree: 500) { _ in 1_499 }
+        }
+        #expect(!fm.fileExists(atPath: dest.path))
+        #expect(try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: folder, to: dest, keepingFree: 500) { _ in 1_500 }.size == 1_000)
+        #expect(VerifiedFileCopy.defaultFreeSpaceFloor >= 1 << 30)
+    }
 }
