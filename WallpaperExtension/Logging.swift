@@ -17,23 +17,10 @@ private nonisolated(unsafe) let logDateFormatter: ISO8601DateFormatter = {
     return f
 }()
 
-/// Recursively dump an object's Mirror for debugging XPC types.
-func dumpMirror(_ obj: Any, label: String = "root", depth: Int = 3, indent: Int = 0) {
-    let prefix = String(repeating: "  ", count: indent)
-    let mirror = Mirror(reflecting: obj)
-    extensionLog("\(prefix)[\(label)] type=\(type(of: obj)) children=\(mirror.children.count)")
-    guard depth > 0 else { return }
-    for child in mirror.children {
-        let childLabel = child.label ?? "?"
-        let childValue = child.value
-        let desc = String(describing: childValue).prefix(200)
-        extensionLog("\(prefix)  .\(childLabel) = \(desc)")
-        // Recurse into non-primitive types
-        let childMirror = Mirror(reflecting: childValue)
-        if childMirror.children.count > 0, !(childValue is String), !(childValue is Data), !(childValue is URL) {
-            dumpMirror(childValue, label: childLabel, depth: depth - 1, indent: indent + 2)
-        }
-    }
+/// Dump an object's Mirror for debugging XPC types: types, labels and
+/// values that can't name a file (`MirrorDump`).
+func dumpMirror(_ obj: Any, label: String = "root", depth: Int = 3) {
+    for line in MirrorDump.lines(obj, label: label, depth: depth) { extensionLog(line) }
 }
 
 /// When true, high-volume per-switch/per-frame diagnostics (`traceLog`) are written too.

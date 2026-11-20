@@ -17,24 +17,29 @@ extension WallpaperXPCHandler {
 
         // Settings lists choices under the provider ID SettingsProvider uses.
         let ownProvider = Bundle.main.bundleIdentifier ?? "app.lumawall.personal.wallpaper"
-        let target = request.map {
-            ChoiceRemoval.target(in: $0, ownProvider: ownProvider) { VideoLibrary.shared.entry(for: $0) != nil }
+        let target = ChoiceRemoval.target(in: request, ownProvider: ownProvider) {
+            VideoLibrary.shared.entry(for: $0) != nil
         }
-        guard case let .remove(videoID) = target else {
-            if case let .refuse(reason) = target {
-                extensionLog("  [Remove] Refused: \(reason)")
-            } else {
-                extensionLog("  [Remove] Refused: no request")
-            }
+        let videoID: String
+        switch target {
+        case let .remove(id):
+            videoID = id
+        case let .refuse(refusal):
+            // Nothing was removed, so the host must not hear success.
+            extensionLog("  [Remove] Refused: \(refusal.reason)")
             if let request, verboseLoggingEnabled { dumpMirror(request, label: "removeRequest") }
-            reply(nil)
+            reply(refusal.error)
             return
         }
 
         extensionLog("  [Remove] Removing video: \(videoID)")
 
         // Remove from library (deletes files + metadata)
-        VideoLibrary.shared.removeVideo(id: videoID)
+        guard VideoLibrary.shared.removeVideo(id: videoID) else {
+            extensionLog("  [Remove] Refused: \(ChoiceRemoval.Refusal.deleteFailed.reason)")
+            reply(ChoiceRemoval.Refusal.deleteFailed.error)
+            return
+        }
 
         // Tear down only the contexts actually using this video. The video is gone
         // from the library, so these slots are genuinely dead (not a reuse). Other
