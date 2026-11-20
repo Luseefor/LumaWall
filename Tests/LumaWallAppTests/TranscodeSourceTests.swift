@@ -103,15 +103,23 @@ final class TranscodeSourceTests: XCTestCase {
         XCTAssertEqual(privateFiles(), [])
     }
 
-    func testAnotherSourceReplacesTheKeptCopy() async throws {
+    func testEachSourceKeepsItsCopyUntilReleased() async throws {
+        // The queue can run a, then b, then a again; a's copy must survive b.
         try bytes.write(to: deployed)
         let log = SourceLog()
         _ = await export(job(), log: log)
         let other = Data("other source".utf8)
         try other.write(to: deployed)
         _ = await export(job(hash: hash(other)), log: log)
-        XCTAssertEqual(log.contents, [bytes, other])
-        XCTAssertEqual(privateFiles().count, 1)
+        try bytes.write(to: deployed)
+        _ = await export(job("Wallpaper.reduced.mov"), log: log)
+        XCTAssertEqual(log.contents, [bytes, other, bytes])
+        XCTAssertEqual(log.sources[0], log.sources[2])
+        XCTAssertEqual(privateFiles().count, 2)
+        sources.release(job())
+        XCTAssertEqual(privateFiles(), [log.sources[1].lastPathComponent])
+        sources.release(job(hash: hash(other)))
+        XCTAssertEqual(privateFiles(), [])
     }
 
     func testCleanupRemovesLeftoversButNotTheCopyInUse() async throws {
@@ -123,6 +131,24 @@ final class TranscodeSourceTests: XCTestCase {
         try Data("left".utf8).write(to: sources.folderURL.appendingPathComponent("old.mov"))
         sources.removeLeftovers()
         XCTAssertEqual(privateFiles(), [inUse])
+    }
+
+    func testCleanupSparesTheCopiesOfAnotherRunningInstance() async throws {
+        // A dev build running next to the installed app shares this folder;
+        // its launch cleanup deleted the other's copy mid-encode.
+        try bytes.write(to: deployed)
+        let log = SourceLog()
+        _ = await export(job(), log: log)
+        let inUse = try XCTUnwrap(log.sources.first).lastPathComponent
+        XCTAssertTrue(inUse.hasPrefix("\(getpid())."))
+        // PIDs top out below 100000 on macOS, so 999999 never runs.
+        let otherRunning = "\(getppid()).\(UUID().uuidString).mov"
+        let leftovers = ["999999.\(UUID().uuidString).mov", "\(getpid()).\(UUID().uuidString).mov", "\(UUID().uuidString).mov"]
+        for name in [otherRunning] + leftovers {
+            try Data("x".utf8).write(to: sources.folderURL.appendingPathComponent(name))
+        }
+        sources.removeLeftovers()
+        XCTAssertEqual(Set(privateFiles()), [inUse, otherRunning])
     }
 
     func testASymlinkedFolderAboveTheEntryIsRefused() async throws {

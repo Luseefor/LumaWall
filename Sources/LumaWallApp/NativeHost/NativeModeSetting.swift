@@ -66,8 +66,14 @@ struct NativeModeSetting {
         defaults.set(true, forKey: Self.disclosureKey)
     }
 
+    /// Turns native mode off. Waits for a copy publish that is writing into
+    /// the extension's container, which holds `nativeWriteLock` only for
+    /// its native-mode check and two short writes, so none writes there
+    /// after this returns.
     func disable() {
-        defaults.set(false, forKey: Self.enabledKey)
+        NativeWallpaperDeployment.nativeWriteLock.withLock {
+            defaults.set(false, forKey: Self.enabledKey)
+        }
     }
 
     func acknowledgeDisclosure() {

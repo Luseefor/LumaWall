@@ -52,7 +52,8 @@ extension NativeWallpaperDeployment {
     ) throws {
         guard PathSafety.isValidEntryID(entryID) else { throw DeploymentError.invalidEntry }
         try entryLock.withLock {
-            if let staging = try? TrustedDirectory(url: stagingFolderURL, below: trustedAncestor) {
+            // App-private, so only the folder itself must not be a symlink.
+            if let staging = try? TrustedDirectory(url: stagingFolderURL) {
                 for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasPrefix(entryID + ".") {
                     try? staging.removeFile(named: file.name)
                 }

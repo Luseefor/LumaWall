@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import LumaWallCore
 
@@ -36,10 +37,47 @@ extension NativeWallpaperDeployment {
         videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
     }
 
-    /// Exports are written here, outside the library folder the extension
-    /// scans, and moved into the entry once metadata.json can list them.
+    /// Exports are written, probed and kept here until they are moved into
+    /// the entry once metadata.json can list them. It sits next to
+    /// `transcodeSourcesFolderURL`, outside the extension's container: the
+    /// app reads an export by path, and inside the container the extension
+    /// could swap it for other bytes between the check and the read.
     static var stagingFolderURL: URL {
-        WallpaperHostCapabilities.extensionDocumentsURL.appendingPathComponent("copy-staging", isDirectory: true)
+        transcodeSourcesFolderURL.deletingLastPathComponent().appendingPathComponent("copy-staging", isDirectory: true)
+    }
+
+    /// The private staging folder, made owner-only if missing.
+    static func privateStagingFolder(_ url: URL = stagingFolderURL) throws -> TrustedDirectory {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        return try TrustedDirectory(url: url)
+    }
+
+    /// Whether another process of this app is running, such as the
+    /// installed LumaWall next to a dev build.
+    static func anotherLumaWallIsRunning() -> Bool {
+        guard let id = Bundle.main.bundleIdentifier else { return false }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: id)
+            .contains { $0.processIdentifier != getpid() }
+    }
+
+    /// Deletes what versions before this one left in copy-staging in the
+    /// extension's Documents folder, without following a symlink on the way.
+    /// Callers skip it while another LumaWall runs; in case an older one
+    /// starts meanwhile, only items untouched for an hour go. Their copies are encoded again if
+    /// still wanted.
+    static func removeLegacyCopyStaging(
+        documentsURL: URL = WallpaperHostCapabilities.extensionDocumentsURL, trustedAncestor: URL = containerURL,
+        now: Date = Date()
+    ) {
+        guard let documents = try? TrustedDirectory(url: documentsURL, below: trustedAncestor),
+            let staging = try? documents.subdirectory("copy-staging")
+        else { return }
+        for item in (try? staging.entries()) ?? [] {
+            guard let modified = try? staging.modificationDate(ofItemNamed: item.name),
+                now.timeIntervalSince(modified) > 60 * 60
+            else { continue }
+            try? staging.removeItem(named: item.name)
+        }
     }
 
     /// The extension's container. The extension can write anything inside
@@ -148,12 +186,7 @@ extension NativeWallpaperDeployment {
         readiness: { readiness(of: $0) },
         encode: { job in
             let staged = stagedURL(for: job)
-            // Made through the container's descriptors, so a symlinked
-            // Documents folder can't put copy-staging somewhere else.
-            guard
-                let staging = try? trustedFolder(stagingFolderURL.deletingLastPathComponent())
-                    .makeSubdirectory(named: stagingFolderURL.lastPathComponent)
-            else { return .failed }
+            guard let staging = try? privateStagingFolder() else { return .failed }
             // A finished export whose publication failed is reused, not redone.
             if !reusableExport(named: staged.lastPathComponent, in: staging) {
                 // Encoded from a private copy: AVFoundation reads by path,
@@ -170,26 +203,24 @@ extension NativeWallpaperDeployment {
                 case .skipped: return .notNow
                 }
             }
+            // By path, which is safe here: the extension can't reach staging.
             guard let resolution = await videoSize(of: staged) else {
-                // The probe went by path; delete only if that path still
-                // names the folder checked above.
-                if let current = try? trustedFolder(stagingFolderURL).identity(), current == (try? staging.identity()) {
-                    try? staging.removeFile(named: staged.lastPathComponent)
-                }
+                try? staging.removeFile(named: staged.lastPathComponent)
                 return .failed
             }
-            // Publishing writes into the extension's container.
-            guard NativeModeSetting.isEnabledNow else { return .notNow }
             switch publish(staged, job: job, resolution: resolution) {
             case .published:
                 notifyLibraryChanged()
                 return .done
             case .stale: return .done
             case .failed: return .failed
+            case .nativeModeOff: return .notNow
             }
         },
         prepare: {
             transcodeSources.removeLeftovers()
+            // An older LumaWall still running may be using it.
+            if !anotherLumaWallIsRunning() { removeLegacyCopyStaging() }
             cleanUpAbandonedExports(
                 videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL, trustedAncestor: containerURL)
         },
@@ -219,26 +250,43 @@ extension NativeWallpaperDeployment {
     /// copy of the old source can't land in the redeployed entry.
     static let entryLock = NSLock()
 
-    enum PublishResult: Equatable { case published, stale, failed }
+    /// Held by a copy publish from its native-mode check through its
+    /// writes, and by `NativeModeSetting.disable()`. Never held while
+    /// reading anything the extension controls, so turning native mode off
+    /// on the main thread waits only for a rename and a small write.
+    static let nativeWriteLock = NSLock()
+
+    enum PublishResult: Equatable {
+        case published, stale, failed
+        /// Native mode was off once the entry lock was held; the export
+        /// stays staged.
+        case nativeModeOff
+    }
 
     /// Moves a finished export into its entry and lists it in metadata.json,
     /// re-reading the file so copies other jobs recorded are kept. Discards
     /// the export when the entry no longer holds the source it was made from.
-    /// When metadata.json can't be written the export goes back to staging,
-    /// so a retry publishes it without encoding again.
+    /// When metadata.json can't be written the moved copy is deleted, and a
+    /// retry encodes it again.
     ///
     /// The staging and entry folders are opened through `TrustedDirectory`
     /// and every read, move and delete goes through their descriptors, so
     /// a folder swapped for a symlink fails the publish instead of steering
     /// it elsewhere.
+    ///
+    /// Native mode is checked under `nativeWriteLock`, held until the
+    /// writes are done: a publish can wait on the entry lock while native
+    /// mode is turned off, and nothing may be written into the extension's
+    /// container after that.
     static func publish(
         _ staged: URL,
         job: VariantEncodeQueue.Job,
         resolution: CGSize,
         videosFolderURL: URL = videosFolderURL,
-        writeMetadata: (EntryInfo, TrustedDirectory) throws -> Void = { entry, folder in
-            try folder.writeFile(named: "metadata.json", contents: JSONEncoder().encode(entry))
-        }
+        writeMetadata: (Data, TrustedDirectory) throws -> Void = { data, folder in
+            try folder.writeFile(named: "metadata.json", contents: data)
+        },
+        isNativeModeOn: () -> Bool = { NativeModeSetting.isEnabledNow }
     ) -> PublishResult {
         entryLock.withLock {
             let stagedName = staged.lastPathComponent
@@ -267,18 +315,38 @@ extension NativeWallpaperDeployment {
                 return .failed
             }
             let name = job.spec.filename
-            do { try staging.publishItem(named: stagedName, into: folder, as: name) } catch { return .failed }
             var updated = current
             let listed = (current.variants ?? []).filter { (try? folder.kind(ofItemNamed: $0.filename)) == .file }
             let variant = NativeVideoVariant(filename: name, fps: job.spec.recordedFPS, resolution: resolution)
             updated.variants = merging(listed, with: [variant])
-            do {
-                try writeMetadata(updated, folder)
-            } catch {
-                try? folder.publishItem(named: name, into: staging, as: stagedName)
-                return .failed
+            guard let metadata = try? JSONEncoder().encode(updated) else { return .failed }
+            return nativeWriteLock.withLock {
+                guard isNativeModeOn() else { return .nativeModeOff }
+                // Moved from a name of its own: replacing an existing copy
+                // swaps the old file into staging for a moment, and under the
+                // staged name another LumaWall could take it for a finished
+                // export. A `.partial.mov` is never read, and cleanup deletes
+                // one left behind.
+                let moving = "\(UUID().uuidString).publishing.partial.mov"
+                do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
+                do {
+                    try staging.publishItem(named: moving, into: folder, as: name)
+                } catch {
+                    // Nothing moved: `moving` still holds the export.
+                    try? staging.renameItem(named: moving, to: stagedName)
+                    return .failed
+                }
+                do {
+                    try writeMetadata(metadata, folder)
+                } catch {
+                    // Not moved back to staging: in the entry the extension
+                    // can have swapped it, and staging only holds bytes the
+                    // app encoded. The retry encodes again.
+                    try? folder.removeFile(named: name)
+                    return .failed
+                }
+                return .published
             }
-            return .published
         }
     }
 
@@ -288,13 +356,17 @@ extension NativeWallpaperDeployment {
     /// pick one as the wallpaper.
     ///
     /// Only `.mov` files are deleted, through `TrustedDirectory` opened
-    /// below `trustedAncestor`: a staging or entry folder, or any folder
-    /// above them, swapped for a symlink can't steer the delete elsewhere.
-    static func cleanUpAbandonedExports(videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL) {
+    /// below `trustedAncestor` (and the staging folder below
+    /// `stagingAncestor`, by default itself): a staging or entry folder, or
+    /// any folder between them and their ancestor, swapped for a symlink
+    /// can't steer the delete elsewhere.
+    static func cleanUpAbandonedExports(
+        videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL, stagingAncestor: URL? = nil
+    ) {
         // Without a trustworthy videos folder, no staged export can be shown
         // stale, so everything is kept.
         guard let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) else { return }
-        if let staging = try? TrustedDirectory(url: stagingFolderURL, below: trustedAncestor) {
+        if let staging = try? TrustedDirectory(url: stagingFolderURL, below: stagingAncestor ?? stagingFolderURL) {
             for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasSuffix(".mov") {
                 let parts = file.name.split(separator: ".", maxSplits: 2).map(String.init)
                 let keep =

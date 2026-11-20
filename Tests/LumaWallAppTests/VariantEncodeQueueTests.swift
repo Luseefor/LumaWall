@@ -317,4 +317,23 @@ final class VariantEncodeQueueTests: XCTestCase {
         await queue.drained()
         XCTAssertEqual(log.events, ["encode a/Wallpaper.minimal.mov", "release a"])
     }
+
+    func testASourceInterruptedByAnotherIsKeptUntilItsJobsAreDone() async {
+        // A needed copy of b jumped in between a's two jobs, and a's private
+        // copy was deleted and then made again for a's second job.
+        let log = EncodeLog()
+        log.set("b/Wallpaper.minimal.mov", .ready(rank: 0))
+        let queue = queue(log)
+        await queue.enqueue([job("a", "Wallpaper.minimal.mov"), job("a", "Wallpaper.reduced.mov")])
+        await log.waitUntilStarted("a/Wallpaper.minimal.mov")
+        await queue.enqueue([job("b", "Wallpaper.minimal.mov")])
+        log.openAll()
+        await queue.drained()
+        XCTAssertEqual(
+            log.events,
+            [
+                "encode a/Wallpaper.minimal.mov", "encode b/Wallpaper.minimal.mov", "release b",
+                "encode a/Wallpaper.reduced.mov", "release a",
+            ])
+    }
 }

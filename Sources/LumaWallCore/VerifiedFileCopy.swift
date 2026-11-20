@@ -14,11 +14,17 @@ public enum VerifiedFileCopy {
     public enum CopyError: LocalizedError, Equatable {
         case notALocalFile
         case notARegularFile
+        /// The destination's volume has less free space than the source's size.
+        case notEnoughSpace
+        /// The source grew or shrank while it was copied.
+        case sourceChangedSize
 
         public var errorDescription: String? {
             switch self {
             case .notALocalFile: "Only files on this Mac can be imported."
             case .notARegularFile: "The selected item is not a regular file."
+            case .notEnoughSpace: "There isn't enough free space for a copy of the file."
+            case .sourceChangedSize: "The file changed while it was being copied."
             }
         }
     }
@@ -72,12 +78,47 @@ public enum VerifiedFileCopy {
     /// Copies the regular file `name` in `folder`, like `copy(from:to:)`,
     /// but a symlink at `name` is refused rather than followed. For files in
     /// folders a less trusted process can write.
-    public static func copy(named name: String, in folder: TrustedDirectory, to destination: URL) throws -> Result {
+    ///
+    /// That process can also keep writing to the file, so the copy is held
+    /// to the size the file had when it was opened: it doesn't start unless
+    /// `availableSpace` reports room for that many bytes on the
+    /// destination's folder with `keepingFree` bytes to spare (and not when
+    /// it reports nothing), and it fails
+    /// with `sourceChangedSize`, deleting the partial copy, when the file
+    /// ends up any other size. The floor matters for a sparse file, which
+    /// costs its writer nothing but costs the copy its full size.
+    public static func copy(
+        named name: String, in folder: TrustedDirectory, to destination: URL,
+        keepingFree floor: Int64 = defaultFreeSpaceFloor,
+        availableSpace: (URL) -> Int64? = { availableSpace(in: $0) }
+    ) throws -> Result {
         guard destination.isFileURL else { throw CopyError.notALocalFile }
-        return try copy(from: try folder.openFile(named: name), to: destination)
+        let reader = try folder.openFile(named: name)
+        var info = stat()
+        guard fstat(reader.fileDescriptor, &info) == 0 else { throw POSIXError.current }
+        let expected = Int64(info.st_size)
+        // Free space that can't be read isn't taken as enough. Subtracting
+        // can't overflow: both are at least zero.
+        guard let free = availableSpace(destination.deletingLastPathComponent()), free - max(floor, 0) >= expected else {
+            throw CopyError.notEnoughSpace
+        }
+        return try copy(from: reader, to: destination, limit: expected)
     }
 
-    private static func copy(from reader: FileHandle, to destination: URL) throws -> Result {
+    /// What `copy(named:in:to:)` leaves free on the destination volume.
+    public static let defaultFreeSpaceFloor: Int64 = 1 << 30
+
+    /// Free bytes for files the user asked for on the volume holding
+    /// `folder`, counting space the system can purge; nil when it can't be
+    /// read, for example because `folder` doesn't exist.
+    public static func availableSpace(in folder: URL) -> Int64? {
+        try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage
+    }
+
+    /// Copies `reader` to `destination`. With `limit`, the source must be
+    /// exactly that many bytes; reading stops as soon as it is longer.
+    private static func copy(from reader: FileHandle, to destination: URL, limit: Int64? = nil) throws -> Result {
         let output = open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
         guard output >= 0 else { throw POSIXError.current }
         let writer = FileHandle(fileDescriptor: output, closeOnDealloc: true)
@@ -86,10 +127,12 @@ public enum VerifiedFileCopy {
             var size: Int64 = 0
             while let chunk = try reader.read(upToCount: 1_048_576), !chunk.isEmpty {
                 try Task.checkCancellation()
+                size += Int64(chunk.count)
+                if let limit, size > limit { throw CopyError.sourceChangedSize }
                 hasher.update(data: chunk)
                 try writer.write(contentsOf: chunk)
-                size += Int64(chunk.count)
             }
+            if let limit, size != limit { throw CopyError.sourceChangedSize }
             try writer.synchronize()
             return Result(sha256: hex(hasher.finalize()), size: size)
         } catch {

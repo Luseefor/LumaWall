@@ -97,4 +97,75 @@ struct VerifiedFileCopyTests {
             #expect(!fm.fileExists(atPath: dest.path))
         }
     }
+
+    /// The private copy of a deployed video must not fill the disk. The
+    /// extension can keep appending to the file it owns, so the copy stops
+    /// at the size the file had when it was opened.
+    @Test func stopsWhenTheSourceGrowsWhileCopying() throws {
+        let dir = try makeDir()
+        defer { try? fm.removeItem(at: dir) }
+        let source = dir.appendingPathComponent("Wallpaper.mov")
+        try Data(repeating: 1, count: 1_000).write(to: source)
+        let dest = dir.appendingPathComponent("private.mov")
+
+        #expect(throws: VerifiedFileCopy.CopyError.sourceChangedSize) {
+            try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: TrustedDirectory(url: dir), to: dest) { _ in
+                // Called after the open: grow the file under the copy.
+                let handle = try? FileHandle(forWritingTo: source)
+                _ = try? handle?.seekToEnd()
+                try? handle?.write(contentsOf: Data(repeating: 2, count: 3_000_000))
+                try? handle?.close()
+                return .max
+            }
+        }
+        #expect(!fm.fileExists(atPath: dest.path))
+    }
+
+    @Test func refusesToStartWithoutRoomForTheCopy() throws {
+        let dir = try makeDir()
+        defer { try? fm.removeItem(at: dir) }
+        try Data(repeating: 1, count: 1_000).write(to: dir.appendingPathComponent("Wallpaper.mov"))
+        let dest = dir.appendingPathComponent("private.mov")
+        var asked: URL?
+
+        #expect(throws: VerifiedFileCopy.CopyError.notEnoughSpace) {
+            try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: TrustedDirectory(url: dir), to: dest) { folder in
+                asked = folder
+                return 999
+            }
+        }
+        #expect(asked?.standardizedFileURL == dir.standardizedFileURL)
+        #expect(!fm.fileExists(atPath: dest.path))
+
+        // Free space that can't be read doesn't count as enough.
+        #expect(throws: VerifiedFileCopy.CopyError.notEnoughSpace) {
+            try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: TrustedDirectory(url: dir), to: dest) { _ in nil }
+        }
+        #expect(!fm.fileExists(atPath: dest.path))
+    }
+
+    @Test func measuresFreeSpaceOnTheDestinationVolume() throws {
+        let dir = try makeDir()
+        defer { try? fm.removeItem(at: dir) }
+        let free = try #require(VerifiedFileCopy.availableSpace(in: dir))
+        #expect(free > 0)
+        #expect(VerifiedFileCopy.availableSpace(in: dir.appendingPathComponent("missing")) == nil)
+    }
+
+    /// A sparse file costs the extension nothing but its full size here, so
+    /// a copy that would leave less than the floor free never starts.
+    @Test func leavesAFloorOfFreeSpace() throws {
+        let dir = try makeDir()
+        defer { try? fm.removeItem(at: dir) }
+        try Data(repeating: 1, count: 1_000).write(to: dir.appendingPathComponent("Wallpaper.mov"))
+        let folder = try TrustedDirectory(url: dir)
+        let dest = dir.appendingPathComponent("private.mov")
+
+        #expect(throws: VerifiedFileCopy.CopyError.notEnoughSpace) {
+            try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: folder, to: dest, keepingFree: 500) { _ in 1_499 }
+        }
+        #expect(!fm.fileExists(atPath: dest.path))
+        #expect(try VerifiedFileCopy.copy(named: "Wallpaper.mov", in: folder, to: dest, keepingFree: 500) { _ in 1_500 }.size == 1_000)
+        #expect(VerifiedFileCopy.defaultFreeSpaceFloor >= 1 << 30)
+    }
 }
