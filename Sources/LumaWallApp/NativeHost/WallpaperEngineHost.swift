@@ -245,14 +245,17 @@ final class WallpaperEngine {
         }
     }
 
-    /// A missing display isn't native mode's fault and permission errors
-    /// switch every display over; anything else moves `displayIDs` to the
-    /// overlay so the caller can retry there. A failure from a host that has
+    /// A missing display or a removed wallpaper isn't native mode's fault,
+    /// and permission errors switch every display over; anything else moves
+    /// `displayIDs` to the overlay so the caller can retry there. A failure from a host that has
     /// since been replaced (native mode turned off meanwhile) changes nothing.
     private func handleNativeFailure(
         _ error: any Error, on displayIDs: Set<DisplayID>, since generation: Int
     ) async throws {
         if case OverlayWallpaperEngine.EngineError.missingDisplay = error { throw error }
+        // A wallpaper removed while it deployed isn't native mode's failure,
+        // and the overlay mustn't play it instead.
+        if case NativeWallpaperDeployment.DeploymentError.removed = error { throw error }
         guard generation == hostGeneration else { return }
         if WallpaperHostCapabilities.isPermissionError(error) {
             await fallBackToOverlay()

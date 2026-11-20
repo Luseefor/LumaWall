@@ -249,6 +249,10 @@ final class NativeWallpaperEngine {
                 let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, surfaces: surfaces)
                 map[display.cgDisplayID] = entry
                 active[assignment.displayID] = (asset.id, assignment.composition)
+            } catch NativeWallpaperDeployment.DeploymentError.removed {
+                // Removed while it deployed: nothing to play here, and not
+                // native mode's failure, so the overlay doesn't take it.
+                continue
             } catch {
                 if WallpaperHostCapabilities.isPermissionError(error) { throw error }
                 nativeHostLog.error(
@@ -261,10 +265,13 @@ final class NativeWallpaperEngine {
         // must not be written back. Nothing from here to the write suspends,
         // so a removal can't land in between.
         let batch = Self.withoutRemoved(map, removed: NativeWallpaperDeployment.removedEntries)
-        map = batch.map
         for display in connected where batch.dropped.contains(display.cgDisplayID) {
-            active.removeValue(forKey: display.displayID)
+            // Unless something applied meanwhile put another wallpaper there.
+            if active[display.displayID]?.0.rawValue.uuidString == map[display.cgDisplayID]?.id {
+                active.removeValue(forKey: display.displayID)
+            }
         }
+        map = batch.map
         guard !map.isEmpty else {
             nativeHostLog.info("restore: nothing to assign")
             return failed
@@ -278,6 +285,7 @@ final class NativeWallpaperEngine {
                 active.removeValue(forKey: display.displayID)
             }
         }
+        map = batch.map
         guard !map.isEmpty else { return failed }
         let fingerprint = Dictionary(
             uniqueKeysWithValues: map.compactMap { cg, entry in
