@@ -105,6 +105,12 @@ public final class TrustedDirectory {
     /// The bytes of the regular file `name`. Refuses symlinks, folders and
     /// anything else that isn't a plain file.
     public func readFile(named name: String) throws -> Data {
+        try openFile(named: name).readToEnd() ?? Data()
+    }
+
+    /// The regular file `name`, open for reading. Refuses symlinks, folders
+    /// and anything else that isn't a plain file; a FIFO can't block the open.
+    public func openFile(named name: String) throws -> FileHandle {
         try Self.checkName(name)
         let file = openat(fd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard file >= 0 else { throw POSIXError.current }
@@ -112,7 +118,8 @@ public final class TrustedDirectory {
         var info = stat()
         guard fstat(file, &info) == 0 else { throw POSIXError.current }
         guard Self.kind(of: info.st_mode) == .file else { throw POSIXError(.EFTYPE) }
-        return try handle.readToEnd() ?? Data()
+        _ = fcntl(file, F_SETFL, fcntl(file, F_GETFL) & ~O_NONBLOCK)
+        return handle
     }
 
     /// Writes `contents` to `name` in one step: the bytes go to a new hidden

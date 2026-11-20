@@ -66,8 +66,18 @@ public enum VerifiedFileCopy {
     /// Removes the partial copy on failure or cancellation.
     public static func copy(from source: URL, to destination: URL) throws -> Result {
         guard destination.isFileURL else { throw CopyError.notALocalFile }
-        let reader = try openRegularFile(source)
+        return try copy(from: try openRegularFile(source), to: destination)
+    }
 
+    /// Copies the regular file `name` in `folder`, like `copy(from:to:)`,
+    /// but a symlink at `name` is refused rather than followed. For files in
+    /// folders a less trusted process can write.
+    public static func copy(named name: String, in folder: TrustedDirectory, to destination: URL) throws -> Result {
+        guard destination.isFileURL else { throw CopyError.notALocalFile }
+        return try copy(from: try folder.openFile(named: name), to: destination)
+    }
+
+    private static func copy(from reader: FileHandle, to destination: URL) throws -> Result {
         let output = open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
         guard output >= 0 else { throw POSIXError.current }
         let writer = FileHandle(fileDescriptor: output, closeOnDealloc: true)
