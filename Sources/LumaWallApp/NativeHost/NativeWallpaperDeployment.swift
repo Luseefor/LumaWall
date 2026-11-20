@@ -250,7 +250,7 @@ enum NativeWallpaperDeployment {
             // loses the link and not what it points at.
             try entryLock.withLock {
                 do {
-                    try TrustedDirectory(url: videosFolderURL).removeItem(named: entryID)
+                    try TrustedDirectory(url: videosFolderURL, below: containerURL).removeItem(named: entryID)
                 } catch POSIXError.ENOENT {}
             }
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)

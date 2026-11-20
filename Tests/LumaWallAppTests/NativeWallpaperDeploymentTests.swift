@@ -434,7 +434,7 @@ final class VariantPublicationTests: XCTestCase {
         let current = try stage(job(hash: "aaa"))
         let stale = try stage(job(hash: "old"))
         for url in [partial, legacyTemp] { try Data("x".utf8).write(to: url) }
-        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
         XCTAssertFalse(fm.fileExists(atPath: partial.path))
         XCTAssertFalse(fm.fileExists(atPath: legacyTemp.path))
         XCTAssertFalse(fm.fileExists(atPath: stale.path))
@@ -461,9 +461,27 @@ final class VariantPublicationTests: XCTestCase {
         let linkedEntry = videos.appendingPathComponent(UUID().uuidString)
         try fm.createSymbolicLink(at: linkedEntry, withDestinationURL: victim)
 
-        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
         XCTAssertTrue(fm.fileExists(atPath: precious.path))
         XCTAssertTrue(fm.fileExists(atPath: victim.appendingPathComponent(legacyName).path))
+    }
+
+    func testStartupCleanupRefusesASymlinkAboveTheStagingFolder() throws {
+        // The extension can swap its own Documents folder for a symlink;
+        // cleanup then opened a real copy-staging folder somewhere else.
+        let fm = FileManager.default
+        let victim = root.appendingPathComponent("Elsewhere", isDirectory: true)
+        let foreign = victim.appendingPathComponent("copy-staging", isDirectory: true)
+        try fm.createDirectory(at: foreign, withIntermediateDirectories: true)
+        let movie = foreign.appendingPathComponent("\(id).\(UUID().uuidString).partial.mov")
+        try Data("keep".utf8).write(to: movie)
+        let docs = root.appendingPathComponent("Documents")
+        try fm.createSymbolicLink(at: docs, withDestinationURL: victim)
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(
+            videosFolderURL: docs.appendingPathComponent("videos"),
+            stagingFolderURL: docs.appendingPathComponent("copy-staging"), trustedAncestor: root)
+        XCTAssertTrue(fm.fileExists(atPath: movie.path))
     }
 
     func testStartupCleanupDeletesOnlyStagedMovies() throws {
@@ -473,7 +491,7 @@ final class VariantPublicationTests: XCTestCase {
         let folder = staging.appendingPathComponent("nested", isDirectory: true)
         try Data("x".utf8).write(to: note)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
         XCTAssertTrue(fm.fileExists(atPath: note.path))
         XCTAssertTrue(fm.fileExists(atPath: folder.path))
     }
@@ -497,7 +515,7 @@ final class VariantPublicationTests: XCTestCase {
         let orphan = unlisted.appendingPathComponent("Wallpaper.qhd.mov.\(UUID().uuidString).tmp.mov")
         try Data("x".utf8).write(to: orphan)
 
-        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
         XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(recovered).path))
         XCTAssertTrue(fm.fileExists(atPath: userFile.path))
         XCTAssertTrue(fm.fileExists(atPath: orphan.path))

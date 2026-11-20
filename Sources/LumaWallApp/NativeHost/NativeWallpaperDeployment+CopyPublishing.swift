@@ -42,6 +42,13 @@ extension NativeWallpaperDeployment {
         WallpaperHostCapabilities.extensionDocumentsURL.appendingPathComponent("copy-staging", isDirectory: true)
     }
 
+    /// The extension's container. The extension can write anything inside
+    /// `Data`, including swapping a folder for a symlink, so folders below
+    /// this are opened with `TrustedDirectory(url:below:)`.
+    static var containerURL: URL {
+        WallpaperHostCapabilities.extensionDocumentsURL.deletingLastPathComponent().deletingLastPathComponent()
+    }
+
     /// Where a finished export waits to be published: "entryID.hash.filename".
     static func stagedURL(for job: VariantEncodeQueue.Job, stagingFolderURL: URL = stagingFolderURL) -> URL {
         stagingFolderURL.appendingPathComponent("\(job.entryID).\(job.contentHash).\(job.spec.filename)")
@@ -153,7 +160,10 @@ extension NativeWallpaperDeployment {
             case .failed: return .failed
             }
         },
-        prepare: { cleanUpAbandonedExports(videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL) }
+        prepare: {
+            cleanUpAbandonedExports(
+                videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL, trustedAncestor: containerURL)
+        }
     )
 
     private static func isRecorded(_ spec: VariantSpec, in entry: EntryInfo) -> Bool {
@@ -218,11 +228,11 @@ extension NativeWallpaperDeployment {
     /// inside the entry folder, where the extension's recovery scan could
     /// pick one as the wallpaper.
     ///
-    /// Only `.mov` files are deleted, through `TrustedDirectory`: a staging
-    /// or entry folder swapped for a symlink between listing and deleting
-    /// can't steer the delete outside the container.
-    static func cleanUpAbandonedExports(videosFolderURL: URL, stagingFolderURL: URL) {
-        if let staging = try? TrustedDirectory(url: stagingFolderURL) {
+    /// Only `.mov` files are deleted, through `TrustedDirectory` opened
+    /// below `trustedAncestor`: a staging or entry folder, or any folder
+    /// above them, swapped for a symlink can't steer the delete elsewhere.
+    static func cleanUpAbandonedExports(videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL) {
+        if let staging = try? TrustedDirectory(url: stagingFolderURL, below: trustedAncestor) {
             for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasSuffix(".mov") {
                 let parts = file.name.split(separator: ".", maxSplits: 2).map(String.init)
                 let keep =
@@ -237,15 +247,20 @@ extension NativeWallpaperDeployment {
         // entry. Only entries whose metadata.json reads and names another
         // primary are touched: the extension may have recovered one of these
         // as the primary, and deleting it makes the extension prune the entry.
-        guard let videos = try? TrustedDirectory(url: videosFolderURL) else { return }
-        for dir in (try? videos.entries()) ?? [] where dir.kind == .directory {
-            guard PathSafety.isValidEntryID(dir.name),
-                let entry = try? entry(id: dir.name, videosFolderURL: videosFolderURL),
-                let folder = try? videos.subdirectory(dir.name)
-            else { continue }
-            for file in (try? folder.entries()) ?? []
-            where file.kind == .file && file.name != entry.filename && isLegacyExport(file.name) {
-                try? folder.removeFile(named: file.name)
+        // The metadata is read through the descriptor the delete uses, under
+        // the entry lock deploy holds while it replaces an entry.
+        guard let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) else { return }
+        for dir in (try? videos.entries()) ?? [] where dir.kind == .directory && PathSafety.isValidEntryID(dir.name) {
+            entryLock.withLock {
+                guard let folder = try? videos.subdirectory(dir.name),
+                    let data = try? folder.readFile(named: "metadata.json"),
+                    let entry = try? JSONDecoder().decode(EntryInfo.self, from: data),
+                    entry.id == dir.name
+                else { return }
+                for file in (try? folder.entries()) ?? []
+                where file.kind == .file && file.name != entry.filename && isLegacyExport(file.name) {
+                    try? folder.removeFile(named: file.name)
+                }
             }
         }
     }
