@@ -77,12 +77,14 @@ closures in `XCTestCase` methods. Watch CI after pushing.
 
 ## Media service
 
-The app never parses imported media itself. `LumaWallMediaService`
-(`Sources/LumaWallMediaService`, embedded in the app's `XPCServices`) runs
-in App Sandbox with no file entitlements; the app sends it an open
-read-only file handle through `MediaServiceClient`. Route new
-AVFoundation inspection or frame extraction through `MediaProbing`, not
-`AVURLAsset(url:)` in the app. Testing builds gain Xcode's read-only `/`
+Media inspection and still frames (import, deploy, posters) run in
+`LumaWallMediaService` (`Sources/LumaWallMediaService`, embedded in the
+app's `XPCServices`), in App Sandbox with no file entitlements; the app
+sends it an open read-only file handle through `MediaServiceClient`.
+Route new inspection or frame extraction through `MediaProbing`, not
+`AVURLAsset(url:)` in the app. Still in the app: transcoding
+(`MediaImporter.exportVideoOnly`, the copy encodes, `BatteryMediaVariant`)
+and `AVPlayer` playback. Testing builds gain Xcode's read-only `/`
 sandbox exception, so check real entitlements on the Release build:
 `codesign -d --entitlements - <Release app>/Contents/XPCServices/LumaWallMediaService.xpc`.
 
