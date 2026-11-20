@@ -172,4 +172,18 @@ struct TrustedDirectoryTests {
         defer { cleanup() }
         #expect(throws: POSIXError(.ENOENT)) { try TrustedDirectory(url: root).removeItem(named: "gone") }
     }
+
+    @Test func identityNamesTheFolderNotItsPath() throws {
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        let folder = root.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let first = try TrustedDirectory(url: folder).identity()
+        #expect(try TrustedDirectory(url: folder).identity() == first)
+        #expect(try TrustedDirectory(url: victim).identity() != first)
+        // A new folder at the same path is a different folder.
+        try fm.removeItem(at: folder)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        #expect(try TrustedDirectory(url: folder).identity() != first)
+    }
 }

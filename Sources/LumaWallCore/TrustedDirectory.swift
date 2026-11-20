@@ -17,6 +17,12 @@ public final class TrustedDirectory {
         public var kind: Kind
     }
 
+    /// Which folder on disk this is, whatever path reached it.
+    public struct Identity: Codable, Equatable, Sendable {
+        public var device: Int64
+        public var inode: UInt64
+    }
+
     private let fd: Int32
 
     /// Opens `url`. The folders above it are followed as usual; `url`'s own
@@ -53,6 +59,13 @@ public final class TrustedDirectory {
     }
 
     deinit { close(fd) }
+
+    /// The device and inode of the folder this is open on.
+    public func identity() throws -> Identity {
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { throw POSIXError.current }
+        return Identity(device: Int64(info.st_dev), inode: UInt64(info.st_ino))
+    }
 
     /// The folder `name` inside this one. Throws if it is missing, a file,
     /// or a symlink.
