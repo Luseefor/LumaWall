@@ -138,7 +138,8 @@ enum NativeWallpaperDeployment {
         private func loaded() -> [String: Record] {
             if let records { return records }
             // A missing or unreadable file only costs one rehash per source.
-            let decoded = fileURL
+            let decoded =
+                fileURL
                 .flatMap { try? Data(contentsOf: $0) }
                 .flatMap { try? JSONDecoder().decode([String: Record].self, from: $0) }
             records = decoded ?? [:]
@@ -211,8 +212,9 @@ enum NativeWallpaperDeployment {
         playbackChanged(entryID: entryID, surfaces: surfaces)
         let hash = try await hashStore.hash(for: asset.mediaURL)
         if let existing = try entry(id: entryID),
-           FileManager.default.fileExists(atPath: videoURL(for: existing).path),
-           existing.contentHash == hash {
+            FileManager.default.fileExists(atPath: videoURL(for: existing).path),
+            existing.contentHash == hash
+        {
             // Libraries missing any planned copy (pre-variant ones, or ones
             // made before the 1440p copy existed) backfill in the background.
             if needsVariants(existing, displayPixels: displayPixels) {
@@ -250,7 +252,8 @@ enum NativeWallpaperDeployment {
                 }
             }
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            let filename = PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
+            let filename =
+                PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
                 ? asset.mediaURL.lastPathComponent
                 : "Wallpaper.mov"
             let dest = dir.appendingPathComponent(filename)
@@ -288,7 +291,8 @@ enum NativeWallpaperDeployment {
     }
 
     static func entry(id: String, videosFolderURL: URL = videosFolderURL) throws -> EntryInfo? {
-        let metadataURL = videosFolderURL
+        let metadataURL =
+            videosFolderURL
             .appendingPathComponent(id, isDirectory: true)
             .appendingPathComponent("metadata.json")
         let data: Data

@@ -80,74 +80,77 @@ struct LibraryInspector: View {
                 GeometryReader { viewport in
                     ScrollView(.vertical) {
                         VStack(alignment: .leading, spacing: 16) {
-                        poster(asset)
-                        TextField("Wallpaper name", text: $draftName)
-                            .font(.title3.weight(.semibold))
-                            .textFieldStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .clipped()
-                            .onSubmit { commitName(asset) }
-                        metadata(asset)
-                        Divider().overlay(Theme.line)
-                        Picker("Category", selection: Binding(
-                            get: { asset.category },
-                            set: { model.setCategory($0, for: asset) }
-                        )) {
-                            ForEach(WallpaperCategory.allCases) { category in
-                                Label(category.title, systemImage: category.symbol).tag(category)
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        if !model.displaysUsing(asset).isEmpty {
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text("Currently displayed on")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Theme.textDim)
-                                ForEach(model.displaysUsing(asset)) { display in
-                                    Label(display.name, systemImage: "display")
-                                        .font(.subheadline)
+                            poster(asset)
+                            TextField("Wallpaper name", text: $draftName)
+                                .font(.title3.weight(.semibold))
+                                .textFieldStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .clipped()
+                                .onSubmit { commitName(asset) }
+                            metadata(asset)
+                            Divider().overlay(Theme.line)
+                            Picker(
+                                "Category",
+                                selection: Binding(
+                                    get: { asset.category },
+                                    set: { model.setCategory($0, for: asset) }
+                                )
+                            ) {
+                                ForEach(WallpaperCategory.allCases) { category in
+                                    Label(category.title, systemImage: category.symbol).tag(category)
                                 }
                             }
-                        }
+                            .pickerStyle(.menu)
 
-                        Menu {
-                            Button("Main Display") { model.apply(asset) }
-                            Button("All Displays") { model.applyToAll(asset) }
-                            if model.displays.count > 1 {
-                                Button("Span Across Displays") { model.spanAcrossAllDisplays(asset) }
+                            if !model.displaysUsing(asset).isEmpty {
+                                VStack(alignment: .leading, spacing: 7) {
+                                    Text("Currently displayed on")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Theme.textDim)
+                                    ForEach(model.displaysUsing(asset)) { display in
+                                        Label(display.name, systemImage: "display")
+                                            .font(.subheadline)
+                                    }
+                                }
                             }
-                            Divider()
-                            ForEach(model.displays) { display in
-                                Button(display.name) { model.apply(asset, to: display.displayID) }
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "display")
-                                Text("Use as Wallpaper")
-                                    .font(.system(size: 13, weight: .semibold))
-                                Spacer()
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 14)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 40)
-                            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                        }
-                        .menuStyle(.borderlessButton)
 
-                        HStack {
-                            GhostButton("Preview", symbol: "play.fill") { model.previewAsset = asset }
-                            GhostButton(
-                                model.isFavorite(asset) ? "Favorited" : "Favorite",
-                                symbol: model.isFavorite(asset) ? "heart.fill" : "heart"
-                            ) { model.toggleFavorite(asset) }
-                        }
-                        Button("Remove from Library", role: .destructive) { model.remove(asset) }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.red.opacity(0.9))
+                            Menu {
+                                Button("Main Display") { model.apply(asset) }
+                                Button("All Displays") { model.applyToAll(asset) }
+                                if model.displays.count > 1 {
+                                    Button("Span Across Displays") { model.spanAcrossAllDisplays(asset) }
+                                }
+                                Divider()
+                                ForEach(model.displays) { display in
+                                    Button(display.name) { model.apply(asset, to: display.displayID) }
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "display")
+                                    Text("Use as Wallpaper")
+                                        .font(.system(size: 13, weight: .semibold))
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 11, weight: .bold))
+                                }
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 14)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 40)
+                                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            }
+                            .menuStyle(.borderlessButton)
+
+                            HStack {
+                                GhostButton("Preview", symbol: "play.fill") { model.previewAsset = asset }
+                                GhostButton(
+                                    model.isFavorite(asset) ? "Favorited" : "Favorite",
+                                    symbol: model.isFavorite(asset) ? "heart.fill" : "heart"
+                                ) { model.toggleFavorite(asset) }
+                            }
+                            Button("Remove from Library", role: .destructive) { model.remove(asset) }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.red.opacity(0.9))
                         }
                         // Scroll views otherwise let media and long filenames choose
                         // an oversized ideal width, which can push the leading edge
@@ -366,10 +369,12 @@ struct PlaylistShelfCard: View {
                     Text(playlist.name)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                    Text("\(playlist.wallpaperIDs.count) items · \(playlist.shuffled ? "Shuffled" : "Ordered") · every \(playlist.intervalMinutes)m")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.65))
-                        .lineLimit(1)
+                    Text(
+                        "\(playlist.wallpaperIDs.count) items · \(playlist.shuffled ? "Shuffled" : "Ordered") · every \(playlist.intervalMinutes)m"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineLimit(1)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)

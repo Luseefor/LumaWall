@@ -38,7 +38,8 @@ final class VariantSelectionTests: XCTestCase {
 
     func testCopiesBelowTheSourceFrameRateNeverServeFull() {
         let slow = [VideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1920, height: 1080))]
-        let pick = VariantSelection.variant(for: .full, sourceFPS: 60, sourceResolution: source, variants: slow, displayPixels: CGSize(width: 1920, height: 1080))
+        let pick = VariantSelection.variant(
+            for: .full, sourceFPS: 60, sourceResolution: source, variants: slow, displayPixels: CGSize(width: 1920, height: 1080))
         XCTAssertNil(pick)
     }
 
@@ -47,8 +48,10 @@ final class VariantSelectionTests: XCTestCase {
     }
 
     func testBatteryTiersIgnoreTheQHDCopy() {
-        let reduced = VariantSelection.variant(for: .reduced, sourceFPS: 60, sourceResolution: source, variants: variants, displayPixels: CGSize(width: 2560, height: 1440))
-        let minimal = VariantSelection.variant(for: .minimal, sourceFPS: 60, sourceResolution: source, variants: variants, displayPixels: CGSize(width: 2560, height: 1440))
+        let reduced = VariantSelection.variant(
+            for: .reduced, sourceFPS: 60, sourceResolution: source, variants: variants, displayPixels: CGSize(width: 2560, height: 1440))
+        let minimal = VariantSelection.variant(
+            for: .minimal, sourceFPS: 60, sourceResolution: source, variants: variants, displayPixels: CGSize(width: 2560, height: 1440))
         XCTAssertEqual(reduced?.filename, "Wallpaper.reduced.mov")
         XCTAssertEqual(minimal?.filename, "Wallpaper.minimal.mov")
     }
@@ -88,7 +91,9 @@ final class VariantSelectionTests: XCTestCase {
             ]
             let sourceFPS = Int(fixture.fps.rounded())
             let copies = fixture.planned.sorted().compactMap { name in
-                sizes[name].map { VideoVariant(filename: name, fps: name == "Wallpaper.qhd.mov" ? sourceFPS : min(sourceFPS, 30), resolution: $0) }
+                sizes[name].map {
+                    VideoVariant(filename: name, fps: name == "Wallpaper.qhd.mov" ? sourceFPS : min(sourceFPS, 30), resolution: $0)
+                }
             }
             let pick = VariantSelection.variant(for: .reduced, sourceFPS: sourceFPS, sourceResolution: fixture.source, variants: copies)
             XCTAssertEqual(pick?.filename, fixture.reducedPlays, "\(fixture)")

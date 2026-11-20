@@ -50,20 +50,27 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
 
     func testPermissionFallbackHandlesUnderlyingSystemPolicyDenialOnly() {
         let denied = NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))
-        let wrapped = NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteUnknown.rawValue,
-                              userInfo: [NSUnderlyingErrorKey: denied])
+        let wrapped = NSError(
+            domain: NSCocoaErrorDomain, code: CocoaError.fileWriteUnknown.rawValue,
+            userInfo: [NSUnderlyingErrorKey: denied])
         XCTAssertTrue(WallpaperHostCapabilities.isPermissionError(wrapped))
-        XCTAssertFalse(WallpaperHostCapabilities.isPermissionError(
-            NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteOutOfSpace.rawValue)))
+        XCTAssertFalse(
+            WallpaperHostCapabilities.isPermissionError(
+                NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteOutOfSpace.rawValue)))
     }
 
     private let variants = [
-        NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1920, height: 1080)),
-        NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.minimal.mov", fps: 30, resolution: CGSize(width: 1280, height: 720)),
+        NativeWallpaperDeployment.NativeVideoVariant(
+            filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1920, height: 1080)),
+        NativeWallpaperDeployment.NativeVideoVariant(
+            filename: "Wallpaper.minimal.mov", fps: 30, resolution: CGSize(width: 1280, height: 720)),
     ]
 
     func testPortraitCopyIsJudgedByWidth() {
-        let portrait = [NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1080, height: 1920))]
+        let portrait = [
+            NativeWallpaperDeployment.NativeVideoVariant(
+                filename: "Wallpaper.reduced.mov", fps: 30, resolution: CGSize(width: 1080, height: 1920))
+        ]
         XCTAssertNil(NativeWallpaperDeployment.previewVariant(portrait, minPixelWidth: 1920))
         XCTAssertEqual(NativeWallpaperDeployment.previewVariant(portrait, minPixelWidth: 640)?.filename, "Wallpaper.reduced.mov")
     }
@@ -97,7 +104,8 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         // The reduced copy is listed but missing on disk: use the original.
         let large = NativeWallpaperDeployment.previewURL(entryID: id, minPixelWidth: 1600, fallback: original, videosFolderURL: videos)
         XCTAssertEqual(large, original)
-        let unknown = NativeWallpaperDeployment.previewURL(entryID: UUID().uuidString, minPixelWidth: 640, fallback: original, videosFolderURL: videos)
+        let unknown = NativeWallpaperDeployment.previewURL(
+            entryID: UUID().uuidString, minPixelWidth: 640, fallback: original, videosFolderURL: videos)
         XCTAssertEqual(unknown, original)
     }
 
@@ -142,7 +150,8 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
     func testCopiesPlannedPerSourceSize() {
         let names = { (size: CGSize) in NativeWallpaperDeployment.variantSpecs(sourceSize: size, sourceFPS: 30).map(\.filename) }
         // 4K sources also get a 1440p copy at full frame rate for 1440p monitors.
-        XCTAssertEqual(Set(names(CGSize(width: 3840, height: 2160))), ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov", "Wallpaper.qhd.mov"])
+        XCTAssertEqual(
+            Set(names(CGSize(width: 3840, height: 2160))), ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov", "Wallpaper.qhd.mov"])
         XCTAssertEqual(Set(names(CGSize(width: 2560, height: 1440))), ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
         XCTAssertEqual(names(CGSize(width: 1920, height: 1080)), ["Wallpaper.minimal.mov"])
         XCTAssertEqual(names(CGSize(width: 1280, height: 720)), [])
@@ -151,7 +160,8 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
     func testQHDCopyIsPlannedOnlyForDisplaysThatPlayIt() {
         // A 4K encode ran even when every display was 4K and would never play it.
         for fixture in QHDFitFixtures.rows {
-            let planned = NativeWallpaperDeployment.variantSpecs(sourceSize: fixture.source, sourceFPS: fixture.fps, displayPixels: [fixture.display])
+            let planned = NativeWallpaperDeployment.variantSpecs(
+                sourceSize: fixture.source, sourceFPS: fixture.fps, displayPixels: [fixture.display])
             XCTAssertEqual(planned.contains { $0.filename == "Wallpaper.qhd.mov" }, fixture.playsQHD, "\(fixture)")
         }
         let uhd = CGSize(width: 3840, height: 2160)
@@ -162,8 +172,9 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertFalse(plansQHD([]))
         XCTAssertTrue(plansQHD([uhd, CGSize(width: 2560, height: 1440)]))
         // Battery copies don't depend on the displays.
-        XCTAssertEqual(NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: 60, displayPixels: [uhd]).map(\.filename),
-                       ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
+        XCTAssertEqual(
+            NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: 60, displayPixels: [uhd]).map(\.filename),
+            ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
     }
 
     func testCopySizesMatchTheSharedFixtures() {
@@ -180,9 +191,12 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         typealias Surface = NativeWallpaperDeployment.Surface
         let uhd = CGSize(width: 3840, height: 2160)
         let qhd = CGSize(width: 2560, height: 1440)
-        func readiness(_ filename: String, _ surfaces: [Surface], fps: Double = 60, power: Bool = true) -> NativeWallpaperDeployment.VariantEncodeQueue.Readiness {
+        func readiness(_ filename: String, _ surfaces: [Surface], fps: Double = 60, power: Bool = true)
+            -> NativeWallpaperDeployment.VariantEncodeQueue.Readiness
+        {
             let spec = NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: fps).first { $0.filename == filename }!
-            return NativeWallpaperDeployment.copyReadiness(spec, sourceSize: uhd, sourceFPS: fps, surfaces: surfaces, canMakeOptionalCopies: power)
+            return NativeWallpaperDeployment.copyReadiness(
+                spec, sourceSize: uhd, sourceFPS: fps, surfaces: surfaces, canMakeOptionalCopies: power)
         }
         // Battery Saver plays the 720p copy, so it goes before the 1080p one.
         let saver = [Surface(pixelSize: qhd, tier: .minimal)]
@@ -195,7 +209,9 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertEqual(readiness("Wallpaper.qhd.mov", full), .ready(rank: 0))
         XCTAssertEqual(readiness("Wallpaper.minimal.mov", full), .ready(rank: 1))
         // A 30 fps source on a 1080p display at Full Quality plays the 1080p copy.
-        XCTAssertEqual(readiness("Wallpaper.reduced.mov", [Surface(pixelSize: CGSize(width: 1920, height: 1080), tier: .full)], fps: 30), .ready(rank: 0))
+        XCTAssertEqual(
+            readiness("Wallpaper.reduced.mov", [Surface(pixelSize: CGSize(width: 1920, height: 1080), tier: .full)], fps: 30),
+            .ready(rank: 0))
         // The 1440p copy is held while power or the tier keeps it unplayed,
         // and dropped once no surface fits it.
         XCTAssertEqual(readiness("Wallpaper.qhd.mov", full, power: false), .hold)
@@ -214,7 +230,8 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
                 let readiness = NativeWallpaperDeployment.copyReadiness(
                     spec, sourceSize: fixture.source, sourceFPS: fixture.fps, surfaces: surfaces, canMakeOptionalCopies: true
                 )
-                let expected: NativeWallpaperDeployment.VariantEncodeQueue.Readiness = spec.filename == fixture.reducedPlays ? .ready(rank: 0) : .ready(rank: 1)
+                let expected: NativeWallpaperDeployment.VariantEncodeQueue.Readiness =
+                    spec.filename == fixture.reducedPlays ? .ready(rank: 0) : .ready(rank: 1)
                 XCTAssertEqual(readiness, expected, "\(spec.filename) for \(fixture)")
             }
         }
@@ -243,23 +260,31 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
             id: UUID().uuidString, name: "x", filename: "Wallpaper.mp4", duration: 5, fps: 60,
             resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants
         )
-        XCTAssertFalse(NativeWallpaperDeployment.needsVariants(entry, displayPixels: [CGSize(width: 3840, height: 2160)], fileExists: { _ in true }))
-        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(entry, displayPixels: [CGSize(width: 2560, height: 1440)], fileExists: { _ in true }))
+        XCTAssertFalse(
+            NativeWallpaperDeployment.needsVariants(entry, displayPixels: [CGSize(width: 3840, height: 2160)], fileExists: { _ in true }))
+        XCTAssertTrue(
+            NativeWallpaperDeployment.needsVariants(entry, displayPixels: [CGSize(width: 2560, height: 1440)], fileExists: { _ in true }))
     }
 
     func testQHDCopyKeepsTheSourceAspect() {
-        let qhd = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 4096, height: 2304), sourceFPS: 60).first { $0.filename == "Wallpaper.qhd.mov" }
+        let qhd = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 4096, height: 2304), sourceFPS: 60).first {
+            $0.filename == "Wallpaper.qhd.mov"
+        }
         XCTAssertEqual(qhd?.fitting, CGSize(width: 2560, height: 1440))
-        let portrait = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 2160, height: 3840), sourceFPS: 60).first { $0.filename == "Wallpaper.qhd.mov" }
+        let portrait = NativeWallpaperDeployment.variantSpecs(sourceSize: CGSize(width: 2160, height: 3840), sourceFPS: 60).first {
+            $0.filename == "Wallpaper.qhd.mov"
+        }
         XCTAssertEqual(portrait?.fitting, CGSize(width: 1440, height: 2560))
     }
 
     func testBatteryCopiesAreCappedAt30FPS() {
         // 60 fps battery copies decoded and redrew twice as often as needed.
         func rates(_ fps: Double) -> [String: Double] {
-            Dictionary(uniqueKeysWithValues: NativeWallpaperDeployment
-                .variantSpecs(sourceSize: CGSize(width: 3840, height: 2160), sourceFPS: fps)
-                .map { ($0.filename, $0.fps) })
+            Dictionary(
+                uniqueKeysWithValues:
+                    NativeWallpaperDeployment
+                    .variantSpecs(sourceSize: CGSize(width: 3840, height: 2160), sourceFPS: fps)
+                    .map { ($0.filename, $0.fps) })
         }
         XCTAssertEqual(rates(60), ["Wallpaper.reduced.mov": 30, "Wallpaper.minimal.mov": 30, "Wallpaper.qhd.mov": 60])
         // Whole divisors keep frames evenly spaced: 59.94 halves to 29.97.
@@ -272,11 +297,16 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
     func testConcurrentCopiesAreMergedNotOverwritten() {
         // Two workers each wrote the list they started with, so the last
         // writer dropped the other's copy from metadata.json.
-        let reduced = NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 60, resolution: CGSize(width: 1920, height: 1080))
-        let minimal = NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.minimal.mov", fps: 60, resolution: CGSize(width: 1280, height: 720))
+        let reduced = NativeWallpaperDeployment.NativeVideoVariant(
+            filename: "Wallpaper.reduced.mov", fps: 60, resolution: CGSize(width: 1920, height: 1080))
+        let minimal = NativeWallpaperDeployment.NativeVideoVariant(
+            filename: "Wallpaper.minimal.mov", fps: 60, resolution: CGSize(width: 1280, height: 720))
         let merged = NativeWallpaperDeployment.merging([minimal], with: [reduced])
         XCTAssertEqual(Set(merged.map(\.filename)), ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov"])
-        let replaced = NativeWallpaperDeployment.merging([reduced], with: [NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: reduced.resolution)])
+        let replaced = NativeWallpaperDeployment.merging(
+            [reduced],
+            with: [NativeWallpaperDeployment.NativeVideoVariant(filename: "Wallpaper.reduced.mov", fps: 30, resolution: reduced.resolution)]
+        )
         XCTAssertEqual(replaced.count, 1)
         XCTAssertEqual(replaced.first?.fps, 30)
     }
@@ -295,11 +325,13 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertFalse(NativeWallpaperDeployment.needsVariants(complete, displayPixels: qhdDisplay, fileExists: { _ in true }))
         // A battery copy made at 60 fps before the 30 fps cap: re-encode it.
         var stale = complete
-        stale.variants = [.init(filename: "Wallpaper.reduced.mov", fps: 60, resolution: CGSize(width: 1920, height: 1080))] + variants.dropFirst()
+        stale.variants =
+            [.init(filename: "Wallpaper.reduced.mov", fps: 60, resolution: CGSize(width: 1920, height: 1080))] + variants.dropFirst()
             + [.init(filename: "Wallpaper.qhd.mov", fps: 60, resolution: CGSize(width: 2560, height: 1440))]
         XCTAssertTrue(NativeWallpaperDeployment.needsVariants(stale, displayPixels: qhdDisplay, fileExists: { _ in true }))
         // Listed in metadata but deleted from disk: repair it.
-        XCTAssertTrue(NativeWallpaperDeployment.needsVariants(complete, displayPixels: qhdDisplay, fileExists: { $0 != "Wallpaper.qhd.mov" }))
+        XCTAssertTrue(
+            NativeWallpaperDeployment.needsVariants(complete, displayPixels: qhdDisplay, fileExists: { $0 != "Wallpaper.qhd.mov" }))
     }
 
     func testCopyFrameDurationKeepsTheSourceCadence() {
@@ -382,8 +414,9 @@ final class VariantPublicationTests: XCTestCase {
         // saw the copy and the next request encoded it again.
         try deploy(hash: "aaa")
         let staged = try stage(job(hash: "aaa"))
-        let failed = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos,
-                                                       writeMetadata: { _, _ in throw CocoaError(.fileWriteOutOfSpace) })
+        let failed = NativeWallpaperDeployment.publish(
+            staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos,
+            writeMetadata: { _, _ in throw CocoaError(.fileWriteOutOfSpace) })
         XCTAssertEqual(failed, .failed)
         XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))

@@ -33,7 +33,9 @@ struct AppChrome: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Button { model.section = .home } label: {
+            Button {
+                model.section = .home
+            } label: {
                 HStack(spacing: 8) {
                     BrandMark(size: 30)
                     Text(L10n.appName)

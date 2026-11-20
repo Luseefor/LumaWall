@@ -10,9 +10,12 @@ extension WallpaperXPCHandler {
     /// Runs on `Lifecycle.queue`.
     func acquireReuse(_ existing: ActiveWallpaper, _ acquired: AcquiredRequest, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
         let key = acquired.key, displayID = acquired.displayID, destSize = acquired.destSize, scaleFactor = acquired.scaleFactor
-        let isPreview = acquired.isPreview, choiceConfiguration = acquired.choiceConfiguration, renderChoice = acquired.renderChoice, videoURL = acquired.videoURL
+        let isPreview = acquired.isPreview, choiceConfiguration = acquired.choiceConfiguration, renderChoice = acquired.renderChoice,
+            videoURL = acquired.videoURL
         let pixelWidth = acquired.pixelWidth, pixelHeight = acquired.pixelHeight, loadStill = acquired.loadStill
-        traceLog("  [acquire] REUSE ctx=\(existing.contextId) display=\(key.displayID) storedVideoID=\(existing.videoID ?? "nil") newChoice=\(choiceConfiguration ?? "nil") renderer=\(existing.renderer.map { "#\($0.debugID)" } ?? "nil") videoURL=\(findVideoURL(forChoice: choiceConfiguration)?.lastPathComponent ?? "nil") dest=\(destSize) @\(scaleFactor)x isPreview=\(isPreview) (surface isPreview=\(existing.isPreview))")
+        traceLog(
+            "  [acquire] REUSE ctx=\(existing.contextId) display=\(key.displayID) storedVideoID=\(existing.videoID ?? "nil") newChoice=\(choiceConfiguration ?? "nil") renderer=\(existing.renderer.map { "#\($0.debugID)" } ?? "nil") videoURL=\(findVideoURL(forChoice: choiceConfiguration)?.lastPathComponent ?? "nil") dest=\(destSize) @\(scaleFactor)x isPreview=\(isPreview) (surface isPreview=\(existing.isPreview))"
+        )
 
         // A same-key acquire from the OTHER role (a Settings preview of the
         // current wallpaper reusing the live surface id, or an id-less
@@ -26,12 +29,17 @@ extension WallpaperXPCHandler {
             guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
                 reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
             }
-            if Lifecycle.replies.hold(heldReply(SendableBox(value: replyObj), contextId: existing.contextId, key: key, reply: reply), for: key) {
-                extensionLog("  [acquire] REUSE role mismatch while display \(key.displayID)'s renderer is being created → reply waits for its seed")
+            if Lifecycle.replies.hold(
+                heldReply(SendableBox(value: replyObj), contextId: existing.contextId, key: key, reply: reply), for: key)
+            {
+                extensionLog(
+                    "  [acquire] REUSE role mismatch while display \(key.displayID)'s renderer is being created → reply waits for its seed")
             } else {
                 reply(replyObj, nil)
             }
-            extensionLog("  [acquire] REUSE role mismatch (surface isPreview=\(existing.isPreview), request isPreview=\(isPreview), dest=\(destSize)) → reply only, no resize/switch")
+            extensionLog(
+                "  [acquire] REUSE role mismatch (surface isPreview=\(existing.isPreview), request isPreview=\(isPreview), dest=\(destSize)) → reply only, no resize/switch"
+            )
             return
         }
 
@@ -50,13 +58,16 @@ extension WallpaperXPCHandler {
             CATransaction.commit()
             CATransaction.flush()
             resized.renderer?.resize(to: destSize, scale: scaleFactor)
-            extensionLog("  [acquire] REUSE geometry changed (same role) → resized surface on display \(key.displayID) to \(destSize) @\(scaleFactor)x")
+            extensionLog(
+                "  [acquire] REUSE geometry changed (same role) → resized surface on display \(key.displayID) to \(destSize) @\(scaleFactor)x"
+            )
         }
 
         guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
             reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
         }
-        if Lifecycle.replies.hold(heldReply(SendableBox(value: replyObj), contextId: existing.contextId, key: key, reply: reply), for: key) {
+        if Lifecycle.replies.hold(heldReply(SendableBox(value: replyObj), contextId: existing.contextId, key: key, reply: reply), for: key)
+        {
             extensionLog("  [acquire] REUSE while display \(key.displayID)'s renderer is being created → reply waits for its seed")
         } else {
             reply(replyObj, nil)
@@ -72,7 +83,9 @@ extension WallpaperXPCHandler {
             traceLog("  [acquire] no video for new choice, keeping current")
             return
         }
-        extensionLog("  [acquire] switching to \(videoURL.lastPathComponent) (renderer \(existing.renderer != nil ? "present → switchVideo" : "nil → create"))")
+        extensionLog(
+            "  [acquire] switching to \(videoURL.lastPathComponent) (renderer \(existing.renderer != nil ? "present → switchVideo" : "nil → create"))"
+        )
         let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
         if let renderer = existing.renderer {
             // Switch the video IN PLACE on the already-hosted display layer.
@@ -97,7 +110,8 @@ extension WallpaperXPCHandler {
                     renderer = try await VideoRenderer.create(
                         rootLayer: boxedRoot.value, videoURL: videoURL,
                         seed: { holds in await seedStill(cached: loadStill(videoURL), videoURL: videoURL, decode: !holds) },
-                        fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
+                        fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) },
+                        variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         isPreview: isPreview,
                     )
@@ -107,7 +121,10 @@ extension WallpaperXPCHandler {
                     return
                 }
                 if !renderer.seededStill { installGradientFallback(on: boxedRoot.value) }
-                guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
+                guard
+                    case let .installed(old) = WallpaperState.shared.installRenderer(
+                        renderer, token: token, videoID: choiceConfiguration, for: key)
+                else {
                     renderer.stop()
                     return
                 }
@@ -123,7 +140,10 @@ extension WallpaperXPCHandler {
         } else {
             traceLog("  [acquire] renderer create already in flight for display \(key.displayID), skipping duplicate")
         }
-        Task { [videoURL, choiceConfiguration, pixelWidth, pixelHeight] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: pixelWidth, displayPixelHeight: pixelHeight) }
+        Task { [videoURL, choiceConfiguration, pixelWidth, pixelHeight] in
+            await writeBMPSnapshot(
+                videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: pixelWidth, displayPixelHeight: pixelHeight)
+        }
         return
     }
 }

@@ -92,7 +92,8 @@ public enum SolarSchedule: Sendable {
         ra = (ra + (floor(l / 90) * 90 - floor(ra / 90) * 90)) / 15
         let sinDec = 0.39782 * sin(l * .pi / 180)
         let cosDec = cos(asin(sinDec))
-        let cosH = (cos(90.833 * .pi / 180) - (sinDec * sin(latitude * .pi / 180)))
+        let cosH =
+            (cos(90.833 * .pi / 180) - (sinDec * sin(latitude * .pi / 180)))
             / (cosDec * cos(latitude * .pi / 180))
         guard cosH >= -1, cosH <= 1 else {
             // Polar edge: cosH > 1 means the sun never rises (polar night),
@@ -106,7 +107,8 @@ public enum SolarSchedule: Sendable {
                 return rising ? 0 : 24 * 60
             }
         }
-        var h = rising
+        var h =
+            rising
             ? 360 - (acos(cosH) * 180 / .pi)
             : (acos(cosH) * 180 / .pi)
         h /= 15

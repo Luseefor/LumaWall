@@ -54,7 +54,8 @@ extension NativeWallpaperDeployment {
 
     @MainActor
     private static func cachedEntry(id: String, videosFolderURL: URL) -> EntryInfo? {
-        let metadata = videosFolderURL
+        let metadata =
+            videosFolderURL
             .appendingPathComponent(id, isDirectory: true)
             .appendingPathComponent("metadata.json")
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: metadata.path) else {
@@ -81,11 +82,12 @@ extension NativeWallpaperDeployment {
         videosFolderURL: URL
     ) -> (plan: PreviewPlan, url: URL?) {
         guard PathSafety.isValidEntryID(entryID),
-              let entry = cachedEntry(id: entryID, videosFolderURL: videosFolderURL)
+            let entry = cachedEntry(id: entryID, videosFolderURL: videosFolderURL)
         else { return (allowsOriginal ? .original : .poster, nil) }
         let plan = previewPlan(entry.variants ?? [], minPixelWidth: minPixelWidth, allowsOriginal: allowsOriginal)
         guard case .copy(let variant) = plan else { return (plan, nil) }
-        let url = videosFolderURL
+        let url =
+            videosFolderURL
             .appendingPathComponent(entryID, isDirectory: true)
             .appendingPathComponent(variant.filename)
         if FileManager.default.fileExists(atPath: url.path) { return (plan, url) }

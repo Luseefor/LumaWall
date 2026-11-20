@@ -9,7 +9,8 @@ import UniformTypeIdentifiers
 extension AppModel {
     var featured: WallpaperAsset? {
         if let main = displayCoordinator.mainDisplay(), let id = activeByDisplay[main.displayID],
-           let asset = assets.first(where: { $0.id == id }) {
+            let asset = assets.first(where: { $0.id == id })
+        {
             return asset
         }
         return assets.first
@@ -34,7 +35,8 @@ extension AppModel {
 
     var filteredAssets: [WallpaperAsset] {
         assets.filter { asset in
-            let matchesSearch = searchText.isEmpty || asset.name.localizedCaseInsensitiveContains(searchText)
+            let matchesSearch =
+                searchText.isEmpty || asset.name.localizedCaseInsensitiveContains(searchText)
                 || asset.category.title.localizedCaseInsensitiveContains(searchText)
             let matchesResolution = resolutionFilter.matches(asset.pixelSize)
             let matchesCategory = categoryFilter.map { asset.category == $0 } ?? true

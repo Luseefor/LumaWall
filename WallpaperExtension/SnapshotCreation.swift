@@ -24,7 +24,7 @@ func createSnapshotViaRuntime(currentTime: CMTime? = nil) async -> AnyObject? {
         do {
             let duration = try await asset.load(.duration)
             if duration.isValid, duration.seconds > 0 {
-                let randomOffset = Double.random(in: 0 ..< duration.seconds)
+                let randomOffset = Double.random(in: 0..<duration.seconds)
                 requestTime = CMTime(seconds: randomOffset, preferredTimescale: duration.timescale)
             } else {
                 requestTime = .zero
@@ -61,7 +61,7 @@ private func renderSnapshotToIOSurface(image: CGImage) -> AnyObject? {
         .width: width,
         .height: height,
         .bytesPerElement: 4,
-        .pixelFormat: 0x4247_5241, // 'BGRA'
+        .pixelFormat: 0x4247_5241,  // 'BGRA'
     ]
     guard let surface = IOSurface(properties: surfaceProps) else {
         extensionLog("  [Snapshot] Failed to create IOSurface")

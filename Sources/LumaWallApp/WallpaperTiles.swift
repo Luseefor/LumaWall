@@ -101,7 +101,9 @@ struct WallpaperTile: View {
                             .foregroundStyle(.black)
                     }
                     Spacer()
-                    Button { model.toggleFavorite(asset) } label: {
+                    Button {
+                        model.toggleFavorite(asset)
+                    } label: {
                         Image(systemName: model.isFavorite(asset) ? "heart.fill" : "heart")
                             .foregroundStyle(model.isFavorite(asset) ? .pink : .white)
                             .frame(width: 28, height: 28)
@@ -220,7 +222,9 @@ struct LibraryCard: View {
 
                 Spacer()
 
-                Button(role: .destructive) { model.remove(asset) } label: {
+                Button(role: .destructive) {
+                    model.remove(asset)
+                } label: {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.plain)

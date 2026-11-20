@@ -47,7 +47,9 @@ func bisectShowStill(videoURL: URL?, cachedStill: CGImage?, rootLayer: CALayer, 
         source = "decodedFrame"
     }
     guard let sample else {
-        extensionLog("  [bisect] display \(key.displayID): NO still available (cachedStill=\(cachedStill != nil), url=\(videoURL?.lastPathComponent ?? "nil"))")
+        extensionLog(
+            "  [bisect] display \(key.displayID): NO still available (cachedStill=\(cachedStill != nil), url=\(videoURL?.lastPathComponent ?? "nil"))"
+        )
         return
     }
     bisectSetDisplayImmediately(sample)
@@ -81,7 +83,7 @@ private func decodeFirstSampleBuffer(_ url: URL) -> CMSampleBuffer? {
 /// fully self-contained.
 private func bisectSetDisplayImmediately(_ sample: CMSampleBuffer) {
     guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) else { return }
-    for i in 0 ..< CFArrayGetCount(attachments) {
+    for i in 0..<CFArrayGetCount(attachments) {
         let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, i), to: CFMutableDictionary.self)
         CFDictionarySetValue(
             dict,

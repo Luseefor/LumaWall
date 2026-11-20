@@ -26,7 +26,9 @@ extension VideoRenderer {
             // pauses. Pick the first frame's copy for the tier now.
             requestedTier = tierSource()
             let tier = playedTier(requestedTier)
-            if case let .opened(loaded) = copy.retierAtStart(current: asset.url, tier: tier, displayPixels: displayPixelSize, isPreview: isPreview, open: loadBlocking) {
+            if case let .opened(loaded) = copy.retierAtStart(
+                current: asset.url, tier: tier, displayPixels: displayPixelSize, isPreview: isPreview, open: loadBlocking)
+            {
                 traceLog("  [start #\(debugID)] tier \(tier) opens a different file than create")
                 adopt(loaded)
             }
@@ -142,7 +144,10 @@ extension VideoRenderer {
             guard let self, isRunning else { return }
             let tier = tierSource()
             let hold = lifecycle.displayAsleep || !lifecycle.surfaceOpen
-            switch copy.switchTo(url, selector: variantSelector, current: asset.url, tier: tier, displayPixels: displayPixelSize, hold: hold, open: loadBlocking) {
+            switch copy.switchTo(
+                url, selector: variantSelector, current: asset.url, tier: tier, displayPixels: displayPixelSize, hold: hold,
+                open: loadBlocking)
+            {
             case .held:
                 traceLog("  [switchVideo #\(debugID)] DEFERRED until wake or reopen: \(url.lastPathComponent)")
                 return
@@ -152,7 +157,8 @@ extension VideoRenderer {
             case .unchanged:
                 traceLog("  [switchVideo #\(debugID)] DEDUP: already on \(asset.url.lastPathComponent)")
             case .failed:
-                extensionLog("  [switchVideo #\(debugID)] no playable file for \(url.lastPathComponent), keeping \(asset.url.lastPathComponent)")
+                extensionLog(
+                    "  [switchVideo #\(debugID)] no playable file for \(url.lastPathComponent), keeping \(asset.url.lastPathComponent)")
             }
             applyTier(tier, animated: false)
         }
@@ -181,7 +187,7 @@ extension VideoRenderer {
     static func setDisplayImmediately(_ sample: CMSampleBuffer) {
         guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) else { return }
         let count = CFArrayGetCount(attachments)
-        for i in 0 ..< count {
+        for i in 0..<count {
             let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, i), to: CFMutableDictionary.self)
             CFDictionarySetValue(
                 dict,

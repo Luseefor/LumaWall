@@ -67,7 +67,8 @@ enum PlaybackPolicy: Int, Comparable {
 
         // Presentations where the wallpaper fills the screen with nothing over it:
         // the lock screen, and the screensaver when the screensaver is ours.
-        let fullScreenPresentation = presentationMode == "locked"
+        let fullScreenPresentation =
+            presentationMode == "locked"
             || (presentationMode == "idle" && screenSaverIsOurs)
 
         // --- paused tier ---

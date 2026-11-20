@@ -80,16 +80,17 @@ func buildSettingsViewModelsXPC(rescan: Bool = true) async -> AnyObject? {
     }
 
     if items.count >= 2 {
-        items.append(makeShuffleItem(
-            bundleID: bundleID,
-            choiceIdentifier: shuffleChoiceID,
-            name: "Shuffle All",
-            description: "Rotate through all installed video wallpapers",
-            thumbnailURLs: thumbnailURLs,
-            defaultFrequency: .onWakeup,
-            sortOrder: 1_000,
-            contextMenu: addVideoMenu,
-        ))
+        items.append(
+            makeShuffleItem(
+                bundleID: bundleID,
+                choiceIdentifier: shuffleChoiceID,
+                name: "Shuffle All",
+                description: "Rotate through all installed video wallpapers",
+                thumbnailURLs: thumbnailURLs,
+                defaultFrequency: .onWakeup,
+                sortOrder: 1_000,
+                contextMenu: addVideoMenu,
+            ))
     }
 
     for (index, playlist) in ExtensionPlaylistLibrary.load().enumerated() {
@@ -98,16 +99,17 @@ func buildSettingsViewModelsXPC(rescan: Bool = true) async -> AnyObject? {
         )
         let playlistThumbnails = memberIDs.compactMap { thumbnailByVideoID[$0] }
         guard !playlistThumbnails.isEmpty else { continue }
-        items.append(makeShuffleItem(
-            bundleID: bundleID,
-            choiceIdentifier: ExtensionPlaylistLibrary.choiceID(for: playlist),
-            name: playlist.name,
-            description: "Rotate through \(playlistThumbnails.count) selected video wallpapers",
-            thumbnailURLs: playlistThumbnails,
-            defaultFrequency: ExtensionPlaylistLibrary.defaultFrequency(for: playlist),
-            sortOrder: 1_100 + index,
-            contextMenu: addVideoMenu,
-        ))
+        items.append(
+            makeShuffleItem(
+                bundleID: bundleID,
+                choiceIdentifier: ExtensionPlaylistLibrary.choiceID(for: playlist),
+                name: playlist.name,
+                description: "Rotate through \(playlistThumbnails.count) selected video wallpapers",
+                thumbnailURLs: playlistThumbnails,
+                defaultFrequency: ExtensionPlaylistLibrary.defaultFrequency(for: playlist),
+                sortOrder: 1_100 + index,
+                contextMenu: addVideoMenu,
+            ))
     }
 
     let automationItems: [(id: String, name: String, description: String)] = [
@@ -127,15 +129,16 @@ func buildSettingsViewModelsXPC(rescan: Bool = true) async -> AnyObject? {
         let thumbnails = ExtensionAutomationLibrary.memberIDs(for: automation.id)
             .compactMap { thumbnailByVideoID[$0] }
         guard thumbnails.count == 2 else { continue }
-        items.append(makeAutomationItem(
-            bundleID: bundleID,
-            choiceIdentifier: automation.id,
-            name: automation.name,
-            description: automation.description,
-            thumbnailURLs: thumbnails,
-            sortOrder: 1_300 + index,
-            contextMenu: addVideoMenu,
-        ))
+        items.append(
+            makeAutomationItem(
+                bundleID: bundleID,
+                choiceIdentifier: automation.id,
+                name: automation.name,
+                description: automation.description,
+                thumbnailURLs: thumbnails,
+                sortOrder: 1_300 + index,
+                contextMenu: addVideoMenu,
+            ))
     }
 
     // Never serve an empty group: the host caches this response on disk and (on
@@ -245,13 +248,14 @@ private func makeShuffleItem(
         accessibilityIdentifier: nil,
         localizedInformativeText: nil,
         items: ShuffleFrequencyID.allCases.map { frequency in
-            .item(MenuPickerItem(
-                id: frequency.rawValue,
-                localizedName: frequency.localizedName,
-                accessibilityIdentifier: nil,
-                localizedInformativeText: nil,
-                isDownloaded: true,
-            ))
+            .item(
+                MenuPickerItem(
+                    id: frequency.rawValue,
+                    localizedName: frequency.localizedName,
+                    accessibilityIdentifier: nil,
+                    localizedInformativeText: nil,
+                    isDownloaded: true,
+                ))
         },
     )
     return SettingsItem(
@@ -376,7 +380,8 @@ private func placeholderThumbnailURL() -> URL? {
         let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 72, weight: .regular)
             .applying(.init(paletteColors: [.white]))
         if let plus = NSImage(systemSymbolName: "plus.circle.fill", accessibilityDescription: "Add")?
-            .withSymbolConfiguration(symbolConfiguration) {
+            .withSymbolConfiguration(symbolConfiguration)
+        {
             let plusSize = NSSize(width: 80, height: 80)
             let origin = NSPoint(x: rect.midX - plusSize.width / 2, y: rect.midY - plusSize.height / 2)
             plus.draw(in: NSRect(origin: origin, size: plusSize))
@@ -385,8 +390,8 @@ private func placeholderThumbnailURL() -> URL? {
     }
 
     guard let tiff = image.tiffRepresentation,
-          let rep = NSBitmapImageRep(data: tiff),
-          let png = rep.representation(using: .png, properties: [:])
+        let rep = NSBitmapImageRep(data: tiff),
+        let png = rep.representation(using: .png, properties: [:])
     else { return nil }
     do {
         try png.write(to: url)

@@ -77,7 +77,9 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
     /// Unique per connection (the agent reuses its PID across reconnects), so
     /// an invalidate can be matched to the connection that acquired.
-    let connectionSerial = WallpaperXPCHandler.serials.withLock { $0 += 1; return $0 }
+    let connectionSerial = WallpaperXPCHandler.serials.withLock {
+        $0 += 1; return $0
+    }
     private static let serials = OSAllocatedUnfairLock(initialState: 0)
 
     /// Whether this connection's most recent acquire was a Settings *preview*

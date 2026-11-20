@@ -64,7 +64,7 @@ public struct EnergySoakReport: Equatable, Sendable {
             "App CPU avg \(cpu)% (peak \(peakCPU)%)",
             "RAM avg \(ram) MB (peak \(peakRAM) MB)",
             "Decoders avg \(decoders) (peak \(peakDecoders))",
-            "Battery samples: \(Int((onBatterySampleRatio * 100).rounded()))%"
+            "Battery samples: \(Int((onBatterySampleRatio * 100).rounded()))%",
         ]
         if let start = batteryStartPercent, let end = batteryEndPercent, let delta = batteryDeltaPercent {
             lines.append("Battery \(start)% → \(end)% (Δ \(delta)) while on battery")

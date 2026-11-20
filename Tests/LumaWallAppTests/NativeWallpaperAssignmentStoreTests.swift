@@ -27,11 +27,12 @@ final class NativeWallpaperAssignmentStoreTests: XCTestCase {
             options: 0
         )
         var decodedFormat = PropertyListSerialization.PropertyListFormat.binary
-        let decoded = try XCTUnwrap(PropertyListSerialization.propertyList(
-            from: encoded,
-            options: [],
-            format: &decodedFormat
-        ) as? [String: Any])
+        let decoded = try XCTUnwrap(
+            PropertyListSerialization.propertyList(
+                from: encoded,
+                options: [],
+                format: &decodedFormat
+            ) as? [String: Any])
         let decodedDisplays = try XCTUnwrap(decoded["Displays"] as? [String: Any])
         let decodedDisplay = try XCTUnwrap(decodedDisplays["DISPLAY-A"] as? [String: Any])
         let decodedDesktop = try XCTUnwrap(decodedDisplay["Desktop"] as? [String: Any])

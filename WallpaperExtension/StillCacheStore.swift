@@ -79,7 +79,9 @@ actor StillCacheStore {
     /// is called, at most once per call, for the BMP bytes. A call that hit
     /// or wrote a still then removes other videos of this wallpaper and
     /// trims the directory to the budget; any other outcome deletes nothing.
-    func write(in dir: URL, choiceHash: String, version: String, size: StillSize, encode: @escaping @Sendable () async -> Data?) async -> Report {
+    func write(in dir: URL, choiceHash: String, version: String, size: StillSize, encode: @escaping @Sendable () async -> Data?) async
+        -> Report
+    {
         let scope = dir.standardizedFileURL.path
         if let refused = refusals.withLock({ $0[scope] }) { return Report(outcome: .refused(errno: refused), created: 0) }
         recover(dir, scope: scope)
@@ -98,7 +100,8 @@ actor StillCacheStore {
             var result = settle(key, version: version, wallpaper: wallpaper, in: dir)
             if result == nil {
                 if encoded == nil { encoded = .some(await encode()) }
-                result = settle(key, version: version, wallpaper: wallpaper, in: dir)
+                result =
+                    settle(key, version: version, wallpaper: wallpaper, in: dir)
                     ?? publishEncoded(encoded ?? nil, key: key, version: version, in: dir)
             }
             let (outcome, entry) = result ?? (.failed, nil)
@@ -153,7 +156,7 @@ actor StillCacheStore {
             switch publish(key: key, version: version, in: dir, fill: { try FileManager.default.copyItem(at: source, to: $0) }) {
             case let .entry(entry): return (.created, entry)
             case let .refused(errno): return (.refused(errno: errno), nil)
-            case .failed: return nil // A failed copy falls through to a decode.
+            case .failed: return nil  // A failed copy falls through to a decode.
             }
         case .decode:
             return nil
@@ -203,7 +206,8 @@ actor StillCacheStore {
 
     private func recover(_ dir: URL, scope: String) {
         guard recovered.insert(scope).inserted,
-              let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+            let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
+        else { return }
         for name in names where name.hasPrefix(Self.tempPrefix) && name.hasSuffix(Self.tempSuffix) {
             try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
         }
@@ -225,8 +229,9 @@ actor StillCacheStore {
             // an eviction deletes the file before the decode below.
             let choose: @Sendable (inout [String: Int32]) -> (entry: StillCacheEntry, bytes: Data?)? = { refused in
                 guard refused[scope] == nil,
-                      let file = StillCache.candidates(Self.scan(dir), choiceHash: choiceHash, version: version, size: size)
-                          .first(where: { !excluded.contains($0.entry) }) else { return nil }
+                    let file = StillCache.candidates(Self.scan(dir), choiceHash: choiceHash, version: version, size: size)
+                        .first(where: { !excluded.contains($0.entry) })
+                else { return nil }
                 let url = dir.appendingPathComponent(file.entry.fileName)
                 // A refused touch marks the directory as a refused publish
                 // does, so writes stop too. A transient failure still seeds.
@@ -237,17 +242,20 @@ actor StillCacheStore {
                 }
                 return (file.entry, try? Data(contentsOf: url, options: .alwaysMapped))
             }
-            let pick = refusals.withLockIfAvailable(choose) ?? {
-                onSeedBlocked()
-                return refusals.withLock(choose)
-            }()
+            let pick =
+                refusals.withLockIfAvailable(choose)
+                ?? {
+                    onSeedBlocked()
+                    return refusals.withLock(choose)
+                }()
             guard let pick else { return nil }
             tried.insert(pick.entry)
             onSeedPicked()
             let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
             if let bytes = pick.bytes,
-               let source = CGImageSourceCreateWithData(bytes as CFData, nil),
-               let image = CGImageSourceCreateImageAtIndex(source, 0, options) {
+                let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+                let image = CGImageSourceCreateImageAtIndex(source, 0, options)
+            {
                 return image
             }
         }

@@ -13,7 +13,7 @@ private let logFile: LogFile = {
 /// but it's effectively immutable after initialization (no properties are mutated).
 private nonisolated(unsafe) let logDateFormatter: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds] // millisecond precision for timing
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]  // millisecond precision for timing
     return f
 }()
 

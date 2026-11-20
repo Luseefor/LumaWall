@@ -134,9 +134,11 @@ public actor MediaImporter {
         }
         let duration = try await sourceAsset.load(.duration)
         let composition = AVMutableComposition()
-        guard let destination = composition.addMutableTrack(
-            withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else { throw ImportError.unsupportedMedia }
+        guard
+            let destination = composition.addMutableTrack(
+                withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
+            )
+        else { throw ImportError.unsupportedMedia }
         try destination.insertTimeRange(.init(start: .zero, duration: duration), of: sourceTrack, at: .zero)
         destination.preferredTransform = try await sourceTrack.load(.preferredTransform)
         guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
@@ -149,9 +151,11 @@ public actor MediaImporter {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: mediaURL))
         generator.appliesPreferredTrackTransform = true
         let image = try await generator.image(at: .zero).image
-        guard let destination = CGImageDestinationCreateWithURL(
-            outputURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil
-        ) else { throw ImportError.posterGenerationFailed }
+        guard
+            let destination = CGImageDestinationCreateWithURL(
+                outputURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil
+            )
+        else { throw ImportError.posterGenerationFailed }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.88] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw ImportError.posterGenerationFailed }
     }

@@ -49,7 +49,8 @@ extension WallpaperXPCHandler {
         // desktop → lock = ramp up (start playing), lock → desktop = ramp down (pause).
         // Only ramp when activity is active (suspended = hard pause, process may sleep).
         let modeChanged = presentationMode != previousPresentationMode
-        let animated = prefs.alwaysPauseDesktop
+        let animated =
+            prefs.alwaysPauseDesktop
             && activityState == "active"
             && modeChanged
 
@@ -77,8 +78,8 @@ extension WallpaperXPCHandler {
 /// picker; callers treat nil as "keep the declared default".
 func extractPickerOptionValue(_ optionID: String, fromRequest request: Any?) -> String? {
     guard let request,
-          let optionValues = mirrorFindProperty("optionValues", in: request),
-          let values = mirrorFindProperty("values", in: optionValues)
+        let optionValues = mirrorFindProperty("optionValues", in: request),
+        let values = mirrorFindProperty("values", in: optionValues)
     else { return nil }
     for entry in Mirror(reflecting: values).children {
         var key: String?
@@ -90,7 +91,7 @@ func extractPickerOptionValue(_ optionID: String, fromRequest request: Any?) -> 
         guard key == optionID, let kind else { continue }
         let kindMirror = Mirror(reflecting: kind)
         guard kindMirror.displayStyle == .enum,
-              let payload = kindMirror.children.first, payload.label == "picker"
+            let payload = kindMirror.children.first, payload.label == "picker"
         else { return nil }
         return mirrorFindProperty("id", in: payload.value) as? String
     }

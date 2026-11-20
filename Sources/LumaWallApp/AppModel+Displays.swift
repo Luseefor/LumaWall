@@ -21,8 +21,6 @@ extension AppModel {
         scheduleSettledNativeRestore()
     }
 
-
-
     func scheduleDebouncedDisplayRefresh(delay: TimeInterval = 0.6) {
         displayRefreshWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.refreshDisplays() }

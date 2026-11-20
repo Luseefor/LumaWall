@@ -20,7 +20,9 @@ private func scheduleTeardown(for key: DisplayKey) {
         // A surface kept open still has its context; its waiters go out with
         // its create's reply. Fail them only once the context is gone.
         if WallpaperState.shared.context(for: key) == nil { failHeldReplies(for: key) }
-        extensionLog("  [teardown] grace fired for display \(key.displayID) → \(torn ? "stopped renderer + invalidated CAContext" : "nothing to tear down, or still open after an ambiguous invalidate")")
+        extensionLog(
+            "  [teardown] grace fired for display \(key.displayID) → \(torn ? "stopped renderer + invalidated CAContext" : "nothing to tear down, or still open after an ambiguous invalidate")"
+        )
         ShuffleController.shared.syncActiveWithContexts()
     }
     Lifecycle.teardownTimers[key] = item
@@ -33,7 +35,8 @@ func closeSurfacesLeftUnhosted() {
     Lifecycle.queue.async {
         for key in WallpaperState.shared.closeUnhostedSurfaces() {
             scheduleTeardown(for: key)
-            extensionLog("  [teardown] last host of display \(key.displayID)'s surface quit without an invalidate, closed it and armed its teardown")
+            extensionLog(
+                "  [teardown] last host of display \(key.displayID)'s surface quit without an invalidate, closed it and armed its teardown")
         }
     }
 }
@@ -95,14 +98,16 @@ extension WallpaperXPCHandler {
         displayID: UInt32?, isPreview: Bool
     ) -> (CGSize, CGFloat) {
         guard !isPreview,
-              let did = displayID,
-              destSize.width > 0, destSize.height > 0,
-              let live = liveDisplayGeometry(displayID: did)
+            let did = displayID,
+            destSize.width > 0, destSize.height > 0,
+            let live = liveDisplayGeometry(displayID: did)
         else { return (destSize, scaleFactor) }
         let liveArea = live.size.width * live.size.height
         let reqArea = destSize.width * destSize.height
         guard reqArea < liveArea * shrunkenSurfaceFraction else { return (destSize, scaleFactor) }
-        extensionLog("  [acquire] viewport \(destSize) @\(scaleFactor)x far below live display \(live.size) → clamping to live geometry @\(live.scale)x")
+        extensionLog(
+            "  [acquire] viewport \(destSize) @\(scaleFactor)x far below live display \(live.size) → clamping to live geometry @\(live.scale)x"
+        )
         return (live.size, live.scale)
     }
 
@@ -133,9 +138,11 @@ extension WallpaperXPCHandler {
             let liveArea = live.size.width * live.size.height
             let curArea = surface.destSize.width * surface.destSize.height
             guard curArea > 0, curArea < liveArea * shrunkenSurfaceFraction else { continue }
-            guard let resized = WallpaperState.shared.updateGeometryIfChanged(
-                destSize: live.size, scaleFactor: live.scale, for: surface.key
-            ) else { continue }
+            guard
+                let resized = WallpaperState.shared.updateGeometryIfChanged(
+                    destSize: live.size, scaleFactor: live.scale, for: surface.key
+                )
+            else { continue }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             resized.rootLayer.frame = CGRect(origin: .zero, size: live.size)
@@ -147,7 +154,6 @@ extension WallpaperXPCHandler {
             extensionLog("  [audit] healed shrunken surface on display \(surface.displayID): \(surface.destSize) → \(live.size)")
         }
     }
-
 
     func invalidate(withId id: Any?, reply: @escaping @Sendable ((any Error)?) -> Void) {
         markServed()
@@ -172,7 +178,9 @@ extension WallpaperXPCHandler {
             if WallpaperState.shared.wasRecentlyForgotten(uuid) {
                 extensionLog("=== INVALIDATE === UUID \(uuid) already torn down here → ignore")
             } else {
-                extensionLog("=== INVALIDATE === UUID \(uuid) never registered in this process → ignore (possible cross-process orphan still decoding elsewhere)")
+                extensionLog(
+                    "=== INVALIDATE === UUID \(uuid) never registered in this process → ignore (possible cross-process orphan still decoding elsewhere)"
+                )
             }
             reply(nil); return
         }
@@ -187,8 +195,13 @@ extension WallpaperXPCHandler {
             WallpaperState.shared.forgetWallpaperID(uuid)
         }
         scheduleTeardown(for: key)
-        let stopped = action == .graceOnly ? "another host may still show it (reacquired elsewhere or shared by the other role), keeps playing and survives the grace" : "stopped playback"
-        extensionLog("=== INVALIDATE === UUID \(uuid) → \(stopped), tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired")
+        let stopped =
+            action == .graceOnly
+            ? "another host may still show it (reacquired elsewhere or shared by the other role), keeps playing and survives the grace"
+            : "stopped playback"
+        extensionLog(
+            "=== INVALIDATE === UUID \(uuid) → \(stopped), tear down surface on display \(key.displayID) in \(Lifecycle.teardownGrace)s unless re-acquired"
+        )
         reply(nil)
     }
 }

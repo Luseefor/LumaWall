@@ -27,8 +27,9 @@ struct StillCacheEntry: Hashable, Sendable {
         guard fileName.hasSuffix(".bmp") else { return nil }
         let parts = fileName.dropLast(4).split(separator: "-", omittingEmptySubsequences: false)
         guard parts.count == 5, parts[0].count == 64, parts[3] == "0",
-              let width = Int(parts[1]), let height = Int(parts[2]),
-              let written = UInt64(parts[4], radix: 16) else { return nil }
+            let width = Int(parts[1]), let height = Int(parts[2]),
+            let written = UInt64(parts[4], radix: 16)
+        else { return nil }
         self.init(key: StillCacheKey(choiceHash: String(parts[0]), width: width, height: height), written: written)
     }
 
@@ -180,7 +181,8 @@ extension StillCache {
         let width = Int(Int32(bitPattern: le32(18)))
         let height = abs(Int(Int32(bitPattern: le32(22))))
         guard bytes[0] == 0x42, bytes[1] == 0x4D, le32(10) == UInt32(bmpHeaderSize), le32(14) == 40,
-              width > 0, height > 0, bytes[28] == 24, le32(30) == 0 else { return nil }
+            width > 0, height > 0, bytes[28] == 24, le32(30) == 0
+        else { return nil }
         let fileSize = bmpHeaderSize + ((width * 3 + 3) & ~3) * height
         return Int(le32(2)) == fileSize ? fileSize : nil
     }
@@ -198,31 +200,33 @@ extension StillCache {
         let headerSize = fileHeaderSize + dibHeaderSize
 
         var bmp = Data(count: headerSize + pixelDataSize)
-        bmp[0] = 0x42; bmp[1] = 0x4D // "BM"
+        bmp[0] = 0x42; bmp[1] = 0x4D  // "BM"
         bmpWriteLE32(&bmp, offset: 2, value: UInt32(headerSize + pixelDataSize))
         bmpWriteLE32(&bmp, offset: 10, value: UInt32(headerSize))
         let d = fileHeaderSize
         bmpWriteLE32(&bmp, offset: d, value: UInt32(dibHeaderSize))
         bmpWriteLE32(&bmp, offset: d + 4, value: UInt32(bitPattern: Int32(width)))
-        bmpWriteLE32(&bmp, offset: d + 8, value: UInt32(bitPattern: Int32(-height))) // top-down
-        bmpWriteLE16(&bmp, offset: d + 12, value: 1) // planes
-        bmpWriteLE16(&bmp, offset: d + 14, value: 24) // bits per pixel
-        bmpWriteLE32(&bmp, offset: d + 16, value: 0) // BI_RGB
+        bmpWriteLE32(&bmp, offset: d + 8, value: UInt32(bitPattern: Int32(-height)))  // top-down
+        bmpWriteLE16(&bmp, offset: d + 12, value: 1)  // planes
+        bmpWriteLE16(&bmp, offset: d + 14, value: 24)  // bits per pixel
+        bmpWriteLE32(&bmp, offset: d + 16, value: 0)  // BI_RGB
         bmpWriteLE32(&bmp, offset: d + 20, value: UInt32(pixelDataSize))
 
         let stripRows = min(64, height)
         let stripRowBytes = width * 4
         var strip = [UInt8](repeating: 0, count: stripRowBytes * stripRows)
         let converted = strip.withUnsafeMutableBytes { stripBuf -> Bool in
-            guard let ctx = CGContext(
-                data: stripBuf.baseAddress,
-                width: width,
-                height: stripRows,
-                bitsPerComponent: 8,
-                bytesPerRow: stripRowBytes,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue,
-            ) else { return false }
+            guard
+                let ctx = CGContext(
+                    data: stripBuf.baseAddress,
+                    width: width,
+                    height: stripRows,
+                    bitsPerComponent: 8,
+                    bytesPerRow: stripRowBytes,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue,
+                )
+            else { return false }
             ctx.interpolationQuality = .none
             let src = stripBuf.baseAddress!.assumingMemoryBound(to: UInt8.self)
             return bmp.withUnsafeMutableBytes { out -> Bool in
@@ -234,13 +238,13 @@ extension StillCache {
                     guard let band = image.cropping(to: CGRect(x: 0, y: top, width: width, height: rows)) else { return false }
                     ctx.clear(CGRect(x: 0, y: 0, width: width, height: stripRows))
                     ctx.draw(band, in: CGRect(x: 0, y: stripRows - rows, width: width, height: rows))
-                    for r in 0 ..< rows {
+                    for r in 0..<rows {
                         let s = src + r * stripRowBytes
                         let o = pixels + (top + r) * paddedRowBytes
-                        for x in 0 ..< width {
-                            o[x * 3] = s[x * 4] // B
-                            o[x * 3 + 1] = s[x * 4 + 1] // G
-                            o[x * 3 + 2] = s[x * 4 + 2] // R
+                        for x in 0..<width {
+                            o[x * 3] = s[x * 4]  // B
+                            o[x * 3 + 1] = s[x * 4 + 1]  // G
+                            o[x * 3 + 2] = s[x * 4 + 2]  // R
                         }
                     }
                 }

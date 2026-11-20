@@ -35,12 +35,13 @@ import Testing
 
     @Test func prunesToMaxReports() throws {
         let store = try makeStore()
-        for index in 0 ..< (CrashReportStore.maxReports + 5) {
-            store.save(CrashReport(
-                date: .now.addingTimeInterval(Double(index)),
-                kind: .signal, name: "SIGABRT", reason: "\(index)",
-                appVersion: "1.0", osVersion: "26.0"
-            ))
+        for index in 0..<(CrashReportStore.maxReports + 5) {
+            store.save(
+                CrashReport(
+                    date: .now.addingTimeInterval(Double(index)),
+                    kind: .signal, name: "SIGABRT", reason: "\(index)",
+                    appVersion: "1.0", osVersion: "26.0"
+                ))
         }
         #expect(store.reports().count == CrashReportStore.maxReports)
         // Newest reports survive the prune.
@@ -144,8 +145,9 @@ import Testing
         #expect(reports[0].name.count <= CrashReportStore.maxDumpNameLength)
         #expect(reports[0].backtrace.count <= CrashReportStore.maxDumpBacktraceLines)
         // The dump file is consumed either way.
-        #expect(!FileManager.default.fileExists(
-            atPath: store.directoryURL.appendingPathComponent("raw.stack").path
-        ))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: store.directoryURL.appendingPathComponent("raw.stack").path
+            ))
     }
 }

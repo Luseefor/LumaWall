@@ -31,7 +31,9 @@ struct SettingsPage: View {
                 settingsGroup(title: L10n.playbackEnergy, symbol: "leaf.fill") {
                     VStack(spacing: 0) {
                         ForEach(PowerProfile.allCases, id: \.self) { profile in
-                            Button { model.setPowerProfile(profile) } label: {
+                            Button {
+                                model.setPowerProfile(profile)
+                            } label: {
                                 HStack(spacing: 14) {
                                     Image(systemName: profile.symbol)
                                         .frame(width: 28, height: 28)
@@ -78,10 +80,13 @@ struct SettingsPage: View {
                             detail: "Stops that screen when a window covers about 92% of it.",
                             symbol: "rectangle.slash"
                         ) {
-                            Toggle(L10n.pauseObscured, isOn: Binding(
-                                get: { model.pauseWhenObscured },
-                                set: { model.setPauseWhenObscured($0) }
-                            ))
+                            Toggle(
+                                L10n.pauseObscured,
+                                isOn: Binding(
+                                    get: { model.pauseWhenObscured },
+                                    set: { model.setPauseWhenObscured($0) }
+                                )
+                            )
                             .labelsHidden()
                             .accessibilityLabel(L10n.pauseObscured)
                         }
@@ -91,10 +96,13 @@ struct SettingsPage: View {
                             detail: "Stops live video behind the lock screen. The still poster stays.",
                             symbol: "lock.fill"
                         ) {
-                            Toggle(L10n.pauseLock, isOn: Binding(
-                                get: { model.pauseOnLock },
-                                set: { model.setPauseOnLock($0) }
-                            ))
+                            Toggle(
+                                L10n.pauseLock,
+                                isOn: Binding(
+                                    get: { model.pauseOnLock },
+                                    set: { model.setPauseOnLock($0) }
+                                )
+                            )
                             .labelsHidden()
                             .accessibilityLabel(L10n.pauseLock)
                         }
@@ -106,10 +114,13 @@ struct SettingsPage: View {
                                 : "Hides the live overlay on the desktop. System Settings still has the poster.",
                             symbol: "photo"
                         ) {
-                            Toggle(L10n.stillDesktop, isOn: Binding(
-                                get: { model.hideDesktopVideo },
-                                set: { model.setHideDesktopVideo($0) }
-                            ))
+                            Toggle(
+                                L10n.stillDesktop,
+                                isOn: Binding(
+                                    get: { model.hideDesktopVideo },
+                                    set: { model.setHideDesktopVideo($0) }
+                                )
+                            )
                             .labelsHidden()
                             .accessibilityLabel(L10n.stillDesktop)
                         }
@@ -243,15 +254,18 @@ struct SettingsPage: View {
                             GhostButton(L10n.clearRAM, symbol: "memorychip") { model.clearMemoryCache() }
                             GhostButton(L10n.clearDisk, symbol: "externaldrive") { model.clearDiskCache() }
                         }
-                        Text("Clear RAM drops decoders and temporary caches. Imported videos stay on disk. Matching multi-display videos share one decoder on the overlay host.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textDim)
+                        Text(
+                            "Clear RAM drops decoders and temporary caches. Imported videos stay on disk. Matching multi-display videos share one decoder on the overlay host."
+                        )
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textDim)
                     }
                 }
 
                 settingsGroup(title: L10n.status, symbol: "info.circle") {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        statusCell(title: "Playback", value: model.playbackStopped ? "Paused" : (model.activeByDisplay.isEmpty ? "Idle" : "Live"))
+                        statusCell(
+                            title: "Playback", value: model.playbackStopped ? "Paused" : (model.activeByDisplay.isEmpty ? "Idle" : "Live"))
                         statusCell(title: "Displays", value: "\(model.activeByDisplay.count) of \(model.displays.count) live")
                         statusCell(title: "Energy", value: model.powerProfile.label)
                         statusCell(title: "Automations", value: automationStatus)

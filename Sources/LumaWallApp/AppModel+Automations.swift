@@ -155,12 +155,14 @@ extension AppModel {
         // verdict can also flip on solar transitions, quiet-hours end, and
         // weekday re-entry — none of which that covered, so switches landed
         // late, were skipped in quiet hours, or never fired at all.
-        guard let fireDate = automations.nextEvaluationDates(
-            after: now,
-            calendar: calendar,
-            latitude: coordinate?.latitude,
-            longitude: coordinate?.longitude
-        ).first else { return }
+        guard
+            let fireDate = automations.nextEvaluationDates(
+                after: now,
+                calendar: calendar,
+                latitude: coordinate?.latitude,
+                longitude: coordinate?.longitude
+            ).first
+        else { return }
         let interval = max(1, fireDate.timeIntervalSince(now))
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -191,7 +193,7 @@ extension AppModel {
         for name in [
             NSNotification.Name.NSSystemClockDidChange,
             NSNotification.Name.NSSystemTimeZoneDidChange,
-            NSApplication.didBecomeActiveNotification
+            NSApplication.didBecomeActiveNotification,
         ] {
             automationObservers.append(
                 center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -257,10 +259,11 @@ extension AppModel {
                 LocationDaylightProvider.shared.requestIfNeeded()
             }
             let coordinate = LocationDaylightProvider.shared.coordinate
-            targetID = automations.isDayPeriod(
-                latitude: coordinate?.latitude,
-                longitude: coordinate?.longitude
-            ) ? automations.dayWallpaperID : automations.nightWallpaperID
+            targetID =
+                automations.isDayPeriod(
+                    latitude: coordinate?.latitude,
+                    longitude: coordinate?.longitude
+                ) ? automations.dayWallpaperID : automations.nightWallpaperID
         } else if automations.appearanceEnabled {
             targetID = isSystemDarkAppearance() ? automations.darkWallpaperID : automations.lightWallpaperID
         } else {

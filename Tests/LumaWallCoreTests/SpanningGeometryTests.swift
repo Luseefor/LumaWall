@@ -37,9 +37,11 @@ struct SpanningGeometryTests {
         let top = CGRect(x: 0, y: 1080, width: 1920, height: 1080)
         let canvas = SpanningGeometry.canvas(for: [bottom, top])
         #expect(canvas == CGRect(x: 0, y: 0, width: 1920, height: 2160))
-        #expect(SpanningGeometry.mediaFrame(canvas: canvas!, on: bottom)
-            == CGRect(x: 0, y: 0, width: 1920, height: 2160))
-        #expect(SpanningGeometry.mediaFrame(canvas: canvas!, on: top)
-            == CGRect(x: 0, y: -1080, width: 1920, height: 2160))
+        #expect(
+            SpanningGeometry.mediaFrame(canvas: canvas!, on: bottom)
+                == CGRect(x: 0, y: 0, width: 1920, height: 2160))
+        #expect(
+            SpanningGeometry.mediaFrame(canvas: canvas!, on: top)
+                == CGRect(x: 0, y: -1080, width: 1920, height: 2160))
     }
 }

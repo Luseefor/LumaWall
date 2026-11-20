@@ -40,17 +40,17 @@ func colorDiagInstall(rootLayer: CALayer, for key: DisplayKey) {
 
     // Solid base color so any true-black (surface cleared) is unmistakable against it.
     rootLayer.contents = nil
-    rootLayer.backgroundColor = CGColor(red: 0.0, green: 0.55, blue: 0.25, alpha: 1.0) // green
+    rootLayer.backgroundColor = CGColor(red: 0.0, green: 0.55, blue: 0.25, alpha: 1.0)  // green
 
     // Remove any prior sweep (stale renderer/still sublayers too) so only the bar shows.
     rootLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
 
     let fill = CALayer()
     fill.name = "colorDiag.fill"
-    fill.anchorPoint = CGPoint(x: 0.0, y: 0.5) // grow rightward from the left edge
+    fill.anchorPoint = CGPoint(x: 0.0, y: 0.5)  // grow rightward from the left edge
     fill.position = CGPoint(x: 0.0, y: bounds.midY)
     fill.bounds = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
-    fill.backgroundColor = CGColor(red: 0.9, green: 0.1, blue: 0.6, alpha: 1.0) // magenta
+    fill.backgroundColor = CGColor(red: 0.9, green: 0.1, blue: 0.6, alpha: 1.0)  // magenta
     rootLayer.addSublayer(fill)
 
     CATransaction.commit()

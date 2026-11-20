@@ -26,9 +26,11 @@ extension JSONDecoder {
 /// defaults into memory and the next persist overwrote the evidence.
 public enum StorePaths {
     public static func appSupportBase(rootURL: URL? = nil) throws -> URL {
-        let base = rootURL ?? FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0].appendingPathComponent("LumaWall", isDirectory: true)
+        let base =
+            rootURL
+            ?? FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            )[0].appendingPathComponent("LumaWall", isDirectory: true)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }

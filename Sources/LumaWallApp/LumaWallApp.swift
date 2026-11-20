@@ -3,37 +3,37 @@ import LumaWallCore
 import SwiftUI
 
 #if LUMAWALL_TEST_HOST
-// Playback tests create their own sessions and temporary media. Keep the test
-// host from restoring real wallpapers or opening the user's library stores.
-@main
-struct LumaWallTestHost: App {
-    var body: some Scene {
-        WindowGroup { Color.clear.frame(width: 32, height: 32) }
+    // Playback tests create their own sessions and temporary media. Keep the test
+    // host from restoring real wallpapers or opening the user's library stores.
+    @main
+    struct LumaWallTestHost: App {
+        var body: some Scene {
+            WindowGroup { Color.clear.frame(width: 32, height: 32) }
+        }
     }
-}
 #else
-@main
-struct LumaWallApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
+    @main
+    struct LumaWallApp: App {
+        @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+        @State private var model = AppModel()
 
-    var body: some Scene {
-        WindowGroup("LumaWall", id: "main") {
-            RootView(model: model)
-                .frame(minWidth: 1_080, minHeight: 700)
-        }
-        .defaultSize(width: 1_280, height: 840)
-        .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unifiedCompact)
+        var body: some Scene {
+            WindowGroup("LumaWall", id: "main") {
+                RootView(model: model)
+                    .frame(minWidth: 1_080, minHeight: 700)
+            }
+            .defaultSize(width: 1_280, height: 840)
+            .windowStyle(.hiddenTitleBar)
+            .windowToolbarStyle(.unifiedCompact)
 
-        MenuBarExtra {
-            MenuBarPopover(model: model)
-        } label: {
-            Image(nsImage: MenuBarIcon.image(badge: model.activePlaylistID != nil))
+            MenuBarExtra {
+                MenuBarPopover(model: model)
+            } label: {
+                Image(nsImage: MenuBarIcon.image(badge: model.activePlaylistID != nil))
+            }
+            .menuBarExtraStyle(.window)
         }
-        .menuBarExtraStyle(.window)
     }
-}
 #endif
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -78,7 +78,9 @@ struct RootView: View {
         }
         .preferredColorScheme(.dark)
         .tint(Theme.accent)
-        .dropDestination(for: URL.self) { urls, _ in model.importVideos(urls); return true }
+        .dropDestination(for: URL.self) { urls, _ in
+            model.importVideos(urls); return true
+        }
         .alert(
             model.activeAlert?.title ?? "",
             isPresented: Binding(

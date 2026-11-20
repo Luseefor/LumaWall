@@ -8,9 +8,12 @@ extension VideoRenderer {
     /// reset before this flushed the renderer, so it accepts the buffer.
     func showFallbackStill() {
         let still = fallbackStill(copy.activeOriginal)
-        extensionLog("  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing \(still == nil ? "the gradient" : "the still")")
+        extensionLog(
+            "  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing \(still == nil ? "the gradient" : "the still")"
+        )
         guard let image = still ?? Self.makeGradientStill(),
-              let buffer = makeStillSampleBuffer(from: image) else { return }
+            let buffer = makeStillSampleBuffer(from: image)
+        else { return }
         Self.setDisplayImmediately(buffer)
         renderer.enqueue(buffer)
     }
@@ -19,19 +22,22 @@ extension VideoRenderer {
     /// scales it to fill.
     static func makeGradientStill() -> CGImage? {
         let side = 64
-        guard let context = CGContext(
-            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue,
-        ), let gradient = CGGradient(
-            colorsSpace: CGColorSpaceCreateDeviceRGB(),
-            colors: [
-                CGColor(red: 0.2, green: 0.0, blue: 0.5, alpha: 1.0),
-                CGColor(red: 0.0, green: 0.3, blue: 0.7, alpha: 1.0),
-                CGColor(red: 0.0, green: 0.6, blue: 0.4, alpha: 1.0),
-            ] as CFArray,
-            locations: nil,
-        ) else { return nil }
+        guard
+            let context = CGContext(
+                data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue,
+            ),
+            let gradient = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [
+                    CGColor(red: 0.2, green: 0.0, blue: 0.5, alpha: 1.0),
+                    CGColor(red: 0.0, green: 0.3, blue: 0.7, alpha: 1.0),
+                    CGColor(red: 0.0, green: 0.6, blue: 0.4, alpha: 1.0),
+                ] as CFArray,
+                locations: nil,
+            )
+        else { return nil }
         // Same start and end points as the CAGradientLayer, in the same
         // bottom-left-origin space.
         context.drawLinearGradient(
@@ -96,7 +102,9 @@ extension VideoRenderer {
         output.alwaysCopiesSampleData = false
         reader.add(output)
         guard reader.startReading() else {
-            extensionLog("  [reset #\(debugID)] FAILED to start reading \(asset.url.lastPathComponent): \(reader.error?.localizedDescription ?? "unknown")")
+            extensionLog(
+                "  [reset #\(debugID)] FAILED to start reading \(asset.url.lastPathComponent): \(reader.error?.localizedDescription ?? "unknown")"
+            )
             return false
         }
         currentReader = reader
@@ -121,7 +129,9 @@ extension VideoRenderer {
                 lastEnqueuedEnd = estimatedSampleEnd(pts: pts, duration: dur)
             }
         }
-        traceLog("  [reset #\(debugID)] BUILT \(kind) continuing=\(continuing) asset=\(asset.url.lastPathComponent) rendererStatus=\(renderer.status.rawValue)")
+        traceLog(
+            "  [reset #\(debugID)] BUILT \(kind) continuing=\(continuing) asset=\(asset.url.lastPathComponent) rendererStatus=\(renderer.status.rawValue)"
+        )
         feedLogBudget = 4
         prepareNextReader()
         return true

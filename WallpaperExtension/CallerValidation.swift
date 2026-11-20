@@ -46,7 +46,8 @@ enum CallerValidation {
         }
 
         if let agentReq = requirement("identifier \"com.apple.wallpaper.agent\""),
-           SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), agentReq) != errSecSuccess {
+            SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), agentReq) != errSecSuccess
+        {
             extensionLog("  [Caller] Apple caller is not WallpaperAgent, accepting with note")
         }
         return true

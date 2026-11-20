@@ -41,8 +41,9 @@ enum BatteryMediaVariant {
         defer { inFlight.remove(key) }
 
         let source = AVURLAsset(url: asset.mediaURL)
-        guard let export = AVAssetExportSession(asset: source, presetName: AVAssetExportPreset1280x720)
-            ?? AVAssetExportSession(asset: source, presetName: AVAssetExportPresetMediumQuality)
+        guard
+            let export = AVAssetExportSession(asset: source, presetName: AVAssetExportPreset1280x720)
+                ?? AVAssetExportSession(asset: source, presetName: AVAssetExportPresetMediumQuality)
         else { return }
         let temp = dest.deletingLastPathComponent()
             .appendingPathComponent("Wallpaper.battery.\(UUID().uuidString).mov")

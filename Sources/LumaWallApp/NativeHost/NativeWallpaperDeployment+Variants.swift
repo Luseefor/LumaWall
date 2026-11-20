@@ -39,9 +39,10 @@ extension NativeWallpaperDeployment {
         let specs = allVariantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS)
         guard let displayPixels else { return specs }
         return specs.filter { spec in
-            !spec.forFullQuality || displayPixels.contains { display in
-                fullQualityPick(among: specs, sourceSize: sourceSize, sourceFPS: sourceFPS, display: display) == spec
-            }
+            !spec.forFullQuality
+                || displayPixels.contains { display in
+                    fullQualityPick(among: specs, sourceSize: sourceSize, sourceFPS: sourceFPS, display: display) == spec
+                }
         }
     }
 
@@ -55,7 +56,8 @@ extension NativeWallpaperDeployment {
             let size = copySize(source: sourceSize, fitting: spec.fitting)
             return size.width * size.height
         }
-        return specs
+        return
+            specs
             .filter { $0.recordedFPS >= sourceRate }
             .filter { spec in
                 let size = copySize(source: sourceSize, fitting: spec.fitting)
@@ -82,16 +84,22 @@ extension NativeWallpaperDeployment {
         let battery = batteryFPS(source: sourceFPS)
         var specs: [VariantSpec] = []
         if longSide > 1920 {
-            specs.append(VariantSpec(filename: "Wallpaper.reduced.mov", preset: AVAssetExportPresetHighestQuality,
-                                     fitting: box(1920, 1080), fps: battery, forFullQuality: false))
+            specs.append(
+                VariantSpec(
+                    filename: "Wallpaper.reduced.mov", preset: AVAssetExportPresetHighestQuality,
+                    fitting: box(1920, 1080), fps: battery, forFullQuality: false))
         }
         if longSide > 1280 {
-            specs.append(VariantSpec(filename: "Wallpaper.minimal.mov", preset: AVAssetExportPresetHighestQuality,
-                                     fitting: box(1280, 720), fps: battery, forFullQuality: false))
+            specs.append(
+                VariantSpec(
+                    filename: "Wallpaper.minimal.mov", preset: AVAssetExportPresetHighestQuality,
+                    fitting: box(1280, 720), fps: battery, forFullQuality: false))
         }
         if longSide > 2560 {
-            specs.append(VariantSpec(filename: "Wallpaper.qhd.mov", preset: AVAssetExportPresetHEVCHighestQuality,
-                                     fitting: box(2560, 1440), fps: sourceFPS, forFullQuality: true))
+            specs.append(
+                VariantSpec(
+                    filename: "Wallpaper.qhd.mov", preset: AVAssetExportPresetHEVCHighestQuality,
+                    fitting: box(2560, 1440), fps: sourceFPS, forFullQuality: true))
         }
         return specs
     }
@@ -99,11 +107,14 @@ extension NativeWallpaperDeployment {
     /// True when the entry lacks a copy it should have: one added in a later
     /// version, one deleted from disk, or one made at a different frame rate.
     static func needsVariants(_ entry: EntryInfo, displayPixels: [CGSize], fileExists: ((String) -> Bool)? = nil) -> Bool {
-        let exists = fileExists ?? { filename in
-            FileManager.default.fileExists(atPath: videosFolderURL
-                .appendingPathComponent(entry.id, isDirectory: true)
-                .appendingPathComponent(filename).path)
-        }
+        let exists =
+            fileExists ?? { filename in
+                FileManager.default.fileExists(
+                    atPath:
+                        videosFolderURL
+                        .appendingPathComponent(entry.id, isDirectory: true)
+                        .appendingPathComponent(filename).path)
+            }
         let have = entry.variants ?? []
         return variantSpecs(sourceSize: entry.resolution, sourceFPS: entry.fps, displayPixels: displayPixels).contains { spec in
             !have.contains { $0.filename == spec.filename && $0.fps == spec.recordedFPS && exists($0.filename) }
@@ -150,8 +161,8 @@ extension NativeWallpaperDeployment {
     static func videoSize(of url: URL) async -> CGSize? {
         let asset = AVURLAsset(url: url)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-              let natural = try? await track.load(.naturalSize),
-              let transform = try? await track.load(.preferredTransform)
+            let natural = try? await track.load(.naturalSize),
+            let transform = try? await track.load(.preferredTransform)
         else { return nil }
         let transformed = natural.applying(transform)
         let size = CGSize(width: abs(transformed.width), height: abs(transformed.height))
@@ -184,7 +195,8 @@ extension NativeWallpaperDeployment {
         let width = oriented.width, height = oriented.height
         guard width > 0, height > 0 else { return nil }
         let scale = min(box.width / width, box.height / height, 1)
-        let placed = transform
+        let placed =
+            transform
             .concatenating(CGAffineTransform(translationX: -oriented.minX, y: -oriented.minY))
             .concatenating(CGAffineTransform(scaleX: scale, y: scale))
         let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: track)

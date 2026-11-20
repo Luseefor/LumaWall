@@ -95,18 +95,20 @@ struct EnergyLogStoreTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let now = Date()
         let first = try EnergyLogStore(rootURL: root)
-        try await first.record(EnergySample(
-            date: now.addingTimeInterval(-25 * 3_600),
-            processCPUPercent: 9, systemCPUPercent: 20, processMemoryMB: 200,
-            batteryPercent: 50, isOnBattery: false, decoderCount: 2,
-            powerProfile: "automatic", playbackActive: false
-        ), now: now)
-        try await first.record(EnergySample(
-            date: now.addingTimeInterval(-1 * 3_600),
-            processCPUPercent: 2, systemCPUPercent: 12, processMemoryMB: 110,
-            batteryPercent: 90, isOnBattery: false, decoderCount: 1,
-            powerProfile: "automatic", playbackActive: true
-        ), now: now)
+        try await first.record(
+            EnergySample(
+                date: now.addingTimeInterval(-25 * 3_600),
+                processCPUPercent: 9, systemCPUPercent: 20, processMemoryMB: 200,
+                batteryPercent: 50, isOnBattery: false, decoderCount: 2,
+                powerProfile: "automatic", playbackActive: false
+            ), now: now)
+        try await first.record(
+            EnergySample(
+                date: now.addingTimeInterval(-1 * 3_600),
+                processCPUPercent: 2, systemCPUPercent: 12, processMemoryMB: 110,
+                batteryPercent: 90, isOnBattery: false, decoderCount: 1,
+                powerProfile: "automatic", playbackActive: true
+            ), now: now)
 
         // A fresh process loading the persisted file must prune on init, so a
         // relaunch never resurrects out-of-retention samples.

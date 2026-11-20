@@ -111,9 +111,11 @@ struct PowerPolicyTests {
     }
 
     @Test func fullQualityIgnoresBatteryLevel() {
-        #expect(PlaybackPolicy.resolve(.init(
-            profile: .fullQuality, isOnBattery: true, batteryPercent: 15
-        )) == .full)
+        #expect(
+            PlaybackPolicy.resolve(
+                .init(
+                    profile: .fullQuality, isOnBattery: true, batteryPercent: 15
+                )) == .full)
     }
 
     @Test func profilesApplyOnACPower() {
@@ -144,9 +146,11 @@ struct PowerPolicyTests {
     @Test func sessionLockPausesUnlessLiveOnLock() {
         #expect(PlaybackPolicy.resolve(.init(sessionIsLocked: true)) == .paused)
         // hideDesktopVideo without native lock support still pauses on lock.
-        #expect(PlaybackPolicy.resolve(.init(
-            sessionIsLocked: true, hideDesktopVideo: true, allowLiveOnLock: false
-        )) == .paused)
+        #expect(
+            PlaybackPolicy.resolve(
+                .init(
+                    sessionIsLocked: true, hideDesktopVideo: true, allowLiveOnLock: false
+                )) == .paused)
     }
 
     @Test func hysteresisThresholdsArePinned() {

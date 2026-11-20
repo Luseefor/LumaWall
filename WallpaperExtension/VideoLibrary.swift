@@ -74,17 +74,19 @@ final class VideoLibrary: Sendable {
     /// resolves to no variant. Returns `nil` only if the entry doesn't exist.
     func bestVariantURL(for id: String, policy: PlaybackPolicy, displayPixels: CGSize? = nil) -> URL? {
         guard let entry = entry(for: id) else { return nil }
-        guard let chosen = VariantSelection.variant(
-            for: policy,
-            sourceFPS: Int(entry.fps.rounded()),
-            sourceResolution: entry.resolution,
-            // A copy listed in metadata but missing on disk would leave the
-            // renderer retrying a dead URL; choose among files that exist.
-            variants: (entry.variants ?? []).filter {
-                FileManager.default.fileExists(atPath: variantURL(for: id, variant: $0).path)
-            },
-            displayPixels: displayPixels,
-        ) else {
+        guard
+            let chosen = VariantSelection.variant(
+                for: policy,
+                sourceFPS: Int(entry.fps.rounded()),
+                sourceResolution: entry.resolution,
+                // A copy listed in metadata but missing on disk would leave the
+                // renderer retrying a dead URL; choose among files that exist.
+                variants: (entry.variants ?? []).filter {
+                    FileManager.default.fileExists(atPath: variantURL(for: id, variant: $0).path)
+                },
+                displayPixels: displayPixels,
+            )
+        else {
             return videoURL(for: entry)
         }
         return variantURL(for: id, variant: chosen)
@@ -98,9 +100,11 @@ final class VideoLibrary: Sendable {
         let token = scanLock.withLock { scanRecord.begin() }
         var discovered = [VideoEntry]()
         let fm = FileManager.default
-        guard let subdirs = try? fm.contentsOfDirectory(
-            at: videosDir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles,
-        ) else {
+        guard
+            let subdirs = try? fm.contentsOfDirectory(
+                at: videosDir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles,
+            )
+        else {
             publish([], token: token)
             return
         }
@@ -119,7 +123,8 @@ final class VideoLibrary: Sendable {
             let metadataURL = dir.appendingPathComponent("metadata.json")
 
             if let data = try? Data(contentsOf: metadataURL),
-               let entry = try? JSONDecoder().decode(VideoEntry.self, from: data) {
+                let entry = try? JSONDecoder().decode(VideoEntry.self, from: data)
+            {
                 // Metadata id must match its containing directory, and the
                 // filename must be a safe basename that resolves inside `dir`.
                 guard entry.id == id, PathSafety.isSafeComponent(entry.filename) else {
@@ -246,7 +251,8 @@ final class VideoLibrary: Sendable {
             entries[idx].fps = fps
             entries[idx].resolution = resolution
         }
-        let metadataURL = videosDir
+        let metadataURL =
+            videosDir
             .appendingPathComponent(id)
             .appendingPathComponent("metadata.json")
         if let entry = entry(for: id) {
@@ -260,7 +266,8 @@ final class VideoLibrary: Sendable {
     /// Generate a JPEG thumbnail for a video entry, saved alongside the video.
     func generateThumbnail(for entry: VideoEntry) async -> URL? {
         let url = videoURL(for: entry)
-        let thumbnailURL = videosDir
+        let thumbnailURL =
+            videosDir
             .appendingPathComponent(entry.id)
             .appendingPathComponent("thumbnail.jpg")
 
@@ -281,12 +288,16 @@ final class VideoLibrary: Sendable {
             return nil
         }
 
-        guard let dest = CGImageDestinationCreateWithURL(
-            thumbnailURL as CFURL, "public.jpeg" as CFString, 1, nil,
-        ) else { return nil }
-        CGImageDestinationAddImage(dest, cgImage, [
-            kCGImageDestinationLossyCompressionQuality: 0.85,
-        ] as CFDictionary)
+        guard
+            let dest = CGImageDestinationCreateWithURL(
+                thumbnailURL as CFURL, "public.jpeg" as CFString, 1, nil,
+            )
+        else { return nil }
+        CGImageDestinationAddImage(
+            dest, cgImage,
+            [
+                kCGImageDestinationLossyCompressionQuality: 0.85
+            ] as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { return nil }
 
         return thumbnailURL
@@ -300,9 +311,11 @@ final class VideoLibrary: Sendable {
 
     private func findVideoFile(in directory: URL) -> URL? {
         let extensions = ["mp4", "mov", "m4v"]
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil,
-        ) else { return nil }
+        guard
+            let contents = try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil,
+            )
+        else { return nil }
         return contents.first { file in
             extensions.contains(file.pathExtension.lowercased())
         }

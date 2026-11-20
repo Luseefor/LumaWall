@@ -503,7 +503,7 @@ final class RendererLifecycleTests: XCTestCase {
         var life = playing()
         var effects = life.handle(.assetChanged)
         var generation = 1
-        for _ in 0 ..< RendererLifecycle.maxFailures {
+        for _ in 0..<RendererLifecycle.maxFailures {
             XCTAssertEqual(effects, [.beginReset(.restart, generation: generation)])
             XCTAssertEqual(life.handle(.resetFlushed(generation: generation)), [.buildPipeline(.restart)])
             // Nothing starts the clock or feed before the build reports back.
@@ -528,7 +528,7 @@ final class RendererLifecycleTests: XCTestCase {
     func testRepeatedDecoderFailureStopsRetrying() {
         var life = playing()
         var token = 1
-        for attempt in 1 ... RendererLifecycle.maxFailures {
+        for attempt in 1...RendererLifecycle.maxFailures {
             XCTAssertEqual(life.handle(.decoderFailed(token: token)), [.beginReset(.recover, generation: attempt)])
             if attempt == RendererLifecycle.maxFailures {
                 XCTAssertEqual(life.handle(.resetFlushed(generation: attempt)), [.showFallback, .armRetry(after: 2)])
@@ -557,7 +557,7 @@ final class RendererLifecycleTests: XCTestCase {
     /// current video. Returns the effects of the flush that gives up.
     private func failUntilFallback(_ life: inout RendererLifecycle) -> [RendererLifecycle.Effect] {
         var effects = life.handle(.assetChanged)
-        for _ in 0 ..< RendererLifecycle.maxFailures {
+        for _ in 0..<RendererLifecycle.maxFailures {
             guard case let .beginReset(_, generation)? = effects.last else { XCTFail("no reset: \(effects)"); return [] }
             _ = life.handle(.resetFlushed(generation: generation))
             effects = life.handle(.pipelineBuilt(false))
@@ -583,7 +583,7 @@ final class RendererLifecycleTests: XCTestCase {
         // The retry gets a full set of attempts, then waits longer.
         var effects = life.handle(.resetFlushed(generation: generation))
         XCTAssertEqual(effects, [.buildPipeline(.restart)])
-        for attempt in 1 ... RendererLifecycle.maxFailures {
+        for attempt in 1...RendererLifecycle.maxFailures {
             effects = life.handle(.pipelineBuilt(false))
             guard case let .beginReset(_, next)? = effects.last else { return XCTFail("no reset") }
             effects = life.handle(.resetFlushed(generation: next))

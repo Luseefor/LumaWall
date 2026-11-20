@@ -93,7 +93,7 @@ public struct WallpaperAutomations: Codable, Equatable, Sendable {
 
     public func allowsWeekday(at date: Date = .now, calendar: Calendar = .current) -> Bool {
         guard weekdayMask != 0 else { return true }
-        let weekday = calendar.component(.weekday, from: date) - 1 // 0=Sunday
+        let weekday = calendar.component(.weekday, from: date) - 1  // 0=Sunday
         return (weekdayMask & (1 << weekday)) != 0
     }
 
@@ -118,7 +118,8 @@ public struct WallpaperAutomations: Codable, Equatable, Sendable {
     ) -> [Date] {
         var dates: [Date] = []
         if useSunriseSunset, let latitude, let longitude,
-           let solar = SolarSchedule.nextTransition(after: date, latitude: latitude, longitude: longitude, calendar: calendar) {
+            let solar = SolarSchedule.nextTransition(after: date, latitude: latitude, longitude: longitude, calendar: calendar)
+        {
             dates.append(solar)
         } else {
             let nextDay = calendar.nextDate(
@@ -134,12 +135,13 @@ public struct WallpaperAutomations: Codable, Equatable, Sendable {
             dates.append(contentsOf: [nextDay, nextNight].compactMap { $0 })
         }
         if let start = doNotInterruptStartHour,
-           let end = doNotInterruptEndHour, start != end,
-           let quietEnd = calendar.nextDate(
-               after: date,
-               matching: DateComponents(hour: end, minute: 0, second: 0),
-               matchingPolicy: .nextTime
-           ) {
+            let end = doNotInterruptEndHour, start != end,
+            let quietEnd = calendar.nextDate(
+                after: date,
+                matching: DateComponents(hour: end, minute: 0, second: 0),
+                matchingPolicy: .nextTime
+            )
+        {
             dates.append(quietEnd)
         }
         if let midnight = calendar.nextDate(

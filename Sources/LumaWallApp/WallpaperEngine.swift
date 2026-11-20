@@ -23,42 +23,46 @@ final class OverlayWallpaperEngine {
     init(displays: DisplayCoordinator, assignments: AssignmentStore) {
         self.displays = displays
         self.assignments = assignments
-        notificationTokens.append(NotificationCenter.default.addObserver(
-            forName: NSWorkspace.activeSpaceDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.scheduleSurfaceRecovery() }
-        })
-        notificationTokens.append(NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            // didChangeScreenParameters fires in bursts during a join/cut/mode
-            // probe, and a display can flicker out for a single event. Pruning
-            // sessions on every fire destroys windows for displays that are
-            // still there (and rebuilds them a moment later, the visible
-            // glitch loop). Debounce so only the settled topology applies.
-            Task { @MainActor in self?.scheduleGeometryRebuild() }
-        })
+        notificationTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: NSWorkspace.activeSpaceDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.scheduleSurfaceRecovery() }
+            })
+        notificationTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                // didChangeScreenParameters fires in bursts during a join/cut/mode
+                // probe, and a display can flicker out for a single event. Pruning
+                // sessions on every fire destroys windows for displays that are
+                // still there (and rebuilds them a moment later, the visible
+                // glitch loop). Debounce so only the settled topology applies.
+                Task { @MainActor in self?.scheduleGeometryRebuild() }
+            })
         let workspace = NSWorkspace.shared.notificationCenter
-        workspaceTokens.append(workspace.addObserver(
-            forName: NSWorkspace.screensDidWakeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.scheduleSurfaceRecovery() }
-        })
-        workspaceTokens.append(workspace.addObserver(
-            forName: NSWorkspace.didLaunchApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            guard app?.bundleIdentifier == "com.apple.finder" || app?.bundleIdentifier == "com.apple.dock" else { return }
-            Task { @MainActor in self?.scheduleSurfaceRecovery() }
-        })
+        workspaceTokens.append(
+            workspace.addObserver(
+                forName: NSWorkspace.screensDidWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.scheduleSurfaceRecovery() }
+            })
+        workspaceTokens.append(
+            workspace.addObserver(
+                forName: NSWorkspace.didLaunchApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                guard app?.bundleIdentifier == "com.apple.finder" || app?.bundleIdentifier == "com.apple.dock" else { return }
+                Task { @MainActor in self?.scheduleSurfaceRecovery() }
+            })
     }
 
     deinit {
@@ -134,9 +138,10 @@ final class OverlayWallpaperEngine {
         for display in connected {
             try activate(asset, on: display.displayID, composition: composition)
         }
-        try await assignments.upsert(connected.map {
-            DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
-        })
+        try await assignments.upsert(
+            connected.map {
+                DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
+            })
         synchronize(displayIDs: connected.map(\.displayID))
     }
 
@@ -150,9 +155,10 @@ final class OverlayWallpaperEngine {
         for display in connected {
             try activate(asset, on: display.displayID, composition: composition)
         }
-        try await assignments.upsert(connected.map {
-            DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
-        })
+        try await assignments.upsert(
+            connected.map {
+                DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
+            })
         synchronize(displayIDs: connected.map(\.displayID))
     }
 
@@ -321,14 +327,16 @@ final class OverlayWallpaperEngine {
             // entry to an Apple image choice, wiping the native video
             // assignment (this left desktops showing stills/defaults).
             if nativeHostActive, assignment.composition.usesDefaultCrop,
-               assignment.composition.spanningCanvas == nil {
+                assignment.composition.spanningCanvas == nil
+            {
                 dismantleSession(assignment.displayID)
                 continue
             }
             synchronizedGroups[wallpaperID, default: []].append(assignment.displayID)
             if let session = sessions[assignment.displayID],
-               session.asset.id == wallpaperID,
-               session.currentComposition == assignment.composition {
+                session.asset.id == wallpaperID,
+                session.currentComposition == assignment.composition
+            {
                 continue
             }
             try? activate(asset, on: assignment.displayID, composition: assignment.composition)
@@ -347,9 +355,10 @@ final class OverlayWallpaperEngine {
         var stored = snapshot.assignments
         var topologyChanged = false
 
-        let spanningWallpaperIDs = Set(stored.compactMap { assignment in
-            assignment.composition.spanningCanvas == nil ? nil : assignment.wallpaperID
-        })
+        let spanningWallpaperIDs = Set(
+            stored.compactMap { assignment in
+                assignment.composition.spanningCanvas == nil ? nil : assignment.wallpaperID
+            })
         for wallpaperID in spanningWallpaperIDs {
             let indices = stored.indices.filter { index in
                 stored[index].wallpaperID == wallpaperID
@@ -372,7 +381,8 @@ final class OverlayWallpaperEngine {
         displays.refresh()
         for (id, session) in sessions {
             guard let screen = displays.screen(for: id),
-                  let connected = displays.display(id: id) else { continue }
+                let connected = displays.display(id: id)
+            else { continue }
             installSystemPoster(session.asset.posterURL ?? session.asset.mediaURL, on: screen)
             session.relayout(screen: screen, connected: connected)
             session.apply(tier: tiers[id] ?? .full)
@@ -441,10 +451,12 @@ final class OverlayWallpaperEngine {
         )
         for (id, session) in sessions {
             guard let screen = displays.screen(for: id),
-                  let connected = displays.display(id: id) else { continue }
+                let connected = displays.display(id: id)
+            else { continue }
             session.relayout(screen: screen, connected: connected)
             if let composition = compositionByID[id],
-               composition != session.currentComposition {
+                composition != session.currentComposition
+            {
                 session.updateComposition(composition, screen: screen, connected: connected)
             }
             session.apply(tier: tiers[id] ?? .full)
@@ -454,7 +466,7 @@ final class OverlayWallpaperEngine {
     private func installSystemPoster(_ url: URL, on screen: NSScreen) {
         let options: [NSWorkspace.DesktopImageOptionKey: Any] = [
             .imageScaling: NSNumber(value: Int(NSImageScaling.scaleProportionallyUpOrDown.rawValue)),
-            .allowClipping: true
+            .allowClipping: true,
         ]
         try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: options)
     }
@@ -482,7 +494,8 @@ final class DesktopVideoSession {
     var currentComposition: DisplayComposition { composition }
     var usesSharedDecoder: Bool { sharedHub != nil }
 
-    init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay, tier: PlaybackTier = .full) {
+    init(asset: WallpaperAsset, composition: DisplayComposition, screen: NSScreen, connected: ConnectedDisplay, tier: PlaybackTier = .full)
+    {
         self.asset = asset
         self.composition = composition
         self.requestedTier = tier
@@ -989,6 +1002,6 @@ private final class SessionRootView: NSView {
         "hidden": NSNull(),
         "position": NSNull(),
         "sublayers": NSNull(),
-        "transform": NSNull()
+        "transform": NSNull(),
     ]
 }

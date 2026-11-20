@@ -94,7 +94,8 @@ public final class CrashReportStore: @unchecked Sendable {
         var detected: CrashReport?
         queue.sync {
             if let data = try? Data(contentsOf: sentinelURL),
-               let previousStart = try? JSONDecoder.lumaWall.decode(Date.self, from: data) {
+                let previousStart = try? JSONDecoder.lumaWall.decode(Date.self, from: data)
+            {
                 if let captured = unsafeReports().first(where: { $0.date >= previousStart }) {
                     detected = captured
                 } else {
@@ -146,9 +147,10 @@ public final class CrashReportStore: @unchecked Sendable {
     /// persisted report or the Settings UI that renders it.
     public func ingestRawDumps(appVersion: String, osVersion: String) {
         queue.sync {
-            let dumps = (try? FileManager.default.contentsOfDirectory(
-                at: directoryURL, includingPropertiesForKeys: nil
-            ))?.filter { $0.pathExtension == "stack" } ?? []
+            let dumps =
+                (try? FileManager.default.contentsOfDirectory(
+                    at: directoryURL, includingPropertiesForKeys: nil
+                ))?.filter { $0.pathExtension == "stack" } ?? []
             for url in dumps {
                 defer { try? FileManager.default.removeItem(at: url) }
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }

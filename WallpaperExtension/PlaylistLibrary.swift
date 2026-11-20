@@ -20,7 +20,7 @@ enum ExtensionPlaylistLibrary {
 
     static func load() -> [ExtensionWallpaperPlaylist] {
         guard let data = try? Data(contentsOf: fileURL),
-              let playlists = try? JSONDecoder().decode([ExtensionWallpaperPlaylist].self, from: data)
+            let playlists = try? JSONDecoder().decode([ExtensionWallpaperPlaylist].self, from: data)
         else { return [] }
         return playlists
     }
@@ -36,7 +36,7 @@ enum ExtensionPlaylistLibrary {
 
     static func playlist(forChoiceID id: String) -> ExtensionWallpaperPlaylist? {
         guard id.hasPrefix(choicePrefix),
-              let uuid = UUID(uuidString: String(id.dropFirst(choicePrefix.count)))
+            let uuid = UUID(uuidString: String(id.dropFirst(choicePrefix.count)))
         else { return nil }
         return load().first { $0.id == uuid }
     }

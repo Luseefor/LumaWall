@@ -133,11 +133,12 @@ final class AutomationController: NSObject, @unchecked Sendable {
     private func armBoundaryTimerOnQueue() {
         boundaryTimer?.cancel()
         guard WallpaperState.shared.hasContext(forVideoID: ExtensionAutomationLibrary.dayNightChoiceID),
-              let configuration = ExtensionAutomationLibrary.load()
+            let configuration = ExtensionAutomationLibrary.load()
         else { boundaryTimer = nil; return }
 
         let now = Date()
-        let next = [configuration.dayStartMinutes, configuration.nightStartMinutes]
+        let next =
+            [configuration.dayStartMinutes, configuration.nightStartMinutes]
             .compactMap { nextOccurrence(minutes: $0, after: now) }
             .min() ?? now.addingTimeInterval(60 * 60)
         let source = DispatchSource.makeTimerSource(queue: queue)
@@ -162,7 +163,7 @@ final class AutomationController: NSObject, @unchecked Sendable {
 
     private func refresh(choiceID: String, reason: String) {
         guard let videoID = ExtensionAutomationLibrary.resolve(choiceID),
-              let url = VideoLibrary.shared.videoURL(for: videoID)
+            let url = VideoLibrary.shared.videoURL(for: videoID)
         else { return }
         let renderers = WallpaperState.shared.renderers(forVideoID: choiceID)
         for renderer in renderers {

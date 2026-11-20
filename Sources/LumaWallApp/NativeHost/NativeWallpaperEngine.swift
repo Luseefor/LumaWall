@@ -52,12 +52,15 @@ final class NativeWallpaperEngine {
         }
         let entry: NativeWallpaperDeployment.EntryInfo
         do {
-            entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, surfaces: surfaces(showing: asset.id, plus: [connected]))
+            entry = try await NativeWallpaperDeployment.ensureDeployed(
+                asset: asset, surfaces: surfaces(showing: asset.id, plus: [connected]))
             nativeHostLog.info("apply: deployment ready id=\(entry.id, privacy: .public)")
             try NativeWallpaperAssignmentService.apply(entry: entry, to: [connected.cgDisplayID])
         } catch {
             let cocoa = error as NSError
-            nativeHostLog.error("apply: failed domain=\(cocoa.domain, privacy: .public) code=\(cocoa.code) description=\(cocoa.localizedDescription, privacy: .public)")
+            nativeHostLog.error(
+                "apply: failed domain=\(cocoa.domain, privacy: .public) code=\(cocoa.code) description=\(cocoa.localizedDescription, privacy: .public)"
+            )
             throw error
         }
         nativeHostLog.info("apply: \(asset.name, privacy: .public) → display \(displayID.rawValue, privacy: .public)")
@@ -92,16 +95,18 @@ final class NativeWallpaperEngine {
                 lastWrittenMap[uuid] = entry.id
             }
         }
-        try await assignments.upsert(connected.map {
-            DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
-        })
+        try await assignments.upsert(
+            connected.map {
+                DisplayAssignment(displayID: $0.displayID, wallpaperID: asset.id, composition: composition, isEnabled: true)
+            })
     }
 
     func clear(_ displayID: DisplayID) async throws {
         if let removed = active.removeValue(forKey: displayID)?.0 { reportSurfaces(of: removed) }
         tiers.removeValue(forKey: displayID)
         if let cg = displays.display(id: displayID)?.cgDisplayID,
-           let uuid = stableUUID(for: cg) {
+            let uuid = stableUUID(for: cg)
+        {
             lastWrittenMap.removeValue(forKey: uuid)
         }
         try await assignments.clear(displayID: displayID)
@@ -190,13 +195,15 @@ final class NativeWallpaperEngine {
         var targets: [WallpaperID: [ConnectedDisplay]] = [:]
         for assignment in enabled where !skipped(assignment) {
             if let wallpaperID = assignment.wallpaperID,
-               let display = connected.first(where: { $0.displayID == assignment.displayID }) {
+                let display = connected.first(where: { $0.displayID == assignment.displayID })
+            {
                 targets[wallpaperID, default: []].append(display)
             }
         }
         for assignment in enabled {
             guard let wallpaperID = assignment.wallpaperID, let asset = byID[wallpaperID] else {
-                nativeHostLog.error("restore: wallpaper \(assignment.wallpaperID?.rawValue.uuidString ?? "nil", privacy: .public) not in library")
+                nativeHostLog.error(
+                    "restore: wallpaper \(assignment.wallpaperID?.rawValue.uuidString ?? "nil", privacy: .public) not in library")
                 continue
             }
             if skipped(assignment) { continue }

@@ -54,7 +54,7 @@ final class LogFileTests: XCTestCase {
         let log = LogFile(url: url, maxSize: 1_000_000, rotatedCopies: 2)
         log.append("first\n")
         try FileManager.default.removeItem(at: url)
-        for i in 0 ..< LogFile.pathCheckInterval { log.append("line \(i)\n") }
+        for i in 0..<LogFile.pathCheckInterval { log.append("line \(i)\n") }
         XCTAssertTrue(contents("extension.log").hasSuffix("line \(LogFile.pathCheckInterval - 1)\n"))
     }
 }

@@ -37,7 +37,7 @@ enum NativeWallpaperAssignmentService {
 
     static func stableUUID(for displayID: UInt32) -> String? {
         guard let value = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue(),
-              let text = CFUUIDCreateString(kCFAllocatorDefault, value)
+            let text = CFUUIDCreateString(kCFAllocatorDefault, value)
         else { return nil }
         return (text as String).uppercased()
     }
@@ -61,8 +61,7 @@ enum NativeWallpaperAssignmentService {
         }
 
         let original: Data
-        do { original = try Data(contentsOf: storeURL) }
-        catch {
+        do { original = try Data(contentsOf: storeURL) } catch {
             logFailure("read", error)
             throw AssignmentError.unreadableStore
         }
@@ -75,17 +74,19 @@ enum NativeWallpaperAssignmentService {
         guard let root = source as? NSMutableDictionary else { throw AssignmentError.invalidStore }
         var changed = Set<String>()
         for (uuid, entry) in stableAssignments {
-            changed.formUnion(NativeWallpaperAssignmentStore.update(
-                root: root,
-                choiceID: entry.id,
-                videoURL: NativeWallpaperDeployment.videoURL(for: entry),
-                displayUUIDs: [uuid]
-            ))
+            changed.formUnion(
+                NativeWallpaperAssignmentStore.update(
+                    root: root,
+                    choiceID: entry.id,
+                    videoURL: NativeWallpaperDeployment.videoURL(for: entry),
+                    displayUUIDs: [uuid]
+                ))
         }
         guard changed == Set(stableAssignments.keys) else {
             let missing = Set(stableAssignments.keys).subtracting(changed).sorted().joined(separator: ", ")
             let known = ((root["Displays"] as? NSDictionary)?.allKeys as? [String] ?? []).sorted().joined(separator: ", ")
-            nativeHostLog.error("assign: no Desktop surface for display(s) [\(missing, privacy: .public)]; store has [\(known, privacy: .public)]")
+            nativeHostLog.error(
+                "assign: no Desktop surface for display(s) [\(missing, privacy: .public)]; store has [\(known, privacy: .public)]")
             throw AssignmentError.unknownDisplay
         }
 
@@ -110,8 +111,7 @@ enum NativeWallpaperAssignmentService {
     static func applyLockScreen(entry: NativeWallpaperDeployment.EntryInfo) throws {
         guard #available(macOS 26, *) else { throw AssignmentError.unsupportedSystem }
         let original: Data
-        do { original = try Data(contentsOf: storeURL) }
-        catch { throw AssignmentError.unreadableStore }
+        do { original = try Data(contentsOf: storeURL) } catch { throw AssignmentError.unreadableStore }
         let source = try PropertyListSerialization.propertyList(
             from: original,
             options: [.mutableContainersAndLeaves],

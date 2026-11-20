@@ -62,7 +62,9 @@ extension VideoRenderer {
             return nil
         }
         guard reader.startReading() else {
-            traceLog("  [Renderer] \(label) reader for \(asset.url.lastPathComponent) won't start: \(reader.error?.localizedDescription ?? "unknown")")
+            traceLog(
+                "  [Renderer] \(label) reader for \(asset.url.lastPathComponent) won't start: \(reader.error?.localizedDescription ?? "unknown")"
+            )
             return nil
         }
         return LoopReader(reader: reader, output: output, asset: asset)
@@ -83,7 +85,9 @@ extension VideoRenderer {
         let preloadAsset = preload?.0.asset as? AVURLAsset
         // The preload may predate a tier change; read the tier's copy from
         // this loop on, but keep the preload until that copy starts.
-        let picked = copy.loopReader(preloaded: preloadAsset?.url, current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize) { source -> LoopReader? in
+        let picked = copy.loopReader(
+            preloaded: preloadAsset?.url, current: asset.url, tier: lifecycle.policy, displayPixels: displayPixelSize
+        ) { source -> LoopReader? in
             switch source {
             case let .replacement(url):
                 guard let (newAsset, track) = loadBlocking(url) else { return nil }
@@ -98,7 +102,9 @@ extension VideoRenderer {
         }
         if picked?.source != .preload { preload?.0.cancelReading() }
         if case let .replacement(url) = picked?.source {
-            traceLog("  [Renderer] preload \(preloadAsset?.url.lastPathComponent ?? "none") is for an older tier, looping into \(url.lastPathComponent)")
+            traceLog(
+                "  [Renderer] preload \(preloadAsset?.url.lastPathComponent ?? "none") is for an older tier, looping into \(url.lastPathComponent)"
+            )
         }
         if let next = picked?.reader {
             if next.asset.url != asset.url {
@@ -144,7 +150,8 @@ extension VideoRenderer {
                 hasReader: currentReader != nil && currentOutput != nil,
                 token: token,
             ) {
-                extensionLog("  [feed #\(debugID)] \(fault) status=\(renderer.status.rawValue) err=\(renderer.error?.localizedDescription ?? "-")")
+                extensionLog(
+                    "  [feed #\(debugID)] \(fault) status=\(renderer.status.rawValue) err=\(renderer.error?.localizedDescription ?? "-")")
                 report(fault)
                 return
             }
@@ -172,7 +179,9 @@ extension VideoRenderer {
                 } else {
                     let event = RendererLifecycle.outOfSamples(readerCompleted: currentReader.status == .completed, token: token)
                     if event != .readerExhausted(token: token) || feedLogBudget > 0 {
-                        traceLog("  [feed #\(debugID)] reader out of samples after \(enqueuedThisTick) this tick; readerStatus=\(currentReader.status.rawValue) err=\(currentReader.error?.localizedDescription ?? "-")")
+                        traceLog(
+                            "  [feed #\(debugID)] reader out of samples after \(enqueuedThisTick) this tick; readerStatus=\(currentReader.status.rawValue) err=\(currentReader.error?.localizedDescription ?? "-")"
+                        )
                     }
                     report(event)
                     return
@@ -180,7 +189,9 @@ extension VideoRenderer {
             }
             if feedLogBudget > 0 {
                 feedLogBudget -= 1
-                traceLog("  [feed #\(debugID)] tick enqueued=\(enqueuedThisTick) status=\(renderer.status.rawValue) requiresFlush=\(renderer.requiresFlushToResumeDecoding) ready=\(renderer.isReadyForMoreMediaData) timebase=\(CMTimebaseGetTime(timebase).seconds)")
+                traceLog(
+                    "  [feed #\(debugID)] tick enqueued=\(enqueuedThisTick) status=\(renderer.status.rawValue) requiresFlush=\(renderer.requiresFlushToResumeDecoding) ready=\(renderer.isReadyForMoreMediaData) timebase=\(CMTimebaseGetTime(timebase).seconds)"
+                )
             }
         }
     }

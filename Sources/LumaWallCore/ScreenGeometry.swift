@@ -60,7 +60,8 @@ public enum ScreenGeometry {
         var covered: CGFloat = 0
         for (x0, x1) in zip(xs, xs.dropFirst()) {
             let midX = (x0 + x1) / 2
-            let spans = clipped
+            let spans =
+                clipped
                 .filter { $0.minX < midX && midX < $0.maxX }
                 .map { (low: $0.minY, high: $0.maxY) }
                 .sorted { $0.low < $1.low }
