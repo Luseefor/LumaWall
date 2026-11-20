@@ -18,9 +18,9 @@ import Security
 enum CallerPeer {
     /// The peer's code signature couldn't be read; the reason is logged.
     case unidentified(String)
-    /// The peer's signature, as a test of whether it satisfies a
-    /// requirement written in the code signing requirement language.
-    case signed(satisfies: (String) -> Bool)
+    /// The peer's signature, as a check of a requirement written in the
+    /// code signing requirement language: `errSecSuccess` when it's met.
+    case signed(check: (String) -> OSStatus)
 }
 
 struct CallerHost {
@@ -47,21 +47,41 @@ enum CallerAdmission {
         switch peer {
         case let .unidentified(reason):
             return .rejected(reason)
-        case let .signed(satisfies):
-            if let host = hosts.first(where: { satisfies($0.requirement) }) {
-                return .accepted(host.name)
+        case let .signed(check):
+            var failures: [OSStatus] = []
+            for host in hosts {
+                let status = check(host.requirement)
+                if status == errSecSuccess { return .accepted(host.name) }
+                if !failures.contains(status) { failures.append(status) }
             }
-            return .rejected("signature matches no wallpaper host")
+            // errSecCSReqFailed is an ordinary mismatch; anything else means
+            // the signature itself couldn't be checked.
+            let statuses = failures.map(String.init).joined(separator: ", ")
+            return .rejected("signature matches no wallpaper host (status \(statuses))")
         }
     }
 
-    /// Whether `check` passes for the requirement `text`. A requirement that
-    /// doesn't compile matches nothing.
-    static func satisfies(requirement text: String, check: (SecRequirement) -> OSStatus) -> Bool {
+    /// The peer behind a guest lookup (`SecCodeCopyGuestWithAttributes`),
+    /// checked with `SecCodeCheckValidity`. A failed lookup leaves it
+    /// unidentified.
+    static func peer(guestLookup: () -> (OSStatus, SecCode?)) -> CallerPeer {
+        let (lookup, code) = guestLookup()
+        guard lookup == errSecSuccess, let code else {
+            return .unidentified("could not derive peer SecCode (status \(lookup))")
+        }
+        return .signed { text in
+            status(ofRequirement: text) { SecCodeCheckValidity(code, [], $0) }
+        }
+    }
+
+    /// The result of `check` for the requirement `text`, or the compile
+    /// error when `text` isn't a valid requirement.
+    static func status(ofRequirement text: String, check: (SecRequirement) -> OSStatus) -> OSStatus {
         var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess,
-            let requirement
-        else { return false }
-        return check(requirement) == errSecSuccess
+        let compiled = SecRequirementCreateWithString(text as CFString, [], &requirement)
+        guard compiled == errSecSuccess, let requirement else {
+            return compiled == errSecSuccess ? errSecCSReqInvalid : compiled
+        }
+        return check(requirement)
     }
 }

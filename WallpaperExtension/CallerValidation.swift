@@ -26,14 +26,9 @@ enum CallerValidation {
         var token = connection.auditToken
         let tokenData = withUnsafeBytes(of: &token) { Data($0) }
         let attrs = [kSecGuestAttributeAudit: tokenData] as CFDictionary
-
-        var code: SecCode?
-        let status = SecCodeCopyGuestWithAttributes(nil, attrs, [], &code)
-        guard status == errSecSuccess, let code else {
-            return .unidentified("could not derive peer SecCode (status \(status))")
-        }
-        return .signed { text in
-            CallerAdmission.satisfies(requirement: text) { SecCodeCheckValidity(code, [], $0) }
+        return CallerAdmission.peer {
+            var code: SecCode?
+            return (SecCodeCopyGuestWithAttributes(nil, attrs, [], &code), code)
         }
     }
 }

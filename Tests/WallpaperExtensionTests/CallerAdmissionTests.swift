@@ -29,13 +29,13 @@ final class CallerAdmissionTests: XCTestCase {
         let peer = try staticPeer("/System/Applications/Calculator.app")
         XCTAssertEqual(
             CallerAdmission.verdict(for: peer),
-            .rejected("signature matches no wallpaper host"))
+            .rejected("signature matches no wallpaper host (status \(errSecCSReqFailed))"))
     }
 
     func testRejectsAPeerThatSatisfiesNoRequirement() {
         XCTAssertEqual(
-            CallerAdmission.verdict(for: .signed { _ in false }),
-            .rejected("signature matches no wallpaper host"))
+            CallerAdmission.verdict(for: .signed { _ in errSecCSReqFailed }),
+            .rejected("signature matches no wallpaper host (status \(errSecCSReqFailed))"))
     }
 
     func testEveryHostRequirementPinsAnIdentifierAndApplesAnchor() {
@@ -46,7 +46,53 @@ final class CallerAdmissionTests: XCTestCase {
     }
 
     func testAnUnbuildableRequirementDoesNotMatch() {
-        XCTAssertFalse(CallerAdmission.satisfies(requirement: "not a requirement (") { _ in errSecSuccess })
+        XCTAssertNotEqual(CallerAdmission.status(ofRequirement: "not a requirement (") { _ in errSecSuccess }, errSecSuccess)
+    }
+
+    func testAFailedGuestLookupLeavesThePeerUnidentified() {
+        let peer = CallerAdmission.peer { (errSecCSNoSuchCode, nil) }
+        XCTAssertEqual(
+            CallerAdmission.verdict(for: peer),
+            .rejected("could not derive peer SecCode (status \(errSecCSNoSuchCode))"))
+    }
+
+    func testAcceptsTheRunningWallpaperAgentAsALiveGuest() throws {
+        // The same guest lookup and validity check a connection gets, by PID
+        // instead of audit token. Needs WallpaperAgent running (a logged-in
+        // session), so CI runners without one skip it.
+        let pids = try runningPIDs(named: "WallpaperAgent")
+        let pid = try XCTUnwrap(pids.first)
+        let peer = CallerAdmission.peer {
+            var code: SecCode?
+            let status = SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: pid] as CFDictionary, [], &code)
+            return (status, code)
+        }
+        XCTAssertEqual(CallerAdmission.verdict(for: peer), .accepted("WallpaperAgent"))
+    }
+
+    func testRejectsTheTestRunnerAsALiveGuest() {
+        let peer = CallerAdmission.peer {
+            var code: SecCode?
+            return (SecCodeCopySelf([], &code), code)
+        }
+        guard case let .rejected(reason) = CallerAdmission.verdict(for: peer) else {
+            return XCTFail("the test runner was admitted")
+        }
+        XCTAssertTrue(reason.hasPrefix("signature matches no wallpaper host"), reason)
+    }
+
+    private func runningPIDs(named name: String) throws -> [Int32] {
+        let pgrep = Process()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        pgrep.arguments = ["-x", name]
+        let out = Pipe()
+        pgrep.standardOutput = out
+        try pgrep.run()
+        pgrep.waitUntilExit()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let pids = text.split(separator: "\n").compactMap { Int32($0) }
+        try XCTSkipIf(pids.isEmpty, "WallpaperAgent isn't running here")
+        return pids
     }
 
     /// A peer backed by the code signature of a bundle on disk, checked the
@@ -59,7 +105,7 @@ final class CallerAdmissionTests: XCTestCase {
             throw XCTSkip("can't read the signature of \(path) (\(status))")
         }
         return .signed { text in
-            CallerAdmission.satisfies(requirement: text) {
+            CallerAdmission.status(ofRequirement: text) {
                 SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSBasicValidateOnly), $0)
             }
         }
