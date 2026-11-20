@@ -18,9 +18,41 @@ final class RuntimeLayoutTests: XCTestCase {
         XCTAssertNil(RuntimeLayout.ivarSlot(named: "box", in: FakeRemoteContext.self, bytes: 64))
     }
 
+    func testTheSlotIsTheIvarsOwnOffset() throws {
+        // `box` after another 8-byte field, so a fixed offset of 8 is wrong.
+        let slot = try XCTUnwrap(RuntimeLayout.ivarSlot(named: "box", in: FakeShiftedContext.self, bytes: 8))
+        XCTAssertEqual(slot, ivar_getOffset(try XCTUnwrap(class_getInstanceVariable(FakeShiftedContext.self, "box"))))
+        XCTAssertGreaterThan(slot, class_getInstanceSize(NSObject.self))
+    }
+
+    func testAWriteThatWouldSpillIntoTheNextFieldHasNoSlot() {
+        // A 4-byte `rawValue` followed by another field: an 8-byte pointer
+        // fits in the instance but would overwrite `next`.
+        XCTAssertNil(RuntimeLayout.ivarSlot(named: "rawValue", in: FakeNarrowSnapshot.self, bytes: 8))
+        XCTAssertNotNil(RuntimeLayout.ivarSlot(named: "rawValue", in: FakeNarrowSnapshot.self, bytes: 4))
+    }
+
+    func testTheLiveWallpaperClassesHaveTheSlotsTheWritesNeed() throws {
+        // The same checks as RuntimeHelpers, against this OS's framework.
+        let path = "/System/Library/PrivateFrameworks/WallpaperExtensionKit.framework/WallpaperExtensionKit"
+        try XCTSkipIf(dlopen(path, RTLD_LAZY) == nil, "no WallpaperExtensionKit here")
+        let context: AnyClass = try XCTUnwrap(objc_getClass("WallpaperRemoteContextXPC") as? AnyClass)
+        let snapshot: AnyClass = try XCTUnwrap(objc_getClass("WallpaperSnapshotXPC") as? AnyClass)
+        XCTAssertNotNil(RuntimeLayout.ivarSlot(named: "box", in: context, bytes: MemoryLayout<UInt32>.size))
+        XCTAssertNotNil(RuntimeLayout.ivarSlot(named: "rawValue", in: snapshot, bytes: MemoryLayout<UnsafeRawPointer>.size))
+        let caContext: AnyClass = try XCTUnwrap(NSClassFromString("CAContext"))
+        XCTAssertTrue(RuntimeLayout.respondsToClassSelector(caContext, "remoteContext"))
+        XCTAssertTrue(RuntimeLayout.respondsToClassSelector(caContext, "remoteContextWithOptions:"))
+    }
+
     func testClassSelectorsAreCheckedBeforeUse() {
         XCTAssertTrue(RuntimeLayout.respondsToClassSelector(NSObject.self, "new"))
         XCTAssertFalse(RuntimeLayout.respondsToClassSelector(NSObject.self, "remoteContextWithOptions:"))
+    }
+
+    func testInstanceSelectorsAreCheckedBeforeUse() {
+        XCTAssertTrue(RuntimeLayout.responds(FakeRemoteContext(), to: ["box", "setBox:"]))
+        XCTAssertFalse(RuntimeLayout.responds(FakeRemoteContext(), to: ["box", "setLayer:"]))
     }
 }
 
@@ -28,4 +60,14 @@ final class RuntimeLayoutTests: XCTestCase {
 /// named `box` after the isa, 16 bytes in all.
 private final class FakeRemoteContext: NSObject {
     @objc var box: Int = 0
+}
+
+private final class FakeShiftedContext: NSObject {
+    @objc var first: Int = 0
+    @objc var box: Int = 0
+}
+
+private final class FakeNarrowSnapshot: NSObject {
+    @objc var rawValue: Int32 = 0
+    @objc var next: Int32 = 0
 }

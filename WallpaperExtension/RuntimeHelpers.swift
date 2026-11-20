@@ -22,8 +22,13 @@ func makeRemoteCAContext(displayID: UInt32?) -> CAContext? {
         }
         raw = CAContext.remoteContext()
     }
-    guard let context = raw as? CAContext, context.contextId != 0 else { return nil }
-    return context
+    // The acquire reads contextId and sets layer; check both answer first.
+    guard let context = raw as? CAContext else { return nil }
+    guard RuntimeLayout.responds(context, to: ["contextId", "setLayer:"]) else {
+        extensionLog("  ERROR: CAContext instance lacks contextId or setLayer:")
+        return nil
+    }
+    return context.contextId != 0 ? context : nil
 }
 
 /// Construct a WallpaperRemoteContextXPC wrapping the given CAContext ID.
