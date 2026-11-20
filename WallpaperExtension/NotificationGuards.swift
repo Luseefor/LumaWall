@@ -55,42 +55,56 @@ enum CacheClearRequest {
     }
 }
 
-/// Which files a snapshot-cache clear may delete, and the deleting.
+/// Which files a snapshot-cache clear may delete, and the deleting. Listing,
+/// type checks and deletion all go through one handle on the directory,
+/// opened without following a symlink, so swapping the directory mid-sweep
+/// can't redirect it.
 enum StillCacheSweep {
     /// The extension's own stills (named exactly as `StillCacheEntry`
     /// writes them) that are regular files directly in `directory`. Nil
-    /// when `directory` isn't a real directory, such as a symlink to
-    /// somewhere else.
+    /// when `directory` isn't a real directory, such as a symlink.
     static func filesToClear(in directory: URL) -> [URL]? {
-        let manager = FileManager.default
-        guard (try? manager.attributesOfItem(atPath: directory.path))?[.type] as? FileAttributeType == .typeDirectory,
-            let names = try? manager.contentsOfDirectory(atPath: directory.path)
-        else { return nil }
-        return names.sorted().compactMap { name in
-            guard isWriterName(name) else { return nil }
-            let url = directory.appendingPathComponent(name)
-            guard (try? manager.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeRegular else {
-                return nil
-            }
-            return url
-        }
+        withDirectory(directory) { handle in stills(in: handle).map { directory.appendingPathComponent($0) } }
     }
 
     /// Delete `filesToClear(in:)`. Returns how many went, or nil when the
     /// directory isn't a real directory.
     static func clear(in directory: URL) -> Int? {
-        filesToClear(in: directory).map { remove($0, in: directory) }
+        withDirectory(directory) { handle in stills(in: handle).filter { unlinkat(handle, $0, 0) == 0 }.count }
     }
 
-    /// Unlink each of `files` by name through a handle on `directory` opened
-    /// without following a symlink. unlinkat(2) without AT_REMOVEDIR fails on
-    /// a directory, so a file swapped for one after the scan is never
-    /// deleted recursively. Returns how many were removed.
+    /// Unlink each of `files` by name in `directory`. unlinkat(2) without
+    /// AT_REMOVEDIR fails on a directory, so a file swapped for one after
+    /// the scan is never deleted recursively. Returns how many went.
     static func remove(_ files: [URL], in directory: URL) -> Int {
+        withDirectory(directory) { handle in files.filter { unlinkat(handle, $0.lastPathComponent, 0) == 0 }.count } ?? 0
+    }
+
+    private static func withDirectory<T>(_ directory: URL, _ body: (Int32) -> T) -> T? {
         let handle = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard handle >= 0 else { return 0 }
+        guard handle >= 0 else { return nil }
         defer { close(handle) }
-        return files.filter { unlinkat(handle, $0.lastPathComponent, 0) == 0 }.count
+        return body(handle)
+    }
+
+    /// Writer-named regular files in the directory `handle` is open on.
+    private static func stills(in handle: Int32) -> [String] {
+        let listing = dup(handle)
+        guard listing >= 0, let stream = fdopendir(listing) else {
+            if listing >= 0 { close(listing) }
+            return []
+        }
+        defer { closedir(stream) }
+        var names: [String] = []
+        while let entry = readdir(stream) {
+            let name = withUnsafeBytes(of: entry.pointee.d_name) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            var info = stat()
+            guard isWriterName(name), fstatat(handle, name, &info, AT_SYMLINK_NOFOLLOW) == 0,
+                info.st_mode & S_IFMT == S_IFREG
+            else { continue }
+            names.append(name)
+        }
+        return names.sorted()
     }
 
     /// A name the extension writes: the entry parses and prints back the
@@ -110,6 +124,12 @@ struct LockHintTracker {
     /// Starts from the session's state, or unknown.
     init(sessionLocked: Bool?) {
         locked = sessionLocked
+    }
+
+    /// The Agent reported the lock screen. Kept until a confirmed unlock
+    /// consumes it, so a lock hint missed while suspended still counts.
+    mutating func noteAgentLocked() {
+        locked = true
     }
 
     /// Record a confirmed hint. True when it unlocked a screen known to be

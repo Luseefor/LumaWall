@@ -46,6 +46,15 @@ final class NotificationGuardsTests: XCTestCase {
         XCTAssertFalse(tracker.confirm(locked: false), "a repeated unlock")
     }
 
+    func testALockTheAgentReportedCountsUntilAnUnlockConsumesIt() {
+        // The lock hint was missed while the process was suspended; the
+        // Agent's later desktop update doesn't undo what it saw.
+        var tracker = LockHintTracker(sessionLocked: false)
+        tracker.noteAgentLocked()
+        XCTAssertTrue(tracker.confirm(locked: false))
+        XCTAssertFalse(tracker.confirm(locked: false))
+    }
+
     func testAnUnknownStartingStateNeverCountsAsAWake() {
         var tracker = LockHintTracker(sessionLocked: nil)
         XCTAssertFalse(tracker.confirm(locked: false))
@@ -146,6 +155,15 @@ final class NotificationGuardsTests: XCTestCase {
         try Data().write(to: swapped.appendingPathComponent("keep.txt"))
         XCTAssertEqual(StillCacheSweep.remove([swapped], in: dir), 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: swapped.appendingPathComponent("keep.txt").path))
+    }
+
+    func testAClearReportsNothingForADirectoryThatIsASymlink() throws {
+        let link = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: dir)
+        defer { try? FileManager.default.removeItem(at: link) }
+        try Data().write(to: dir.appendingPathComponent(still))
+        XCTAssertNil(StillCacheSweep.clear(in: link))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent(still).path))
     }
 
     func testAClearRefusesADirectoryThatIsASymlink() throws {

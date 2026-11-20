@@ -134,7 +134,8 @@ final class LumaWallExtension: NSObject, AppExtension {
     /// process can post these names, so each hint is checked against the
     /// login session first (`ScreenLockHint`).
     private func observeScreenLockState() {
-        Self.lockHints = LockHintTracker(sessionLocked: ScreenLockHint.sessionIsLocked())
+        let sessionLocked = ScreenLockHint.sessionIsLocked()
+        Self.lockHints.withLock { $0 = LockHintTracker(sessionLocked: sessionLocked) }
         let dnc = DistributedNotificationCenter.default()
         dnc.addObserver(
             forName: .init("com.apple.screenIsLocked"),
@@ -150,9 +151,14 @@ final class LumaWallExtension: NSObject, AppExtension {
         }
     }
 
-    /// Confirmed lock hints so far. Set at launch, then touched only on the
-    /// main queue, where the observers and their retries run.
-    private nonisolated(unsafe) static var lockHints = LockHintTracker(sessionLocked: nil)
+    /// Confirmed lock hints so far, plus locks the Agent reported. Locked:
+    /// hints arrive on the main queue, Agent updates on the lifecycle queue.
+    private static let lockHints = OSAllocatedUnfairLock(initialState: LockHintTracker(sessionLocked: nil))
+
+    /// The Agent reported the lock screen (`WallpaperXPCHandler.update`).
+    static func noteAgentLocked() {
+        lockHints.withLock { $0.noteAgentLocked() }
+    }
 
     /// Main queue. The session flag can trail loginwindow's notification, so
     /// a hint the session doesn't confirm yet is checked again a second later
@@ -172,10 +178,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             }
             return
         }
-        // The Agent's presentation mode also sets isScreenLocked, which
-        // covers a lock hint missed while the process was suspended.
-        let wasLocked = WallpaperState.shared.isScreenLocked
-        let woke = lockHints.confirm(locked: locked) || (wasLocked && !locked)
+        let woke = lockHints.withLock { $0.confirm(locked: locked) }
         WallpaperState.shared.isScreenLocked = locked
         recomputeAndApplyPolicy()
         if woke {
