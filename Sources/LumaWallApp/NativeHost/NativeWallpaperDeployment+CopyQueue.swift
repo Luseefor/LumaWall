@@ -50,7 +50,7 @@ extension NativeWallpaperDeployment {
         private var pending: [Job] = []
         /// Stopped with `.notNow`; back in `pending` on the next `wake()`.
         private var parked: [Job] = []
-        private var running: (job: Job, task: Task<Outcome, Never>, preempted: Bool)?
+        private var running: (job: Job, task: Task<Outcome, Never>, preempted: Bool, removed: Bool)?
         private var worker: Task<Void, Never>?
         /// Counts `wake()` calls, so a job that stops with `.notNow` after a
         /// wake arrived mid-attempt is checked again instead of parked.
@@ -93,6 +93,17 @@ extension NativeWallpaperDeployment {
             preemptIfNeeded()
             if worker == nil, !pending.isEmpty {
                 worker = Task(priority: .utility) { await drain() }
+            }
+        }
+
+        /// Forgets every job for `entryID` and cancels its running encode,
+        /// whatever kind, without queueing it again. For a removed wallpaper.
+        func cancel(entryID: String) {
+            pending.removeAll { $0.entryID == entryID }
+            parked.removeAll { $0.entryID == entryID }
+            if running?.job.entryID == entryID {
+                running?.removed = true
+                running?.task.cancel()
             }
         }
 
@@ -157,10 +168,12 @@ extension NativeWallpaperDeployment {
                 let encode = self.encode
                 let task = Task(priority: .utility) { await encode(job) }
                 let wakesAtStart = wakes
-                running = (job, task, false)
+                running = (job, task, false, false)
                 let outcome = await task.value
                 let preempted = running?.preempted ?? false
+                let removed = running?.removed ?? false
                 running = nil
+                if removed { continue }
                 switch outcome {
                 case .done:
                     failures[job.key] = nil

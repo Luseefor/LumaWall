@@ -164,6 +164,21 @@ final class VariantEncodeQueueTests: XCTestCase {
         XCTAssertEqual(log.completed, ["a/Wallpaper.qhd.mov"])
     }
 
+    func testRemovingAWallpaperCancelsItsEncodes() async {
+        // Removing a wallpaper left its battery encode running to the end
+        // and its other copies queued.
+        let log = EncodeLog()
+        let queue = queue(log)
+        await queue.enqueue([job("a", "Wallpaper.minimal.mov")])
+        await log.waitUntilStarted("a/Wallpaper.minimal.mov")
+        await queue.enqueue([job("a", "Wallpaper.reduced.mov"), job("b", "Wallpaper.minimal.mov")])
+        await queue.cancel(entryID: "a")
+        log.openAll()
+        await queue.drained()
+        // The cancelled encode isn't retried and a's other copy never starts.
+        XCTAssertEqual(log.order, ["a/Wallpaper.minimal.mov", "b/Wallpaper.minimal.mov"])
+    }
+
     func testDroppedJobsDoNotRun() async {
         let log = EncodeLog()
         log.openAll()
