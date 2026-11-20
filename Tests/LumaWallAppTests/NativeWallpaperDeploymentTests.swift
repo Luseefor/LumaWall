@@ -790,6 +790,17 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: staged.path))
     }
 
+    func testAnExportIsKeptWhileTheVideosFolderIsMissing() throws {
+        // videos/ moved aside for a moment: the entry may still exist.
+        let fm = FileManager.default
+        try deploy(hash: "aaa")
+        let staged = try stage(job(hash: "aaa"))
+        try fm.moveItem(at: videos, to: root.appendingPathComponent("videos-aside"))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .failed)
+        XCTAssertTrue(fm.fileExists(atPath: staged.path))
+    }
+
     func testAnExportOfARemovedEntryIsDiscarded() throws {
         let staged = try stage(job(hash: "aaa"))
         try FileManager.default.removeItem(at: videos.appendingPathComponent(id))
@@ -847,6 +858,23 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertFalse(fm.fileExists(atPath: stale.path))
         XCTAssertTrue(fm.fileExists(atPath: current.path))
         XCTAssertTrue(fm.fileExists(atPath: videos.appendingPathComponent(id).appendingPathComponent("metadata.json").path))
+    }
+
+    func testStartupCleanupKeepsAnExportItCantJudge() throws {
+        // An entry folder that can't be opened safely says nothing about
+        // whether its exports are stale. One whose entry is gone is.
+        let fm = FileManager.default
+        try deploy(hash: "aaa")
+        let kept = try stage(job(hash: "aaa"))
+        let entry = videos.appendingPathComponent(id)
+        let moved = root.appendingPathComponent("entry-real")
+        try fm.moveItem(at: entry, to: moved)
+        try fm.createSymbolicLink(at: entry, withDestinationURL: moved)
+        let orphan = staging.appendingPathComponent("\(UUID().uuidString).aaa.Wallpaper.minimal.mov")
+        try Data("x".utf8).write(to: orphan)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+        XCTAssertTrue(fm.fileExists(atPath: kept.path))
+        XCTAssertFalse(fm.fileExists(atPath: orphan.path))
     }
 
     func testStartupCleanupLeavesSymlinkTargetsAlone() throws {

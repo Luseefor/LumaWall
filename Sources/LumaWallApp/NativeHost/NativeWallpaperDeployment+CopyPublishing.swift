@@ -161,7 +161,11 @@ extension NativeWallpaperDeployment {
                 }
             }
             guard let resolution = await videoSize(of: staged) else {
-                try? staging.removeFile(named: staged.lastPathComponent)
+                // The probe went by path; delete only if that path still
+                // names the folder checked above.
+                if let current = try? trustedFolder(stagingFolderURL).identity(), current == (try? staging.identity()) {
+                    try? staging.removeFile(named: staged.lastPathComponent)
+                }
                 return .failed
             }
             // Publishing writes into the extension's container.
@@ -230,9 +234,10 @@ extension NativeWallpaperDeployment {
             // Stale only when the entry is known gone or holds another
             // source. A folder that can't be opened safely (a symlink in
             // place of videos or the entry) keeps the export for a retry.
+            guard let videos = try? trustedFolder(videosFolderURL) else { return .failed }
             let folder: TrustedDirectory
             do {
-                folder = try trustedFolder(videosFolderURL).subdirectory(job.entryID)
+                folder = try videos.subdirectory(job.entryID)
             } catch POSIXError.ENOENT {
                 try? staging.removeFile(named: stagedName)
                 return .stale
@@ -284,7 +289,7 @@ extension NativeWallpaperDeployment {
                     !file.name.hasSuffix(".partial.mov")
                     && parts.count == 3
                     && PathSafety.isValidEntryID(parts[0])
-                    && entry(id: parts[0], in: videos)?.contentHash == parts[1]
+                    && holdsSource(parts[1], entryID: parts[0], in: videos) != false
                 if !keep { try? staging.removeFile(named: file.name) }
             }
         }
@@ -307,11 +312,24 @@ extension NativeWallpaperDeployment {
         }
     }
 
-    /// metadata.json of entry `id`, read inside `videos` without following
-    /// symlinks; nil when unreadable or listing another ID.
-    private static func entry(id: String, in videos: TrustedDirectory) -> EntryInfo? {
-        guard let folder = try? videos.subdirectory(id) else { return nil }
-        return entry(id: id, inEntry: folder)
+    /// Whether entry `id` still holds the source hashed `hash`: false when
+    /// the entry is gone, holds another source or has no usable metadata;
+    /// nil when its folder or metadata can't be opened safely, which says
+    /// neither.
+    private static func holdsSource(_ hash: String, entryID id: String, in videos: TrustedDirectory) -> Bool? {
+        let folder: TrustedDirectory
+        do {
+            folder = try videos.subdirectory(id)
+        } catch POSIXError.ENOENT {
+            return false
+        } catch {
+            return nil
+        }
+        do {
+            return try entry(id: id, readingFrom: folder)?.contentHash == hash
+        } catch {
+            return nil
+        }
     }
 
     private static func entry(id: String, inEntry folder: TrustedDirectory) -> EntryInfo? {
