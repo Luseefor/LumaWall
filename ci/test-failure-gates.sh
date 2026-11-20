@@ -165,19 +165,22 @@ if [[ "$versions" == *$'\n'* || "$versions" == missing* || "$sums" == *$'\n'* ||
     exit 1
 fi
 
-# A failed validation must preserve an existing DMG and never start packaging.
+# A failed validation must preserve an existing DMG and SHA256SUMS and never start packaging.
 printf '#!/bin/bash\nexit 42\n' > "$fixture_dir/ci/check.sh"
 printf 'previous release\n' > "$fixture_dir/dist/LumaWall.dmg"
+printf 'previous-checksum  LumaWall.dmg\n' > "$fixture_dir/dist/SHA256SUMS"
 export DEVELOPER_ID_APPLICATION='Developer ID Application: Release Gate Fixture'
 export DEVELOPMENT_TEAM='FIXTURE'
 export NOTARY_KEYCHAIN_PROFILE='fixture-profile'
 expect_exit 42 zsh "$fixture_dir/Packaging/release.sh"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/dist/SHA256SUMS")" == 'previous-checksum  LumaWall.dmg' ]] || fail "line $LINENO"
 [[ ! -e "$fixture_dir/packaged" ]] || fail "line $LINENO"
 
 # Unknown release flags must be rejected before running checks or modifying dist/.
 expect_exit 2 zsh "$fixture_dir/Packaging/release.sh" --bogus
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/dist/SHA256SUMS")" == 'previous-checksum  LumaWall.dmg' ]] || fail "line $LINENO"
 
 # Staging, pinned xcodegen, app notarization before DMG, and SHA256SUMS checks.
 printf '#!/bin/bash\nexit 0\n' > "$fixture_dir/ci/check.sh"
@@ -257,26 +260,31 @@ printf 'gh %s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/release-steps.log"
 SH
 chmod +x "$fixture_dir/bin/"*
 
+real_fixture_dir="$(cd "$fixture_dir" && pwd -P)"
+
 # Failure during codesign entitlements inspection must fail closed and preserve dist/.
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_CODESIGN_ENTITLEMENTS_EXIT=1 expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
-[[ ! -e "$fixture_dir/dist/SHA256SUMS" ]] || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/dist/SHA256SUMS")" == 'previous-checksum  LumaWall.dmg' ]] || fail "line $LINENO"
 
 # Failure during Gatekeeper verification must preserve existing dist/ outputs.
 rm -f "$fixture_dir/pinned" "$fixture_dir/release-steps.log"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_SPCTL_EXIT=1 expect_exit 1 zsh "$fixture_dir/Packaging/release.sh"
 [[ -e "$fixture_dir/pinned" ]] || fail "line $LINENO"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
-[[ ! -e "$fixture_dir/dist/SHA256SUMS" ]] || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/dist/SHA256SUMS")" == 'previous-checksum  LumaWall.dmg' ]] || fail "line $LINENO"
 
 # SIGTERM during archive must still unregister builds, remove staging, and exit non-zero.
 rm -f "$fixture_dir/unregistered" "$fixture_dir/staging-dir.txt"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_ARCHIVE_SIGNAL=TERM expect_exit 143 zsh "$fixture_dir/Packaging/release.sh"
 grep -Fq "pluginkit -r " "$fixture_dir/unregistered" || fail "line $LINENO"
 grep -Fq "lsregister -u " "$fixture_dir/unregistered" || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/staging-dir.txt")" == "$real_fixture_dir/dist/.staging."* ]] || fail "line $LINENO"
 [[ ! -e "$(cat "$fixture_dir/staging-dir.txt")" ]] || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/dist/SHA256SUMS")" == 'previous-checksum  LumaWall.dmg' ]] || fail "line $LINENO"
 
-# Successful staging notarizes and staples the app before building the DMG, then writes SHA256SUMS.
+# Successful staging notarizes and staples the app before building the DMG, then swaps matched DMG + SHA256SUMS.
 rm -f "$fixture_dir/release-steps.log"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_SPCTL_EXIT=0 expect_exit 0 zsh "$fixture_dir/Packaging/release.sh"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'new staged dmg' ]] || fail "line $LINENO"
@@ -289,9 +297,8 @@ dmg_create_line="$(grep -n 'hdiutil .*LumaWall\.dmg' "$fixture_dir/release-steps
 [[ "$app_zip_line" -lt "$dmg_create_line" ]] || fail "line $LINENO"
 ! grep -Fq 'gh release create' "$fixture_dir/release-steps.log" || fail "line $LINENO"
 
-# --publish creates a draft GitHub Release with the DMG and SHA256SUMS.
-rm -f "$fixture_dir/release-steps.log"
-real_fixture_dir="$(cd "$fixture_dir" && pwd -P)"
+# --publish creates a draft GitHub Release with the DMG and SHA256SUMS even starting from an empty dist/.
+rm -rf "$fixture_dir/dist" "$fixture_dir/release-steps.log"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_SPCTL_EXIT=0 expect_exit 0 zsh "$fixture_dir/Packaging/release.sh" --publish
 grep -Fq "gh release create v0.4.1 --draft --title LumaWall 0.4.1 --generate-notes $real_fixture_dir/dist/LumaWall.dmg $real_fixture_dir/dist/SHA256SUMS" "$fixture_dir/release-steps.log" || fail "line $LINENO"
 

@@ -60,7 +60,8 @@ fi
 cd "${project_root}"
 "${project_root}/ci/check.sh"
 
-staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumawall-release.XXXXXX")"
+mkdir -p "${output_dir}"
+staging_dir="$(mktemp -d "${output_dir}/.staging.XXXXXX")"
 archive_path="${staging_dir}/LumaWall.xcarchive"
 derived_data_path="${staging_dir}/derived"
 app_zip="${staging_dir}/LumaWall.app.zip"
@@ -171,9 +172,29 @@ spctl --assess --type open --context context:primary-signature --verbose=4 "${st
 
 (cd "${staging_dir}" && shasum -a 256 "LumaWall.dmg" > "${staged_checksums}")
 
-mkdir -p "${output_dir}"
-mv -f "${staged_dmg}" "${dmg_path}"
-mv -f "${staged_checksums}" "${checksums_path}"
+backup_dir="${staging_dir}/backup"
+mkdir -p "${backup_dir}"
+trap '' INT TERM
+if [[ -e "${dmg_path}" ]]; then
+    mv -f "${dmg_path}" "${backup_dir}/LumaWall.dmg"
+fi
+if [[ -e "${checksums_path}" ]]; then
+    mv -f "${checksums_path}" "${backup_dir}/SHA256SUMS"
+fi
+if ! { mv -f "${staged_dmg}" "${dmg_path}" && mv -f "${staged_checksums}" "${checksums_path}"; }; then
+    if [[ -e "${backup_dir}/LumaWall.dmg" ]]; then
+        mv -f "${backup_dir}/LumaWall.dmg" "${dmg_path}" || true
+    fi
+    if [[ -e "${backup_dir}/SHA256SUMS" ]]; then
+        mv -f "${backup_dir}/SHA256SUMS" "${checksums_path}" || true
+    fi
+    trap on_int INT
+    trap on_term TERM
+    print -u2 "Refusing release: failed to promote DMG and SHA256SUMS into ${output_dir}."
+    exit 3
+fi
+trap on_int INT
+trap on_term TERM
 
 print "Production DMG ready: ${dmg_path}"
 print "Checksums ready: ${checksums_path}"
