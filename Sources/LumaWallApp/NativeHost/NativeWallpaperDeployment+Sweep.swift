@@ -231,7 +231,8 @@ extension NativeWallpaperDeployment {
 
     @MainActor private static var sweepRunning = false
     @MainActor private static var sweepRequested = false
-    @MainActor private static var retryScheduled = false
+    @MainActor private static var retry = SweepRetry()
+    @MainActor private static var retryTimer: Task<Void, Never>?
 
     /// Runs a sweep, or one more after the one running now.
     @MainActor
@@ -248,7 +249,7 @@ extension NativeWallpaperDeployment {
                 let result = await Task.detached(priority: .utility) {
                     sweepAbandonedEntries(referenced: referenced)
                 }.value
-                if let wait = result.retryAfter { scheduleRetry(after: wait) }
+                if let wait = result.retryAfter { scheduleRetry(at: Date().addingTimeInterval(wait)) }
                 if !result.entries.isEmpty || !result.stagingFolders.isEmpty {
                     nativeHostLog.info(
                         "sweep: removed \(result.entries.count, privacy: .public) entries, \(result.stagingFolders.count, privacy: .public) staging folders"
@@ -259,18 +260,34 @@ extension NativeWallpaperDeployment {
     }
 
     /// One more sweep once a folder skipped for its age is old enough, so it
-    /// doesn't wait for the next deploy or launch. One timer at a time; a
-    /// sweep it runs that still finds a new folder sets the next.
+    /// doesn't wait for the next deploy or launch. One timer at a time, for
+    /// the earliest deadline; a sweep it runs that still finds a new folder
+    /// sets the next.
     @MainActor
-    private static func scheduleRetry(after wait: TimeInterval) {
-        guard !retryScheduled else { return }
-        retryScheduled = true
-        Task { @MainActor in
+    private static func scheduleRetry(at deadline: Date) {
+        guard retry.replaces(deadline) else { return }
+        retryTimer?.cancel()
+        retryTimer = Task { @MainActor in
             // A little past the age, so the folder's date has crossed it.
-            try? await Task.sleep(for: .seconds(wait + 5))
-            retryScheduled = false
+            try? await Task.sleep(for: .seconds(max(deadline.timeIntervalSinceNow, 0) + 5))
+            guard !Task.isCancelled else { return }
+            retry.deadline = nil
+            retryTimer = nil
             scheduleSweep()
         }
+    }
+}
+
+/// The deadline of the one pending retry sweep.
+struct SweepRetry {
+    var deadline: Date?
+
+    /// True, and `candidate` becomes the deadline, when no retry is pending
+    /// or `candidate` comes before the pending one.
+    mutating func replaces(_ candidate: Date) -> Bool {
+        if let deadline, deadline <= candidate { return false }
+        deadline = candidate
+        return true
     }
 }
 

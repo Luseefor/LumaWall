@@ -236,6 +236,18 @@ final class DeploymentSweepTests: XCTestCase {
         XCTAssertEqual(wait, 600, accuracy: 1)
     }
 
+    func testAnEarlierRetryReplacesAPendingLaterOne() {
+        // A pending timer kept its own deadline, so a folder due sooner
+        // waited for the later one.
+        var retry = SweepRetry()
+        XCTAssertTrue(retry.replaces(now.addingTimeInterval(3300)))
+        XCTAssertFalse(retry.replaces(now.addingTimeInterval(3400)))
+        XCTAssertTrue(retry.replaces(now.addingTimeInterval(60)))
+        XCTAssertEqual(retry.deadline, now.addingTimeInterval(60))
+        retry.deadline = nil
+        XCTAssertTrue(retry.replaces(now.addingTimeInterval(3400)))
+    }
+
     func testARecentFolderHoldingAVideoAsksForNoRetry() throws {
         try entry(UUID().uuidString, files: ["Wallpaper.mov"], modified: now.addingTimeInterval(-60))
         XCTAssertNil(sweep().retryAfter)
