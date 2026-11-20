@@ -204,8 +204,9 @@ extension VideoRenderer {
     }
 
     private func fallbackFrameDuration() -> CMTime {
-        let fps = max(nominalFrameRate, 1)
-        let timescale = CMTimeScale(min(120_000, max(1, Int((fps * 100).rounded()))))
+        // The rate comes from the file; a NaN or infinite one would trap Int(_:).
+        let fps = nominalFrameRate.isFinite ? min(max(nominalFrameRate, 1), 1_200) : 60
+        let timescale = CMTimeScale(Int((fps * 100).rounded()))
         return CMTime(value: 100, timescale: timescale)
     }
 

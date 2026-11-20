@@ -77,7 +77,7 @@ final class VideoLibrary: Sendable {
         guard
             let chosen = VariantSelection.variant(
                 for: policy,
-                sourceFPS: Int(entry.fps.rounded()),
+                sourceFPS: VariantSelection.wholeFPS(entry.fps),
                 sourceResolution: entry.resolution,
                 // A copy listed in metadata but missing on disk would leave the
                 // renderer retrying a dead URL; choose among files that exist.
