@@ -125,11 +125,19 @@ extension AppModel {
     }
 
     func importVideos(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
+        // Web links dropped on the window are refused here, before anything
+        // opens them; only files on this Mac reach the importer.
+        let files = MediaImporter.localFiles(in: urls)
+        let skipped = urls.count - files.count
+        guard !files.isEmpty else {
+            if skipped > 0 { present("Import details", VerifiedFileCopy.CopyError.notALocalFile.localizedDescription) }
+            return
+        }
         isImporting = true
         Task {
             var notes: [String] = []
-            for url in urls {
+            if skipped > 0 { notes.append(VerifiedFileCopy.CopyError.notALocalFile.localizedDescription) }
+            for url in files {
                 // NOTE: `defer` inside a loop defers to the enclosing scope, not
                 // the iteration, the old code held all security-scoped refs until
                 // every import finished. Per-URL helper scopes each access.
