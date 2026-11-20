@@ -86,7 +86,7 @@ enum SettingsPush {
             do {
                 try await proxy.updateSettingsViewModels(models)
             } catch {
-                extensionLog("[SettingsPush] updateSettingsViewModels error: \(error)")
+                extensionLog("[SettingsPush] updateSettingsViewModels error: \(LogRedaction.describe(error))")
             }
         }
     }

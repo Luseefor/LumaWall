@@ -57,7 +57,7 @@ extension WallpaperXPCHandler {
         if let proxy = agentProxy {
             proxy.invalidateSnapshots { error in
                 if let error {
-                    extensionLog("  [Remove] invalidateSnapshots error: \(error)")
+                    extensionLog("  [Remove] invalidateSnapshots error: \(LogRedaction.describe(error))")
                 }
             }
         }
@@ -102,7 +102,7 @@ extension WallpaperXPCHandler {
             }
             if let proxy = agentProxy {
                 proxy.invalidateSnapshots { error in
-                    if let error { extensionLog("  [Choice] invalidateSnapshots error: \(error)") }
+                    if let error { extensionLog("  [Choice] invalidateSnapshots error: \(LogRedaction.describe(error))") }
                 }
             }
             reply(nil)
@@ -122,7 +122,7 @@ extension WallpaperXPCHandler {
             if let proxy = agentProxy {
                 proxy.invalidateSnapshots { error in
                     if let error {
-                        extensionLog("  [Choice] invalidateSnapshots error: \(error)")
+                        extensionLog("  [Choice] invalidateSnapshots error: \(LogRedaction.describe(error))")
                     }
                 }
             }
@@ -159,7 +159,7 @@ extension WallpaperXPCHandler {
         if let proxy = agentProxy {
             proxy.invalidateSnapshots { error in
                 if let error {
-                    extensionLog("  [Choice] invalidateSnapshots error: \(error)")
+                    extensionLog("  [Choice] invalidateSnapshots error: \(LogRedaction.describe(error))")
                 }
             }
         }

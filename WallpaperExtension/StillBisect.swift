@@ -48,7 +48,7 @@ func bisectShowStill(videoURL: URL?, cachedStill: CGImage?, rootLayer: CALayer, 
     }
     guard let sample else {
         extensionLog(
-            "  [bisect] display \(key.displayID): NO still available (cachedStill=\(cachedStill != nil), url=\(videoURL?.lastPathComponent ?? "nil"))"
+            "  [bisect] display \(key.displayID): NO still available (cachedStill=\(cachedStill != nil), url=\(videoURL.map(LogRedaction.fileLabel) ?? "nil"))"
         )
         return
     }

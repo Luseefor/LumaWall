@@ -132,7 +132,7 @@ final class VideoRenderer: @unchecked Sendable {
         ) { (url: URL) async -> (AVURLAsset, AVAssetTrack)? in
             let asset = AVURLAsset(url: url)
             guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
-                traceLog("  [Renderer] no video track in \(url.lastPathComponent)")
+                traceLog("  [Renderer] no video track in \(LogRedaction.fileLabel(url))")
                 return nil
             }
             return (asset, track)
@@ -254,7 +254,7 @@ final class VideoRenderer: @unchecked Sendable {
         rootLayer.addSublayer(displayLayer)
         rootLayer.addSublayer(stillFrameLayer)
         traceLog(
-            "  [Renderer #\(debugID)] CREATED for \(asset.url.lastPathComponent) tier=\(policy), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0)), pixels=\(Int(displayPixelSize.width))x\(Int(displayPixelSize.height))"
+            "  [Renderer #\(debugID)] CREATED for \(LogRedaction.fileLabel(asset.url)) tier=\(policy), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0)), pixels=\(Int(displayPixelSize.width))x\(Int(displayPixelSize.height))"
         )
         if let stillImage, let stillBuffer = makeStillSampleBuffer(from: stillImage) {
             // Tag DisplayImmediately so the still is shown the instant it's enqueued,
