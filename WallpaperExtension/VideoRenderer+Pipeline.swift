@@ -103,7 +103,7 @@ extension VideoRenderer {
         reader.add(output)
         guard reader.startReading() else {
             extensionLog(
-                "  [reset #\(debugID)] FAILED to start reading \(LogRedaction.fileLabel(asset.url)): \(reader.error?.localizedDescription ?? "unknown")"
+                "  [reset #\(debugID)] FAILED to start reading \(LogRedaction.fileLabel(asset.url)): \(reader.error.map(LogRedaction.describe) ?? "unknown")"
             )
             return false
         }

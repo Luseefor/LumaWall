@@ -63,7 +63,7 @@ extension VideoRenderer {
         }
         guard reader.startReading() else {
             traceLog(
-                "  [Renderer] \(label) reader for \(LogRedaction.fileLabel(asset.url)) won't start: \(reader.error?.localizedDescription ?? "unknown")"
+                "  [Renderer] \(label) reader for \(LogRedaction.fileLabel(asset.url)) won't start: \(reader.error.map(LogRedaction.describe) ?? "unknown")"
             )
             return nil
         }
@@ -103,7 +103,7 @@ extension VideoRenderer {
         if picked?.source != .preload { preload?.0.cancelReading() }
         if case let .replacement(url) = picked?.source {
             traceLog(
-                "  [Renderer] preload \(preloadAsset?.url.lastPathComponent ?? "none") is for an older tier, looping into \(LogRedaction.fileLabel(url))"
+                "  [Renderer] preload \(preloadAsset.map { LogRedaction.fileLabel($0.url) } ?? "none") is for an older tier, looping into \(LogRedaction.fileLabel(url))"
             )
         }
         if let next = picked?.reader {
@@ -151,7 +151,8 @@ extension VideoRenderer {
                 token: token,
             ) {
                 extensionLog(
-                    "  [feed #\(debugID)] \(fault) status=\(renderer.status.rawValue) err=\(renderer.error?.localizedDescription ?? "-")")
+                    "  [feed #\(debugID)] \(fault) status=\(renderer.status.rawValue) err=\(renderer.error.map(LogRedaction.describe) ?? "-")"
+                )
                 report(fault)
                 return
             }
@@ -180,7 +181,7 @@ extension VideoRenderer {
                     let event = RendererLifecycle.outOfSamples(readerCompleted: currentReader.status == .completed, token: token)
                     if event != .readerExhausted(token: token) || feedLogBudget > 0 {
                         traceLog(
-                            "  [feed #\(debugID)] reader out of samples after \(enqueuedThisTick) this tick; readerStatus=\(currentReader.status.rawValue) err=\(currentReader.error?.localizedDescription ?? "-")"
+                            "  [feed #\(debugID)] reader out of samples after \(enqueuedThisTick) this tick; readerStatus=\(currentReader.status.rawValue) err=\(currentReader.error.map(LogRedaction.describe) ?? "-")"
                         )
                     }
                     report(event)

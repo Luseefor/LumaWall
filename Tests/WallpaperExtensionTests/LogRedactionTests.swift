@@ -41,12 +41,29 @@ final class LogRedactionTests: XCTestCase {
         XCTAssertEqual(LogRedaction.redact("file:///private/var/alice/clip.mov", home: "/private/var/alice"), "file://~/clip.mov")
     }
 
+    func testAHomeOutsideUsersIsRedactedOnlyAsAWholeComponent() {
+        let home = "/Volumes/Homes/alice"
+        XCTAssertEqual(LogRedaction.redact("/Volumes/Homes/alice-backup/clip.mov", home: home), "/Volumes/Homes/alice-backup/clip.mov")
+        XCTAssertEqual(LogRedaction.redact("at /Volumes/Homes/alice", home: home), "at ~")
+    }
+
+    func testAPercentEncodedHomeOutsideUsersIsRedacted() {
+        XCTAssertEqual(
+            LogRedaction.redact("file:///Volumes/Staff%20Homes/alice/clip.mov", home: "/Volumes/Staff Homes/alice"),
+            "file://~/clip.mov")
+    }
+
     // MARK: File labels
 
     func testAppNamedLibraryFilesKeepTheirNames() {
         for name in ["Wallpaper.mp4", "Wallpaper.qhd.mov", "Wallpaper.reduced.mov", "Wallpaper.battery.mov"] {
             XCTAssertEqual(LogRedaction.fileLabel(URL(fileURLWithPath: "/x/videos/ID/\(name)")), name)
         }
+    }
+
+    func testACustomNameThatStartsLikeTheAppsIsStillHidden() {
+        let url = URL(fileURLWithPath: "/x/videos/5C99B113-4BED-4EB9-9219-24B3E7E6169C/Wallpaper.PrivateShoot.mov")
+        XCTAssertEqual(LogRedaction.fileLabel(url), "5C99B113-4BED-4EB9-9219-24B3E7E6169C/video.mov")
     }
 
     func testAnyOtherFileIsNamedByItsEntry() {

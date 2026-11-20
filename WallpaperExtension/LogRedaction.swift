@@ -27,9 +27,16 @@ enum LogRedaction {
     static func redact(_ message: String, home: String?) -> String {
         var result = message
         if let home, home.count > 1, !home.hasPrefix("/Users/") {
-            result = result.replacingOccurrences(of: home, with: "~")
-            if let encoded = home.addingPercentEncoding(withAllowedCharacters: .alphanumerics), encoded != home {
-                result = result.replacingOccurrences(of: encoded, with: "~", options: .caseInsensitive)
+            // The home as written, URL-path encoded and fully encoded, each
+            // only as a whole path component (not /x/alice-backup).
+            let forms = [
+                home, home.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+                home.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
+            ]
+            for form in Set(forms.compactMap { $0 }) {
+                let pattern = "(?i)" + NSRegularExpression.escapedPattern(for: form) + #"(?=$|[\#(stop)]|%2F)"#
+                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+                result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "~")
             }
         }
         // Most lines have none of these; they skip the regexes. Each is
@@ -51,17 +58,17 @@ enum LogRedaction {
     /// keeps whatever name the user gave it.
     static func fileLabel(_ url: URL) -> String {
         let name = url.lastPathComponent
+        if appFileNames.contains(name) { return name }
         let ext = url.pathExtension.lowercased()
-        let parts = name.split(separator: ".", omittingEmptySubsequences: false)
-        if parts.count >= 2, parts[0] == "Wallpaper", ["mov", "mp4", "m4v"].contains(ext),
-            parts.dropFirst().allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) } })
-        {
-            return name
-        }
         let generic = ext.isEmpty ? "file" : "video.\(ext)"
         let entry = url.deletingLastPathComponent().lastPathComponent
         return UUID(uuidString: entry) != nil ? "\(entry)/\(generic)" : generic
     }
+
+    /// The names the app gives library files: the imported original
+    /// (MediaImporter) and its tier copies.
+    static let appFileNames = Set(
+        ["Wallpaper.mov", "Wallpaper.mp4", "Wallpaper.m4v"] + ["qhd", "reduced", "minimal", "battery"].map { "Wallpaper.\($0).mov" })
 
     /// An error as the log records it: domain and code. Descriptions and
     /// userInfo carry file paths and names.

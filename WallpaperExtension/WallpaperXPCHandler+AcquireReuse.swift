@@ -14,7 +14,7 @@ extension WallpaperXPCHandler {
             videoURL = acquired.videoURL
         let pixelWidth = acquired.pixelWidth, pixelHeight = acquired.pixelHeight, loadStill = acquired.loadStill
         traceLog(
-            "  [acquire] REUSE ctx=\(existing.contextId) display=\(key.displayID) storedVideoID=\(existing.videoID ?? "nil") newChoice=\(choiceConfiguration ?? "nil") renderer=\(existing.renderer.map { "#\($0.debugID)" } ?? "nil") videoURL=\(findVideoURL(forChoice: choiceConfiguration)?.lastPathComponent ?? "nil") dest=\(destSize) @\(scaleFactor)x isPreview=\(isPreview) (surface isPreview=\(existing.isPreview))"
+            "  [acquire] REUSE ctx=\(existing.contextId) display=\(key.displayID) storedVideoID=\(existing.videoID ?? "nil") newChoice=\(choiceConfiguration ?? "nil") renderer=\(existing.renderer.map { "#\($0.debugID)" } ?? "nil") videoURL=\(findVideoURL(forChoice: choiceConfiguration).map(LogRedaction.fileLabel) ?? "nil") dest=\(destSize) @\(scaleFactor)x isPreview=\(isPreview) (surface isPreview=\(existing.isPreview))"
         )
 
         // A same-key acquire from the OTHER role (a Settings preview of the
