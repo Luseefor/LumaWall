@@ -108,7 +108,7 @@ struct MediaImporterTests {
         let stored = try Data(contentsOf: outcome.asset.mediaURL)
         #expect(stored == (try Data(contentsOf: source)))
         #expect(outcome.asset.contentHash == SHA256.hash(data: stored).map { String(format: "%02x", $0) }.joined())
-        let scratch = dir.appendingPathComponent("Library/Scratch")
+        let scratch = dir.appendingPathComponent("Library/Importing")
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: scratch.path)) ?? []).isEmpty)
     }
 
@@ -131,7 +131,7 @@ struct MediaImporterTests {
         _ = try await importer.importVideo(source)
 
         await #expect(throws: LibraryStore.StoreError.self) { try await importer.importVideo(source) }
-        let scratch = dir.appendingPathComponent("Library/Scratch")
+        let scratch = dir.appendingPathComponent("Library/Importing")
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: scratch.path)) ?? []).isEmpty)
     }
 

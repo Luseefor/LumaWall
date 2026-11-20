@@ -118,7 +118,9 @@ public final class TrustedDirectory {
     /// rename, so a reader of `destination` sees the old item or the new
     /// one, never neither and never a half-built one. When `newName` exists
     /// the two are swapped and the old item, now at `name` here, is deleted
-    /// without following symlinks. Both folders must be on one volume.
+    /// without following symlinks; if that delete fails the publish still
+    /// counts and the leftover stays at `name`. Both folders must be on one
+    /// volume.
     public func publishItem(named name: String, into destination: TrustedDirectory, as newName: String) throws {
         try Self.checkName(name)
         try Self.checkName(newName)
@@ -126,7 +128,10 @@ public final class TrustedDirectory {
             if renameatx_np(fd, name, destination.fd, newName, UInt32(RENAME_EXCL)) == 0 { return }
             guard errno == EEXIST else { throw POSIXError.current }
             if renameatx_np(fd, name, destination.fd, newName, UInt32(RENAME_SWAP)) == 0 {
-                try Self.removeTree(named: name, in: fd)
+                // The swap is the commit: the new item is live. An old tree
+                // that won't fully delete stays at `name` for the caller's
+                // next cleanup rather than failing a finished publish.
+                try? Self.removeTree(named: name, in: fd)
                 return
             }
             // The old item vanished between the two renames; try a plain move again.
