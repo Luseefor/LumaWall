@@ -4,6 +4,10 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 
+# The builds below register LumaWall.app with macOS, which can take over the
+# live wallpaper. Unregister them however this script exits.
+trap '"$project_root/ci/unregister-builds.sh" "$project_root/.derived"' EXIT
+
 "$project_root/ci/test-failure-gates.sh"
 
 output_root="${LUMAWALL_CHECK_OUTPUT_DIR:-$project_root/.derived/checks}"
