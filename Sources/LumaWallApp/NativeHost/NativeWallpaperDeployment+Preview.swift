@@ -90,7 +90,7 @@ extension NativeWallpaperDeployment {
             videosFolderURL
             .appendingPathComponent(entryID, isDirectory: true)
             .appendingPathComponent(variant.filename)
-        if FileManager.default.fileExists(atPath: url.path) { return (plan, url) }
+        if isRegularFile(variant.filename, inEntry: entryID, videosFolderURL: videosFolderURL) { return (plan, url) }
         return (allowsOriginal ? .original : .poster, nil)
     }
 

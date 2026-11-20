@@ -212,7 +212,7 @@ enum NativeWallpaperDeployment {
         playbackChanged(entryID: entryID, surfaces: surfaces)
         let hash = try await hashStore.hash(for: asset.mediaURL)
         if let existing = try entry(id: entryID),
-            FileManager.default.fileExists(atPath: videoURL(for: existing).path),
+            isRegularFile(existing.filename, inEntry: entryID),
             existing.contentHash == hash
         {
             // Libraries missing any planned copy (pre-variant ones, or ones
@@ -240,52 +240,44 @@ enum NativeWallpaperDeployment {
 
         // Stage the (potentially large) video file off the main actor. The old
         // code copied gigabytes on MainActor, stalling the UI + watchdog.
+        let filename =
+            PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
+            ? asset.mediaURL.lastPathComponent
+            : "Wallpaper.mov"
         let staged = try await Task.detached(priority: .utility) {
-            let fm = FileManager.default
-            try fm.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
-            let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
-            // Under the entry lock, so a copy of the previous source that is
-            // being published finishes first and can't land after the reset.
-            // TrustedDirectory, so an entry folder swapped for a symlink
-            // loses the link and not what it points at.
-            try entryLock.withLock {
-                do {
-                    try TrustedDirectory(url: videosFolderURL, below: containerURL).removeItem(named: entryID)
-                } catch POSIXError.ENOENT {}
-            }
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            let filename =
-                PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
-                ? asset.mediaURL.lastPathComponent
-                : "Wallpaper.mov"
-            let dest = dir.appendingPathComponent(filename)
-            try fm.copyItem(at: asset.mediaURL, to: dest)
-            return (dir: dir, dest: dest, filename: filename)
+            try stageDeployment(source: asset.mediaURL, entryID: entryID, filename: filename)
         }.value
-
-        let probe = try await probe(url: staged.dest)
-        let entry = EntryInfo(
-            id: entryID,
-            name: asset.name,
-            filename: staged.filename,
-            duration: probe.duration,
-            fps: probe.fps,
-            resolution: probe.resolution,
-            dateAdded: asset.createdAt,
-            contentHash: hash,
-            audioStripped: false
-        )
-        let data = try JSONEncoder().encode(entry)
-        try data.write(to: staged.dir.appendingPathComponent("metadata.json"), options: .atomic)
-        await generateThumbnail(for: staged.dest, in: staged.dir)
+        let entry: EntryInfo
+        do {
+            let probe = try await probe(url: staged.videoURL)
+            entry = EntryInfo(
+                id: entryID,
+                name: asset.name,
+                filename: staged.filename,
+                duration: probe.duration,
+                fps: probe.fps,
+                resolution: probe.resolution,
+                dateAdded: asset.createdAt,
+                contentHash: staged.hash,
+                audioStripped: false
+            )
+            let data = try JSONEncoder().encode(entry)
+            try data.write(to: staged.directoryURL.appendingPathComponent("metadata.json"), options: .atomic)
+            await generateThumbnail(for: staged.videoURL, in: staged.directoryURL)
+            try await Task.detached(priority: .utility) { try publishDeployment(staged) }.value
+        } catch {
+            discardStaged(staged)
+            throw error
+        }
         notifyLibraryChanged()
+        let deployed = videoURL(for: entry)
         Task.detached {
             await ensureVariants(
                 for: entryID,
-                contentHash: hash,
-                sourceURL: staged.dest,
-                sourceFPS: probe.fps,
-                sourceSize: probe.resolution,
+                contentHash: staged.hash,
+                sourceURL: deployed,
+                sourceFPS: entry.fps,
+                sourceSize: entry.resolution,
                 displayPixels: displayPixels
             )
         }
@@ -303,7 +295,18 @@ enum NativeWallpaperDeployment {
         } catch CocoaError.fileReadNoSuchFile {
             return nil
         }
-        return try JSONDecoder().decode(EntryInfo.self, from: data)
+        return validated(try JSONDecoder().decode(EntryInfo.self, from: data), id: id)
+    }
+
+    /// The extension can write its container, so metadata.json is checked
+    /// like any outside input: the ID must name its own folder and the
+    /// filename be a plain basename. An entry failing that reads as missing,
+    /// so the next deploy replaces it. Copies with unsafe names are dropped.
+    static func validated(_ entry: EntryInfo, id: String) -> EntryInfo? {
+        guard entry.id == id, PathSafety.isSafeComponent(entry.filename) else { return nil }
+        var entry = entry
+        entry.variants = entry.variants?.filter { PathSafety.isSafeComponent($0.filename) }
+        return entry
     }
 
     static func notifyLibraryChanged() {
