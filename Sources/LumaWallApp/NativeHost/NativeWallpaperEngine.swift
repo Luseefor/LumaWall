@@ -285,7 +285,6 @@ final class NativeWallpaperEngine {
                 active.removeValue(forKey: display.displayID)
             }
         }
-        map = batch.map
         guard !map.isEmpty else { return failed }
         let fingerprint = Dictionary(
             uniqueKeysWithValues: map.compactMap { cg, entry in
