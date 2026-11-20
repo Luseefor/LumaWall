@@ -17,7 +17,6 @@ final class LumaWallExtension: NSObject, AppExtension {
             VideoLibrary.shared.scan()
             observeLibraryChanges()
             observeCacheControls()
-            observePlaybackControls()
             // Push current view models shortly after launch: the extension is only
             // ever spawned by a host connection, and the host's disk cache may
             // predate library changes made while no extension process was alive to
@@ -278,19 +277,6 @@ final class LumaWallExtension: NSObject, AppExtension {
             { _, _, _, _, _ in clearWallpaperSnapshotCache() },
             "app.lumawall.personal.clearCaches" as CFString,
             nil, .deliverImmediately,
-        )
-    }
-
-    private func observePlaybackControls() {
-        let center = CFNotificationCenterGetDarwinNotifyCenter()
-        let observer = Unmanaged.passUnretained(self).toOpaque()
-        CFNotificationCenterAddObserver(
-            center, observer, { _, _, _, _, _ in _ = ShuffleController.shared.skip() },
-            "app.lumawall.personal.nextPlaylistItem" as CFString, nil, .deliverImmediately,
-        )
-        CFNotificationCenterAddObserver(
-            center, observer, { _, _, _, _, _ in _ = ShuffleController.shared.previous() },
-            "app.lumawall.personal.previousPlaylistItem" as CFString, nil, .deliverImmediately,
         )
     }
 

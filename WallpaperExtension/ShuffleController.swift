@@ -14,7 +14,6 @@ final class ShuffleController: @unchecked Sendable {
     private struct ChoiceState: Sendable {
         var active = false
         var pick: String?
-        var previousPick: String?
         var frequency: ShuffleFrequencyID = .onWakeup
         var lastAdvance: Date?
         var pendingAdvance = false
@@ -165,15 +164,6 @@ final class ShuffleController: @unchecked Sendable {
         return true
     }
 
-    func previous() -> Bool {
-        let choices = lock.withLock {
-            $0.choices.compactMap { id, item in item.active && item.previousPick != nil ? id : nil }
-        }
-        guard !choices.isEmpty else { return false }
-        for choice in choices { queue.async { [self] in restorePrevious(choiceID: choice) } }
-        return true
-    }
-
     private func currentOrNewPick(for choiceID: String) -> String? {
         let available = ExtensionPlaylistLibrary.videoIDs(forChoiceID: choiceID)
         guard !available.isEmpty else { return nil }
@@ -263,11 +253,6 @@ final class ShuffleController: @unchecked Sendable {
         }
 
         guard let url = VideoLibrary.shared.videoURL(for: next) else { return }
-        lock.withLock { state in
-            var item = state.choices[choiceID] ?? ChoiceState()
-            item.previousPick = item.pick
-            state.choices[choiceID] = item
-        }
         setPick(next, for: choiceID)
 
         let renderers = WallpaperState.shared.renderers(forVideoID: choiceID)
@@ -278,27 +263,5 @@ final class ShuffleController: @unchecked Sendable {
         WallpaperState.shared.currentVideoID = next
         WallpaperPrefs.shared.updateCurrentVideo()
         extensionLog("[Shuffle] advanced choice=\(choiceID) to \(next) on \(renderers.count) renderer(s) (\(reason))")
-    }
-
-    private func restorePrevious(choiceID: String) {
-        let pair = lock.withLock { state -> (String, String?)? in
-            guard var item = state.choices[choiceID], let previous = item.previousPick else { return nil }
-            let current = item.pick
-            item.pick = previous
-            item.previousPick = current
-            item.lastAdvance = Date()
-            state.choices[choiceID] = item
-            return (previous, current)
-        }
-        guard let pair, let url = VideoLibrary.shared.videoURL(for: pair.0) else { return }
-        persistState()
-        let renderers = WallpaperState.shared.renderers(forVideoID: choiceID)
-        for renderer in renderers {
-            renderer.switchVideo(to: url, variantSelector: makeVariantSelector(choice: pair.0, fallback: url))
-        }
-        LumaWallExtension.recomputeAndApplyPolicy()
-        WallpaperState.shared.currentVideoID = pair.0
-        WallpaperPrefs.shared.updateCurrentVideo()
-        extensionLog("[Shuffle] restored previous choice=\(choiceID) to \(pair.0)")
     }
 }
