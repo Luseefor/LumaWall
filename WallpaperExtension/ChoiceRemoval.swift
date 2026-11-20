@@ -8,8 +8,10 @@
 // optional `choiceRequest`, sent back to the provider when the item is
 // removed. None of those cases names a choice or a provider, and
 // SettingsProvider sets no `choiceRequest` on its items, so a removal from
-// Settings carries nothing that identifies one of our videos. It is refused
-// with an error; videos are removed in the app.
+// Settings carries nothing that identifies one of our videos. Video items
+// are marked not removable (VideoSettingsItem), so Settings doesn't offer
+// Remove; a request that arrives anyway is refused with an error. Videos
+// are removed in the app.
 //
 // A choice ID (WallpaperChoiceIDXPC) wraps a WallpaperChoice.ID whose
 // `descriptor` (WallpaperChoiceDescriptor) holds `provider`

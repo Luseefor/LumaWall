@@ -184,6 +184,8 @@ targets:
       - path: WallpaperExtension/NotificationGuards.swift
       - path: WallpaperExtension/RuntimeLayout.swift
       - path: WallpaperExtension/CompanionLaunch.swift
+      - path: WallpaperExtension/CodableShims.swift
+      - path: WallpaperExtension/VideoSettingsItem.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:
