@@ -176,6 +176,7 @@ enum NativeWallpaperDeployment {
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
         }
+        guard !removedEntries.contains(entryID) else { throw DeploymentError.removed }
         if !copyEncodingPrepared {
             copyEncodingPrepared = true
             Task.detached(priority: .utility) { await prepareCopyEncoding() }
@@ -186,14 +187,29 @@ enum NativeWallpaperDeployment {
         // over it. Keyed by entry so different wallpapers still deploy in
         // parallel; awaiting a Task value never blocks the actor.
         if let running = deploymentTasks[entryID] {
-            return try await running.value
+            return try await checkedNotRemoved(running.value, entryID: entryID)
         }
         let task = Task<EntryInfo, Error> {
             try await deploy(asset: asset, entryID: entryID, surfaces: surfaces)
         }
         deploymentTasks[entryID] = task
         defer { deploymentTasks.removeValue(forKey: entryID) }
-        return try await task.value
+        return try await checkedNotRemoved(task.value, entryID: entryID)
+    }
+
+    /// Wallpapers removed this session. Removal marks the ID before its
+    /// first suspension, so a restore or apply that read the library earlier
+    /// can't deploy it again, and one already deploying can't go on to
+    /// assign it. Entry IDs are UUIDs and never come back.
+    @MainActor
+    static var removedEntries: Set<String> = []
+
+    /// `entry`, unless its wallpaper was removed while it deployed. Callers
+    /// assign the entry right after this returns, without suspending.
+    @MainActor
+    private static func checkedNotRemoved(_ entry: EntryInfo, entryID: String) throws -> EntryInfo {
+        guard !removedEntries.contains(entryID) else { throw DeploymentError.removed }
+        return entry
     }
 
     /// Set once the first deploy of this run has queued the cleanup of
@@ -367,10 +383,11 @@ enum NativeWallpaperDeployment {
     }
 
     enum DeploymentError: LocalizedError {
-        case invalidEntry, noVideoTrack, invalidDuration
+        case invalidEntry, noVideoTrack, invalidDuration, removed
         var errorDescription: String? {
             switch self {
             case .invalidEntry: "Could not prepare that wallpaper for the system host."
+            case .removed: "That wallpaper was removed from the library."
             case .noVideoTrack: "That file has no video track."
             case .invalidDuration: "That video duration is invalid."
             }
