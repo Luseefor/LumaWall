@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import LumaWallCore
 
@@ -51,10 +52,18 @@ extension NativeWallpaperDeployment {
         return try TrustedDirectory(url: url)
     }
 
+    /// Whether another process of this app is running, such as the
+    /// installed LumaWall next to a dev build.
+    static func anotherLumaWallIsRunning() -> Bool {
+        guard let id = Bundle.main.bundleIdentifier else { return false }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: id)
+            .contains { $0.processIdentifier != getpid() }
+    }
+
     /// Deletes what versions before this one left in copy-staging in the
     /// extension's Documents folder, without following a symlink on the way.
-    /// An older LumaWall may still be running and writing there, so only
-    /// items untouched for an hour go. Their copies are encoded again if
+    /// Callers skip it while another LumaWall runs; in case an older one
+    /// starts meanwhile, only items untouched for an hour go. Their copies are encoded again if
     /// still wanted.
     static func removeLegacyCopyStaging(
         documentsURL: URL = WallpaperHostCapabilities.extensionDocumentsURL, trustedAncestor: URL = containerURL,
@@ -210,7 +219,8 @@ extension NativeWallpaperDeployment {
         },
         prepare: {
             transcodeSources.removeLeftovers()
-            removeLegacyCopyStaging()
+            // An older LumaWall still running may be using it.
+            if !anotherLumaWallIsRunning() { removeLegacyCopyStaging() }
             cleanUpAbandonedExports(
                 videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL, trustedAncestor: containerURL)
         },
