@@ -175,4 +175,103 @@ expect_exit 42 zsh "$fixture_dir/Packaging/release.sh"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
 [[ ! -e "$fixture_dir/packaged" ]] || fail "line $LINENO"
 
+# Unknown release flags must be rejected before running checks or modifying dist/.
+expect_exit 2 zsh "$fixture_dir/Packaging/release.sh" --bogus
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
+
+# Staging, pinned xcodegen, app notarization before DMG, and SHA256SUMS checks.
+printf '#!/bin/bash\nexit 0\n' > "$fixture_dir/ci/check.sh"
+cat > "$fixture_dir/bin/xcodebuild" <<'SH'
+#!/bin/bash
+printf '%s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/xcodebuild.log"
+case " $* " in
+  *" test "*) exit 44 ;;
+  *" archive "*)
+    archive_path=""
+    prev=""
+    for arg in "$@"; do
+      if [[ "$prev" == "-archivePath" ]]; then
+        archive_path="$arg"
+        break
+      fi
+      prev="$arg"
+    done
+    mkdir -p "$archive_path/Products/Applications/LumaWall.app/Contents/MacOS"
+    cat > "$archive_path/Products/Applications/LumaWall.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>0.4.1</string></dict></plist>
+PLIST
+    exit 0
+    ;;
+  *) touch "$LUMAWALL_GATE_MARKERS/packaged"; exit 99 ;;
+esac
+SH
+cat > "$fixture_dir/bin/codesign" <<'SH'
+#!/bin/bash
+case "$1" in
+  -dvv)
+    printf 'flags=0x10000(runtime)\nTimestamp=2026-11-19\n' >&2
+    ;;
+  -d)
+    printf ''
+    ;;
+esac
+SH
+cat > "$fixture_dir/bin/ditto" <<'SH'
+#!/bin/bash
+if [[ "$1" == "-c" ]]; then
+  printf 'zipped %s\n' "$4" >> "$LUMAWALL_GATE_MARKERS/release-steps.log"
+  printf 'fake-zip\n' > "${@: -1}"
+else
+  mkdir -p "$2"
+  cp -R "$1"/* "$2"/ 2>/dev/null || true
+fi
+SH
+cat > "$fixture_dir/bin/hdiutil" <<'SH'
+#!/bin/bash
+printf 'hdiutil %s\n' "${@: -1}" >> "$LUMAWALL_GATE_MARKERS/release-steps.log"
+printf 'new staged dmg\n' > "${@: -1}"
+SH
+cat > "$fixture_dir/bin/xcrun" <<'SH'
+#!/bin/bash
+printf 'xcrun %s %s %s\n' "$1" "$2" "$3" >> "$LUMAWALL_GATE_MARKERS/release-steps.log"
+SH
+cat > "$fixture_dir/bin/spctl" <<'SH'
+#!/bin/bash
+printf 'spctl %s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/release-steps.log"
+exit "${LUMAWALL_FAKE_SPCTL_EXIT:-0}"
+SH
+cat > "$fixture_dir/bin/gh" <<'SH'
+#!/bin/bash
+printf 'gh %s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/release-steps.log"
+SH
+chmod +x "$fixture_dir/bin/"*
+
+# Failure during Gatekeeper verification must preserve existing dist/ outputs.
+rm -f "$fixture_dir/pinned" "$fixture_dir/release-steps.log"
+LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_SPCTL_EXIT=1 expect_exit 1 zsh "$fixture_dir/Packaging/release.sh"
+[[ -e "$fixture_dir/pinned" ]] || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
+[[ ! -e "$fixture_dir/dist/SHA256SUMS" ]] || fail "line $LINENO"
+
+# Successful staging notarizes and staples the app before building the DMG, then writes SHA256SUMS.
+rm -f "$fixture_dir/release-steps.log"
+LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_SPCTL_EXIT=0 expect_exit 0 zsh "$fixture_dir/Packaging/release.sh"
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'new staged dmg' ]] || fail "line $LINENO"
+(cd "$fixture_dir/dist" && shasum -a 256 -c SHA256SUMS > /dev/null) || fail "line $LINENO"
+grep -n 'xcrun notarytool submit .*LumaWall\.app\.zip' "$fixture_dir/release-steps.log" > /dev/null || fail "line $LINENO"
+grep -n 'xcrun stapler staple .*LumaWall\.app' "$fixture_dir/release-steps.log" > /dev/null || fail "line $LINENO"
+grep -n 'xcrun notarytool submit .*LumaWall\.dmg' "$fixture_dir/release-steps.log" > /dev/null || fail "line $LINENO"
+app_zip_line="$(grep -n 'xcrun notarytool submit .*LumaWall\.app\.zip' "$fixture_dir/release-steps.log" | cut -d: -f1)"
+dmg_create_line="$(grep -n 'hdiutil .*LumaWall\.dmg' "$fixture_dir/release-steps.log" | cut -d: -f1)"
+[[ "$app_zip_line" -lt "$dmg_create_line" ]] || fail "line $LINENO"
+! grep -Fq 'gh release create' "$fixture_dir/release-steps.log" || fail "line $LINENO"
+
+# --publish creates a draft GitHub Release with the DMG and SHA256SUMS.
+rm -f "$fixture_dir/release-steps.log"
+real_fixture_dir="$(cd "$fixture_dir" && pwd -P)"
+LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_SPCTL_EXIT=0 expect_exit 0 zsh "$fixture_dir/Packaging/release.sh" --publish
+grep -Fq "gh release create v0.4.1 --draft --title LumaWall 0.4.1 --generate-notes $real_fixture_dir/dist/LumaWall.dmg $real_fixture_dir/dist/SHA256SUMS" "$fixture_dir/release-steps.log" || fail "line $LINENO"
+
 printf 'Core, playback, release, cleanup, and ci/test.sh gates passed.\n'
