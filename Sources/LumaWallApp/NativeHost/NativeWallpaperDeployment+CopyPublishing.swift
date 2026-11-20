@@ -112,6 +112,8 @@ extension NativeWallpaperDeployment {
     }
 
     private static func readiness(of job: VariantEncodeQueue.Job) -> VariantEncodeQueue.Readiness {
+        // Copies live in the extension's container, which only native mode uses.
+        guard NativeModeSetting.isEnabledNow else { return .drop }
         // A wallpaper removed or redeployed while its jobs waited has
         // nothing to encode for them.
         guard let entry = try? entry(id: job.entryID), entry.contentHash == job.contentHash,
@@ -141,6 +143,7 @@ extension NativeWallpaperDeployment {
                 case .skipped: return .notNow
                 }
             }
+            guard NativeModeSetting.isEnabledNow else { return .notNow }
             guard let resolution = await videoSize(of: staged) else {
                 try? fm.removeItem(at: staged)
                 return .failed

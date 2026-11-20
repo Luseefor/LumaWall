@@ -173,6 +173,7 @@ enum NativeWallpaperDeployment {
     /// and which battery copy to encode first.
     @MainActor
     static func ensureDeployed(asset: WallpaperAsset, surfaces: [Surface]) async throws -> EntryInfo {
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
@@ -211,6 +212,8 @@ enum NativeWallpaperDeployment {
         let displayPixels = surfaces.map(\.pixelSize)
         playbackChanged(entryID: entryID, surfaces: surfaces)
         let hash = try await hashStore.hash(for: asset.mediaURL)
+        // Hashing a large file takes a while; native mode may be off by now.
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         if let existing = try entry(id: entryID),
             FileManager.default.fileExists(atPath: videoURL(for: existing).path),
             existing.contentHash == hash

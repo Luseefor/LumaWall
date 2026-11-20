@@ -30,6 +30,10 @@ final class WallpaperEngine {
     /// and on or the app relaunches.
     private(set) var nativeFallbackDisplayIDs: Set<DisplayID> = []
     @ObservationIgnored var onNativeFallback: ((NativeFallback) -> Void)?
+    /// Bumped on every host change. Work that started under an older host
+    /// checks it after each suspension and stops instead of undoing the
+    /// change.
+    @ObservationIgnored private var hostGeneration = 0
 
     init(displays: DisplayCoordinator, assignments: AssignmentStore, nativeSetting: NativeModeSetting = .standard) {
         nativeSetting.migrateIfNeeded()
@@ -52,6 +56,7 @@ final class WallpaperEngine {
     /// Turns native mode on (after the user confirmed the warning) or off,
     /// and moves playback to the new host.
     func setNativeMode(enabled: Bool, library: [WallpaperAsset]) async {
+        hostGeneration += 1
         if enabled { nativeSetting.enable() } else { nativeSetting.disable() }
         nativeModeEnabled = enabled
         needsNativeModeDisclosure = false
@@ -118,6 +123,7 @@ final class WallpaperEngine {
 
     func apply(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition = .init()) async throws {
         libraryByID[asset.id] = asset
+        let generation = hostGeneration
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil,
             !nativeFallbackDisplayIDs.contains(displayID)
         {
@@ -126,7 +132,7 @@ final class WallpaperEngine {
                 overlay.dismantleSession(displayID)
                 return
             } catch {
-                try await handleNativeFailure(error, on: [displayID])
+                try await handleNativeFailure(error, on: [displayID], since: generation)
             }
         }
         try await overlay.apply(asset, to: displayID, composition: composition)
@@ -134,17 +140,22 @@ final class WallpaperEngine {
 
     func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
         libraryByID[asset.id] = asset
+        let generation = hostGeneration
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
             let connected = Set(displays.refresh().map(\.displayID))
             let fellBack = connected.intersection(nativeFallbackDisplayIDs)
             if fellBack != connected {
                 do {
-                    try await native.applyToAll(asset, composition: composition, excluding: fellBack)
-                    for id in connected.subtracting(fellBack) { overlay.dismantleSession(id) }
-                    for id in fellBack { try await overlay.apply(asset, to: id, composition: composition) }
+                    let missing = try await native.applyToAll(asset, composition: composition, excluding: fellBack)
+                    if !missing.isEmpty, generation == hostGeneration {
+                        fallBack(missing, after: NativeWallpaperAssignmentService.AssignmentError.unknownDisplay)
+                    }
+                    let overlayIDs = fellBack.union(missing)
+                    for id in connected.subtracting(overlayIDs) { overlay.dismantleSession(id) }
+                    for id in overlayIDs { try await overlay.apply(asset, to: id, composition: composition) }
                     return
                 } catch {
-                    try await handleNativeFailure(error, on: connected)
+                    try await handleNativeFailure(error, on: connected, since: generation)
                 }
             }
         }
@@ -182,7 +193,10 @@ final class WallpaperEngine {
     func restoreOverlay(using library: [WallpaperAsset]) async {
         libraryByID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         if mode == .native {
-            if await needsOverlaySplit() {
+            let generation = hostGeneration
+            let split = await needsOverlaySplit()
+            guard generation == hostGeneration else { return }
+            if split {
                 await overlay.restore(using: library, nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
             } else {
                 overlay.dismantleSessions()
@@ -203,23 +217,30 @@ final class WallpaperEngine {
     func restoreNative(using library: [WallpaperAsset]) async {
         guard mode == .native, let native else { return }
         libraryByID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
+        let generation = hostGeneration
         do {
             let split = await needsOverlaySplit()
+            guard generation == hostGeneration else { return }
             let failed = try await native.restore(
                 using: library, onlyDefaultCrop: split, skipping: nativeFallbackDisplayIDs)
-            guard !failed.isEmpty else { return }
+            guard generation == hostGeneration, !failed.isEmpty else { return }
             fallBack(failed, after: nil)
             await overlay.restore(using: library, nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
         } catch {
+            guard generation == hostGeneration else { return }
             await fallBackToOverlay()
         }
     }
 
     /// A missing display isn't native mode's fault and permission errors
     /// switch every display over; anything else moves `displayIDs` to the
-    /// overlay so the caller can retry there.
-    private func handleNativeFailure(_ error: any Error, on displayIDs: Set<DisplayID>) async throws {
+    /// overlay so the caller can retry there. A failure from a host that has
+    /// since been replaced (native mode turned off meanwhile) changes nothing.
+    private func handleNativeFailure(
+        _ error: any Error, on displayIDs: Set<DisplayID>, since generation: Int
+    ) async throws {
         if case OverlayWallpaperEngine.EngineError.missingDisplay = error { throw error }
+        guard generation == hostGeneration else { return }
         if WallpaperHostCapabilities.isPermissionError(error) {
             await fallBackToOverlay()
         } else {
@@ -237,6 +258,7 @@ final class WallpaperEngine {
     }
 
     private func fallBackToOverlay() async {
+        hostGeneration += 1
         mode = .overlay
         native?.detach()
         nativeHostLog.notice("Native wallpaper storage access denied; using overlay playback")
