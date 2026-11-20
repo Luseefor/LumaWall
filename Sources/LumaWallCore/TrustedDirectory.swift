@@ -127,6 +127,14 @@ public final class TrustedDirectory {
         return Self.kind(of: info.st_mode)
     }
 
+    /// Renames `name` to `newName` in this folder. Fails rather than
+    /// replace anything already at `newName`.
+    public func renameItem(named name: String, to newName: String) throws {
+        try Self.checkName(name)
+        try Self.checkName(newName)
+        guard renameatx_np(fd, name, fd, newName, UInt32(RENAME_EXCL)) == 0 else { throw POSIXError.current }
+    }
+
     /// Moves `name` from this folder into `destination` as `newName` in one
     /// rename, so a reader of `destination` sees the old item or the new
     /// one, never neither and never a half-built one. When `newName` exists
