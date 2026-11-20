@@ -150,9 +150,13 @@ extension NativeWallpaperDeployment {
             else { return .failed }
             // A finished export whose publication failed is reused, not redone.
             if !reusableExport(named: staged.lastPathComponent, in: staging) {
-                let result = await transcode(sourceURL: job.sourceURL, to: staged, spec: job.spec) {
-                    if case .ready = readiness(of: job) { return true }
-                    return false
+                // Encoded from a private copy: AVFoundation reads by path,
+                // and the deployed file may be a symlink to a user's file.
+                let result = await exportCopy(job, sources: transcodeSources) { source in
+                    await transcode(sourceURL: source, to: staged, spec: job.spec) {
+                        if case .ready = readiness(of: job) { return true }
+                        return false
+                    }
                 }
                 switch result {
                 case .finished: break
@@ -179,9 +183,11 @@ extension NativeWallpaperDeployment {
             }
         },
         prepare: {
+            transcodeSources.removeAll()
             cleanUpAbandonedExports(
                 videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL, trustedAncestor: containerURL)
-        }
+        },
+        finishedSource: { transcodeSources.release($0) }
     )
 
     /// True when a regular file sits at `name` in `staging`, ready to
