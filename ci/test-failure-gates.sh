@@ -145,6 +145,10 @@ mkdir -p "$fixture_dir/.tools/xcodegen/bin"
 cat > "$fixture_dir/.tools/xcodegen/bin/xcodegen" <<'SH'
 #!/bin/bash
 touch "$LUMAWALL_GATE_MARKERS/pinned"
+# A generator that writes a project different from the committed one.
+if [[ -n "${LUMAWALL_FAKE_XCODEGEN_DRIFT:-}" ]]; then
+  printf '/* drift */\n' >> "$LUMAWALL_GATE_MARKERS/LumaWall.xcodeproj/project.pbxproj"
+fi
 SH
 chmod +x "$fixture_dir/.tools/xcodegen/bin/xcodegen"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 expect_exit 0 bash "$fixture_dir/ci/xcodegen.sh" generate
@@ -305,6 +309,15 @@ real_fixture_dir="$(cd "$fixture_dir" && pwd -P)"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_CODESIGN_ENTITLEMENTS_EXIT=1 expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
 [[ "$(cat "$fixture_dir/dist/SHA256SUMS")" == 'previous-checksum  LumaWall.dmg' ]] || fail "line $LINENO"
+
+# A regenerated project that differs from the committed one must refuse
+# release before archiving.
+rm -f "$fixture_dir/xcodebuild.log"
+LUMAWALL_FAKE_XCODEGEN_DRIFT=1 expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
+grep -Fq 'LumaWall.xcodeproj' "$fixture_dir/command.log" || fail "line $LINENO"
+! grep -Fq ' archive' "$fixture_dir/xcodebuild.log" 2>/dev/null || fail "line $LINENO"
+git -C "$fixture_dir" checkout -q -- LumaWall.xcodeproj
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
 
 # An XPC service signed without Hardened Runtime must refuse release.
 LUMAWALL_FAKE_XPC_WITHOUT_RUNTIME=1 expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"

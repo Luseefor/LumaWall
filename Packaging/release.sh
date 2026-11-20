@@ -117,6 +117,14 @@ trap on_int INT
 trap on_term TERM
 
 "${project_root}/ci/xcodegen.sh" generate
+# The archive must build the committed project, the one the tag names.
+if ! project_status="$(git -C "${project_root}" status --porcelain -- LumaWall.xcodeproj 2>&1)" \
+    || [[ -n "${project_status}" ]] \
+    || ! git -C "${project_root}" diff --quiet --exit-code -- LumaWall.xcodeproj; then
+    print -u2 "Refusing release: regenerating LumaWall.xcodeproj changed it; commit the regenerated project first."
+    print -u2 "${project_status}"
+    exit 3
+fi
 xcodebuild \
     -project LumaWall.xcodeproj \
     -scheme LumaWall \
