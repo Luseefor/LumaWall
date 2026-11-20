@@ -727,13 +727,29 @@ final class VariantPublicationTests: XCTestCase {
         return url
     }
 
+    /// `NativeWallpaperDeployment.publish` with native mode on unless a
+    /// test says otherwise; the test host leaves it off.
+    private func publish(
+        _ staged: URL, job: NativeWallpaperDeployment.VariantEncodeQueue.Job, resolution: CGSize, videosFolderURL: URL,
+        writeMetadata: ((NativeWallpaperDeployment.EntryInfo, TrustedDirectory) throws -> Void)? = nil,
+        isNativeModeOn: () -> Bool = { true }
+    ) -> NativeWallpaperDeployment.PublishResult {
+        if let writeMetadata {
+            return NativeWallpaperDeployment.publish(
+                staged, job: job, resolution: resolution, videosFolderURL: videosFolderURL, writeMetadata: writeMetadata,
+                isNativeModeOn: isNativeModeOn)
+        }
+        return NativeWallpaperDeployment.publish(
+            staged, job: job, resolution: resolution, videosFolderURL: videosFolderURL, isNativeModeOn: isNativeModeOn)
+    }
+
     private var dest: URL { videos.appendingPathComponent(id).appendingPathComponent(minimal.filename) }
     private let size = CGSize(width: 1280, height: 720)
 
     func testPublishesACopyForTheCurrentDeployment() throws {
         try deploy(hash: "aaa")
         let staged = try stage(job(hash: "aaa"))
-        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        let result = publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(result, .published)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dest.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
@@ -746,10 +762,23 @@ final class VariantPublicationTests: XCTestCase {
         // the old source could be published into the redeployed entry.
         try deploy(hash: "new")
         let staged = try stage(job(hash: "old"))
-        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "old"), resolution: size, videosFolderURL: videos)
+        let result = publish(staged, job: job(hash: "old"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(result, .stale)
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+        XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)?.variants)
+    }
+
+    func testNoCopyIsPublishedOnceNativeModeIsOff() throws {
+        // A copy waiting on the entry lock published into the extension's
+        // container after native mode was turned off.
+        try deploy(hash: "aaa")
+        let staged = try stage(job(hash: "aaa"))
+        let result = publish(
+            staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos, isNativeModeOn: { false })
+        XCTAssertEqual(result, .nativeModeOff)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)?.variants)
     }
 
@@ -758,13 +787,13 @@ final class VariantPublicationTests: XCTestCase {
         // saw the copy and the next request encoded it again.
         try deploy(hash: "aaa")
         let staged = try stage(job(hash: "aaa"))
-        let failed = NativeWallpaperDeployment.publish(
+        let failed = publish(
             staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos,
             writeMetadata: { _, _ in throw CocoaError(.fileWriteOutOfSpace) })
         XCTAssertEqual(failed, .failed)
         XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
-        let retried = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        let retried = publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(retried, .published)
     }
 
@@ -785,7 +814,7 @@ final class VariantPublicationTests: XCTestCase {
     func testAStaleCopyIsNotDeletedThroughASymlinkedStagingFolder() throws {
         try deploy(hash: "new")
         let (staged, victimFile) = try symlinkedStaging(for: job(hash: "old"))
-        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "old"), resolution: size, videosFolderURL: videos)
+        let result = publish(staged, job: job(hash: "old"), resolution: size, videosFolderURL: videos)
         XCTAssertNotEqual(result, .published)
         XCTAssertEqual(try Data(contentsOf: victimFile), Data("keep".utf8))
     }
@@ -793,7 +822,7 @@ final class VariantPublicationTests: XCTestCase {
     func testACopyIsNotTakenFromASymlinkedStagingFolder() throws {
         try deploy(hash: "aaa")
         let (staged, victimFile) = try symlinkedStaging(for: job(hash: "aaa"))
-        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        let result = publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(result, .failed)
         XCTAssertEqual(try Data(contentsOf: victimFile), Data("keep".utf8))
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
@@ -818,7 +847,7 @@ final class VariantPublicationTests: XCTestCase {
         let moved = root.appendingPathComponent("videos-real")
         try fm.moveItem(at: videos, to: moved)
         try fm.createSymbolicLink(at: videos, withDestinationURL: moved)
-        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        let result = publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(result, .failed)
         XCTAssertTrue(fm.fileExists(atPath: staged.path))
     }
@@ -829,7 +858,7 @@ final class VariantPublicationTests: XCTestCase {
         try deploy(hash: "aaa")
         let staged = try stage(job(hash: "aaa"))
         try fm.moveItem(at: videos, to: root.appendingPathComponent("videos-aside"))
-        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        let result = publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(result, .failed)
         XCTAssertTrue(fm.fileExists(atPath: staged.path))
     }
@@ -837,7 +866,7 @@ final class VariantPublicationTests: XCTestCase {
     func testAnExportOfARemovedEntryIsDiscarded() throws {
         let staged = try stage(job(hash: "aaa"))
         try FileManager.default.removeItem(at: videos.appendingPathComponent(id))
-        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        let result = publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(result, .stale)
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
     }
@@ -868,7 +897,7 @@ final class VariantPublicationTests: XCTestCase {
         try Data("keep".utf8).write(to: outside)
         try fm.createSymbolicLink(at: dest, withDestinationURL: outside)
         let staged = try stage(job(hash: "aaa"))
-        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        let result = publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(result, .published)
         XCTAssertEqual(try Data(contentsOf: outside), Data("keep".utf8))
         XCTAssertEqual(try Data(contentsOf: dest), Data("copy".utf8))

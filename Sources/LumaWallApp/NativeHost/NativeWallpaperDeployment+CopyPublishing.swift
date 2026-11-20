@@ -178,14 +178,13 @@ extension NativeWallpaperDeployment {
                 }
                 return .failed
             }
-            // Publishing writes into the extension's container.
-            guard NativeModeSetting.isEnabledNow else { return .notNow }
             switch publish(staged, job: job, resolution: resolution) {
             case .published:
                 notifyLibraryChanged()
                 return .done
             case .stale: return .done
             case .failed: return .failed
+            case .nativeModeOff: return .notNow
             }
         },
         prepare: {
@@ -219,7 +218,12 @@ extension NativeWallpaperDeployment {
     /// copy of the old source can't land in the redeployed entry.
     static let entryLock = NSLock()
 
-    enum PublishResult: Equatable { case published, stale, failed }
+    enum PublishResult: Equatable {
+        case published, stale, failed
+        /// Native mode was off once the entry lock was held; the export
+        /// stays staged.
+        case nativeModeOff
+    }
 
     /// Moves a finished export into its entry and lists it in metadata.json,
     /// re-reading the file so copies other jobs recorded are kept. Discards
@@ -231,6 +235,10 @@ extension NativeWallpaperDeployment {
     /// and every read, move and delete goes through their descriptors, so
     /// a folder swapped for a symlink fails the publish instead of steering
     /// it elsewhere.
+    ///
+    /// Native mode is checked after the entry lock is taken: a publish can
+    /// wait there while native mode is turned off, and nothing may be
+    /// written into the extension's container after that.
     static func publish(
         _ staged: URL,
         job: VariantEncodeQueue.Job,
@@ -238,9 +246,11 @@ extension NativeWallpaperDeployment {
         videosFolderURL: URL = videosFolderURL,
         writeMetadata: (EntryInfo, TrustedDirectory) throws -> Void = { entry, folder in
             try folder.writeFile(named: "metadata.json", contents: JSONEncoder().encode(entry))
-        }
+        },
+        isNativeModeOn: () -> Bool = { NativeModeSetting.isEnabledNow }
     ) -> PublishResult {
         entryLock.withLock {
+            guard isNativeModeOn() else { return .nativeModeOff }
             let stagedName = staged.lastPathComponent
             guard let staging = try? trustedFolder(staged.deletingLastPathComponent()) else { return .failed }
             // Stale only when the entry is known gone or holds another
