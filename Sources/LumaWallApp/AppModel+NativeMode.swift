@@ -30,6 +30,12 @@ extension AppModel {
             refreshActive()
             applyPlaybackPolicy()
             isApplying = false
+            // A Lock Screen pick saved while native mode was off goes on now.
+            if engine.mode == .native, let lockID = automations.lockScreenWallpaperID,
+                let asset = assets.first(where: { $0.id == lockID })
+            {
+                await applyLockScreenWallpaper(asset)
+            }
         }
     }
 
