@@ -515,7 +515,7 @@ struct LibraryPage: View {
                     title: "Lock Screen",
                     detail: model.wallpaperHostMode == .native
                         ? "Choose wallpaper"
-                        : "Needs macOS 26 native host",
+                        : "Needs native wallpaper mode",
                     footnote: "Idle / lock surface",
                     asset: model.asset(for: model.automations.lockScreenWallpaperID),
                     height: Self.cardHeight

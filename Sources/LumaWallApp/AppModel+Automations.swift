@@ -124,7 +124,11 @@ extension AppModel {
     func applyLockScreenWallpaper(_ asset: WallpaperAsset, announceUnavailable: Bool = false) async {
         guard engine.mode == .native else {
             if announceUnavailable {
-                present("Lock Screen", "Lock-screen assignment needs the macOS 26 wallpaper extension build.")
+                present(
+                    "Lock Screen",
+                    nativeModeEnabled
+                        ? "Lock Screen wallpapers need macOS 26 and the LumaWall wallpaper extension."
+                        : "Lock Screen wallpapers need native wallpaper mode. Turn it on in Settings.")
             }
             return
         }

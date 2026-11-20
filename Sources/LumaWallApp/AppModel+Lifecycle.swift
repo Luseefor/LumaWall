@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 
 extension AppModel {
     func bootstrap() async {
+        observeNativeFallback()
         await reload()
         playlists = await playlistStore.all()
         await restorePlaylistPlaybackState()

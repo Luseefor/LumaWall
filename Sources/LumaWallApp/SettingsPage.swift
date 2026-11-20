@@ -17,15 +17,7 @@ struct SettingsPage: View {
                 }
 
                 settingsGroup(title: L10n.wallpaperHost, symbol: "rectangle.on.rectangle.angled") {
-                    settingsRow(
-                        title: model.wallpaperHostMode == .native ? "System wallpaper (macOS 26)" : "Desktop overlay",
-                        detail: model.wallpaperHostMode == .native
-                            ? "Uses WallpaperExtensionKit through the LumaWall wallpaper extension."
-                            : "Uses the poster plus live overlay. Native host needs macOS 26 and an app build that embeds the wallpaper extension.",
-                        symbol: model.wallpaperHostMode == .native ? "checkmark.seal.fill" : "square.stack.3d.up"
-                    ) {
-                        EmptyView()
-                    }
+                    NativeModeSettings(model: model)
                 }
 
                 settingsGroup(title: L10n.playbackEnergy, symbol: "leaf.fill") {
