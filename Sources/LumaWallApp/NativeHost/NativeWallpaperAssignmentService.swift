@@ -29,7 +29,13 @@ enum NativeWallpaperAssignmentService {
             .appendingPathComponent("Library/Application Support/com.apple.wallpaper/Store/Index.plist")
     }
 
-    private static var backupURL: URL {
+    /// True once LumaWall has written the wallpaper store, which saves a
+    /// backup first. Only native mode writes it.
+    nonisolated static var hasBackup: Bool {
+        FileManager.default.fileExists(atPath: backupURL.path)
+    }
+
+    nonisolated private static var backupURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("LumaWall/Backups", isDirectory: true)
             .appendingPathComponent("WallpaperIndex.plist")
