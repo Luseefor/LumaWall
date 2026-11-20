@@ -145,7 +145,14 @@ actor PosterCache {
         for delay in retryDelays {
             guard case .busy = outcome, !Task.isCancelled else { break }
             try? await Task.sleep(for: delay)
-            if Task.isCancelled { break }
+            // While this waited, another request may have cached the frame or
+            // found it can't be made, or `remove` may have run.
+            if Task.isCancelled || startedAt != epoch(of: fallbackVideo) { break }
+            if let entry = entries[key] {
+                touch(key)
+                return entry.image
+            }
+            if failedFrames.contains(key) { return nil }
             outcome = await frame(for: fallbackVideo, key: key, maxPixelWidth: maxPixelWidth)
         }
         let frame: CGImage?
@@ -360,7 +367,10 @@ struct PosterImage: View {
         }
         .task(id: PosterRequest(url: url, fallbackVideo: fallbackVideo, width: maxPixelWidth)) {
             if url != nil || fallbackVideo != nil {
-                image = await PosterCache.shared.image(for: url, fallbackVideo: fallbackVideo, maxPixelWidth: maxPixelWidth)
+                let loaded = await PosterCache.shared.image(for: url, fallbackVideo: fallbackVideo, maxPixelWidth: maxPixelWidth)
+                // A cancelled load (the request changed) can finish after the
+                // new one and would blank the poster it showed.
+                if !Task.isCancelled { image = loaded }
             } else {
                 image = nil
             }

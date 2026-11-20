@@ -226,6 +226,28 @@ final class PosterCacheTests: XCTestCase {
         XCTAssertEqual(afterSecond, 4)
     }
 
+    func testARetryUsesAFrameAnotherRequestCachedMeanwhile() async throws {
+        // A waiting retry asked the busy service again and could give up
+        // with the frame already in the cache.
+        let counter = CallCounter()
+        let frame = stillFrame()
+        let cache = PosterCache(
+            frameGenerator: { _, _ in
+                await counter.hit()
+                if await counter.count == 2 { return frame }
+                throw MediaProbeError.serviceUnavailable
+            }, retryDelays: [.milliseconds(300)])
+        let video = folder.appendingPathComponent("clip.mov")
+        let first = Task { await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640) }
+        try await Task.sleep(for: .milliseconds(100))
+        let second = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        XCTAssertNotNil(second)
+        let retried = await first.value
+        XCTAssertNotNil(retried)
+        let calls = await counter.count
+        XCTAssertEqual(calls, 2)
+    }
+
     func testUndecodableVideoIsNotRetried() async {
         let counter = CallCounter()
         let cache = PosterCache(
