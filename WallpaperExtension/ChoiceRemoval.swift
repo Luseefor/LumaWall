@@ -1,12 +1,14 @@
 // Decides which library video a Settings "remove" request may delete.
 //
-// The request is a private WallpaperKit XPC object. Its choice descriptor
-// (`rawValue.descriptor`, see ChoiceIDDescriptor in CodableShims) carries the
-// provider that owns the choice and the choice's identifier. Removal goes ahead
-// only when both are read from that descriptor, the provider is this extension,
-// and the identifier is a video in the library. Scanning the request's
-// description for `identifier: "` could pick up any field that happened to
-// contain that text.
+// A choice ID (WallpaperChoiceIDXPC) wraps a WallpaperChoice.ID whose
+// `descriptor` holds `provider` (WallpaperChoiceProviderID, a `rawValue`
+// String), `files` and `configuration`, per WallpaperTypes' Swift metadata on
+// macOS 27.2. SettingsProvider writes the video ID as the UTF-8
+// `configuration`. Removal goes ahead only when the provider is this extension
+// and the configuration names a video in the library. Scanning the request's
+// description for `identifier: "` could pick up any field that contained that
+// text. A request that holds no descriptor, such as the add-style
+// WallpaperChoiceRequest enum, deletes nothing.
 
 import Foundation
 
@@ -31,12 +33,13 @@ enum ChoiceRemoval {
         return .remove(descriptor.identifier)
     }
 
-    /// The first value in the tree with a `provider` and a String
-    /// `identifier`, read through `Mirror`.
+    /// The first value in the tree with a `provider` and a non-empty UTF-8
+    /// `configuration`, read through `Mirror`.
     private static func findDescriptor(in value: Any, depth: Int) -> (provider: String, identifier: String)? {
         guard depth < 8 else { return nil }
         let children = Mirror(reflecting: value).children
-        if let identifier = children.first(where: { $0.label == "identifier" })?.value as? String,
+        if let configuration = children.first(where: { $0.label == "configuration" })?.value as? Data,
+            let identifier = String(data: configuration, encoding: .utf8), !identifier.isEmpty,
             let provider = children.first(where: { $0.label == "provider" }).flatMap({ firstString(in: $0.value, depth: 0) })
         {
             return (provider, identifier)

@@ -34,6 +34,13 @@ final class ChoiceRemovalTests: XCTestCase {
             .refuse("no choice descriptor in request"))
     }
 
+    func testRefusesAnAddStyleChoiceRequest() {
+        let request = ChoiceRequest.image(URL(fileURLWithPath: "/Users/someone/Videos/\(video)"))
+        XCTAssertEqual(
+            ChoiceRemoval.target(in: request, ownProvider: own) { _ in true },
+            .refuse("no choice descriptor in request"))
+    }
+
     func testIgnoresAnIdentifierOutsideTheDescriptor() {
         // The old parser took the first `identifier: "` in the request's
         // description, wherever it appeared.
@@ -44,26 +51,25 @@ final class ChoiceRemovalTests: XCTestCase {
     }
 }
 
-// Shaped like WallpaperChoiceIDXPC: an object whose `rawValue` is a
-// WallpaperChoiceID holding a descriptor with the provider and identifier.
+// Shaped like WallpaperChoiceIDXPC on macOS 27.2, read from WallpaperTypes'
+// Swift metadata: `rawValue` is a WallpaperChoice.ID whose `descriptor` holds
+// `provider` (WallpaperChoiceProviderID, a `rawValue` String), `files` and
+// `configuration`. SettingsProvider puts the video ID in `configuration`.
 private final class FakeChoiceIDXPC: NSObject {
     let rawValue: ChoiceIDValue
     init(provider: String, identifier: String) {
         rawValue = ChoiceIDValue(
-            id: UUID().uuidString,
             descriptor: Descriptor(
-                provider: ProviderID(rawValue: provider), identifier: identifier, files: [], configuration: Data()))
+                provider: ProviderID(rawValue: provider), files: [], configuration: Data(identifier.utf8)))
     }
 }
 
 private struct ChoiceIDValue {
-    let id: String
     let descriptor: Descriptor
 }
 
 private struct Descriptor {
     let provider: ProviderID
-    let identifier: String
     let files: [URL]
     let configuration: Data
 }
@@ -75,4 +81,10 @@ private struct ProviderID {
 private struct Decoy {
     let note: String
     let choice: FakeChoiceIDXPC
+}
+
+// WallpaperExtensionChoiceRequestXPC boxes a WallpaperChoiceRequest, an enum
+// of things to add (a color, an image URL, ...). It names no choice of ours.
+private enum ChoiceRequest {
+    case image(URL)
 }
