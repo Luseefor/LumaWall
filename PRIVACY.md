@@ -12,7 +12,9 @@ LumaWall sends nothing off your Mac. Neither the app nor the wallpaper extension
 
 ## Deleting local data
 
-Quit LumaWall and remove:
+If you used native wallpaper mode, first use **Restore original wallpaper** in LumaWall (or switch to a standard macOS wallpaper in System Settings) before deleting LumaWall's folders; otherwise macOS may still reference the deployed media in the extension container and deleting `~/Library/Application Support/LumaWall/` removes LumaWall's backup of your previous wallpaper settings.
+
+Then quit LumaWall and remove:
 
 - `~/Library/Application Support/LumaWall/`
 - `~/Library/Containers/app.lumawall.personal.wallpaper/`

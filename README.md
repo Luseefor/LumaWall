@@ -27,7 +27,7 @@ Shared overlay decoders reuse one player when the same media hits multiple scree
 
 - **Safe mode (default)**: LumaWall uses its desktop overlay engine by default on every macOS version. It sets the desktop image to a static poster for each screen via standard macOS APIs and plays a muted looping video in a desktop-level window above it. It never modifies internal system wallpaper files or restarts system wallpaper agents.
 - **Native wallpaper mode (optional, experimental)**: On macOS 26+ with `LumaWallWallpaper.appex` embedded under `Contents/Extensions`, you can opt in to native mode. Native mode uses undocumented interfaces for the macOS 26 wallpaper extension point, deploys the video into the extension container, edits the system wallpaper settings file (`~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`), and restarts `WallpaperAgent` so the system hosts playback.
-- **Risk and fallback**: Native mode is used at your own risk and may break after a macOS update. If a native assignment fails, LumaWall falls back to Safe mode (overlay) automatically and can restore your previous wallpaper settings from its backup.
+- **Risk and fallback**: Native mode is used at your own risk and may break after a macOS update. If a native assignment fails, LumaWall falls back to Safe mode (overlay) automatically and can restore your previous wallpaper settings from its backup. Before uninstalling LumaWall or deleting its `Application Support` and container folders, native-mode users should run **Restore original wallpaper** or switch to another wallpaper in System Settings so macOS no longer references the deployed media or backup.
 
 You can also force Safe mode (overlay) from the command line:
 
