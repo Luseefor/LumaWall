@@ -250,8 +250,8 @@ extension NativeWallpaperDeployment {
     /// Moves a finished export into its entry and lists it in metadata.json,
     /// re-reading the file so copies other jobs recorded are kept. Discards
     /// the export when the entry no longer holds the source it was made from.
-    /// When metadata.json can't be written the export goes back to staging,
-    /// so a retry publishes it without encoding again.
+    /// When metadata.json can't be written the moved copy is deleted, and a
+    /// retry encodes it again.
     ///
     /// The staging and entry folders are opened through `TrustedDirectory`
     /// and every read, move and delete goes through their descriptors, so
@@ -307,7 +307,10 @@ extension NativeWallpaperDeployment {
             do {
                 try writeMetadata(updated, folder)
             } catch {
-                try? folder.publishItem(named: name, into: staging, as: stagedName)
+                // Not moved back to staging: in the entry the extension can
+                // have swapped it, and staging only holds bytes the app
+                // encoded. The retry encodes again.
+                try? folder.removeFile(named: name)
                 return .failed
             }
             return .published

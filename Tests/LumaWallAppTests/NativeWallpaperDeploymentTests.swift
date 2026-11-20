@@ -782,18 +782,24 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)?.variants)
     }
 
-    func testFailedMetadataWriteKeepsTheExportForRetry() throws {
-        // A failed metadata write counted as success: the extension never
-        // saw the copy and the next request encoded it again.
+    func testAFailedMetadataWriteNeverTakesTheFileBackFromTheEntry() throws {
+        // The export went back to staging by name, so the extension could
+        // swap it inside the entry first and have the app probe its bytes.
+        let fm = FileManager.default
         try deploy(hash: "aaa")
         let staged = try stage(job(hash: "aaa"))
+        let dest = self.dest
         let failed = publish(
             staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos,
-            writeMetadata: { _, _ in throw CocoaError(.fileWriteOutOfSpace) })
+            writeMetadata: { _, _ in
+                try? fm.removeItem(at: dest)
+                try? Data("planted".utf8).write(to: dest)
+                throw CocoaError(.fileWriteOutOfSpace)
+            })
         XCTAssertEqual(failed, .failed)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
-        let retried = publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: staging.path), [])
+        XCTAssertFalse(fm.fileExists(atPath: dest.path))
+        let retried = publish(try stage(job(hash: "aaa")), job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
         XCTAssertEqual(retried, .published)
     }
 
