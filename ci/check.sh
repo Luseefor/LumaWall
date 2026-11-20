@@ -16,7 +16,7 @@ run_dir="$(mktemp -d "$output_root/run.XXXXXX")"
 printf 'Validation results: %s\n' "$run_dir"
 
 swift test 2>&1 | tee "$run_dir/core-tests.log"
-xcodegen generate
+"$project_root/ci/xcodegen.sh" generate
 
 # Testing uses a separate bundle id and a minimal app host. It never starts
 # AppModel or restores the wallpapers in the person's library.
