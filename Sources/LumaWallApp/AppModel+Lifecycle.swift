@@ -10,6 +10,7 @@ extension AppModel {
     func bootstrap() async {
         observeNativeFallback()
         await reload()
+        startDeploymentSweeps()
         playlists = await playlistStore.all()
         await restorePlaylistPlaybackState()
         automations = await automationStore.current()
@@ -32,6 +33,20 @@ extension AppModel {
             await applyLockScreenWallpaper(asset)
         }
         await consumePendingShortcutIfNeeded()
+    }
+
+    /// Lets deploys sweep abandoned entries against the library, and runs
+    /// the first sweep (`NativeWallpaperDeployment.scheduleSweep`).
+    private func startDeploymentSweeps() {
+        let store = store
+        let assignments = assignmentStore
+        NativeWallpaperDeployment.referencedEntryIDs = {
+            let library = await store.assets().map(\.id)
+            guard !library.isEmpty else { return nil }
+            let assigned = await assignments.current().assignments.compactMap(\.wallpaperID)
+            return Set((library + assigned).map(\.rawValue.uuidString))
+        }
+        NativeWallpaperDeployment.scheduleSweep()
     }
 
     func consumePendingShortcutIfNeeded() async {

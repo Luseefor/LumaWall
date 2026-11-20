@@ -17,6 +17,12 @@ public final class TrustedDirectory {
         public var kind: Kind
     }
 
+    /// Which folder on disk this is, whatever path reached it.
+    public struct Identity: Codable, Equatable, Sendable {
+        public var device: Int64
+        public var inode: UInt64
+    }
+
     private let fd: Int32
 
     /// Opens `url`. The folders above it are followed as usual; `url`'s own
@@ -53,6 +59,13 @@ public final class TrustedDirectory {
     }
 
     deinit { close(fd) }
+
+    /// The device and inode of the folder this is open on.
+    public func identity() throws -> Identity {
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { throw POSIXError.current }
+        return Identity(device: Int64(info.st_dev), inode: UInt64(info.st_ino))
+    }
 
     /// The folder `name` inside this one. Throws if it is missing, a file,
     /// or a symlink.
@@ -112,6 +125,14 @@ public final class TrustedDirectory {
             throw POSIXError.current
         }
         return Self.kind(of: info.st_mode)
+    }
+
+    /// Renames `name` to `newName` in this folder. Fails rather than
+    /// replace anything already at `newName`.
+    public func renameItem(named name: String, to newName: String) throws {
+        try Self.checkName(name)
+        try Self.checkName(newName)
+        guard renameatx_np(fd, name, fd, newName, UInt32(RENAME_EXCL)) == 0 else { throw POSIXError.current }
     }
 
     /// Moves `name` from this folder into `destination` as `newName` in one

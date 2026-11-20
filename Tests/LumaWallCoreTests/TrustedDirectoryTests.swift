@@ -172,4 +172,34 @@ struct TrustedDirectoryTests {
         defer { cleanup() }
         #expect(throws: POSIXError(.ENOENT)) { try TrustedDirectory(url: root).removeItem(named: "gone") }
     }
+
+    @Test func identityNamesTheFolderNotItsPath() throws {
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        let folder = root.appendingPathComponent("staging", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let first = try TrustedDirectory(url: folder).identity()
+        #expect(try TrustedDirectory(url: folder).identity() == first)
+        #expect(try TrustedDirectory(url: victim).identity() != first)
+        // A new folder at the same path is a different folder. The old one
+        // stays alive so its inode can't be reused.
+        try fm.moveItem(at: folder, to: root.appendingPathComponent("aside"))
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        #expect(try TrustedDirectory(url: folder).identity() != first)
+    }
+
+    @Test func renameMovesAnItemButNeverOverAnother() throws {
+        let (root, _, cleanup) = try makeTree()
+        defer { cleanup() }
+        let dir = try TrustedDirectory(url: root)
+        try fm.createDirectory(at: root.appendingPathComponent("a"), withIntermediateDirectories: false)
+        try Data("x".utf8).write(to: root.appendingPathComponent("a/clip.mov"))
+        try fm.createDirectory(at: root.appendingPathComponent("taken"), withIntermediateDirectories: false)
+
+        try dir.renameItem(named: "a", to: ".a")
+        #expect(fm.fileExists(atPath: root.appendingPathComponent(".a/clip.mov").path))
+        #expect(throws: POSIXError.self) { try dir.renameItem(named: ".a", to: "taken") }
+        #expect(fm.fileExists(atPath: root.appendingPathComponent(".a/clip.mov").path))
+        #expect(throws: POSIXError.self) { try dir.renameItem(named: ".a", to: "../out") }
+    }
 }

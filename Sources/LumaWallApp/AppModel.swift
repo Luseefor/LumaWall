@@ -88,7 +88,7 @@ final class AppModel {
 
     let store: LibraryStore
     let importer: MediaImporter
-    private let assignmentStore: AssignmentStore
+    let assignmentStore: AssignmentStore
     let playlistStore: PlaylistStore
     let playlistPlaybackStore: PlaylistPlaybackStore
     let recentsStore: RecentsStore

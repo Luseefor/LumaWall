@@ -223,6 +223,10 @@ enum NativeWallpaperDeployment {
     @MainActor
     private static var deploymentTasks: [String: Task<EntryInfo, Error>] = [:]
 
+    /// Entries with a deploy running now.
+    @MainActor
+    static var deployingEntryIDs: Set<String> { Set(deploymentTasks.keys) }
+
     /// Returns once no deploy of `entryID` is running; its result is ignored.
     @MainActor
     static func waitForDeployment(of entryID: String) async {
@@ -271,7 +275,11 @@ enum NativeWallpaperDeployment {
             : "Wallpaper.mov"
         try FileManager.default.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
         let stagingFolder = try makeStagingFolder(appropriateFor: videosFolderURL)
-        defer { try? FileManager.default.removeItem(at: stagingFolder) }
+        beginStaging(stagingFolder)
+        defer {
+            let deleted = (try? FileManager.default.removeItem(at: stagingFolder)) != nil
+            endStaging(stagingFolder, deleted: deleted)
+        }
         let staged = try await Task.detached(priority: .utility) {
             try stageDeployment(source: asset.mediaURL, entryID: entryID, filename: filename, stagingFolderURL: stagingFolder)
         }.value
@@ -297,6 +305,7 @@ enum NativeWallpaperDeployment {
             try publishDeployment(staged, stagingFolderURL: stagingFolder)
         }.value
         notifyLibraryChanged()
+        scheduleSweep()
         let deployed = videoURL(for: entry)
         Task.detached {
             await ensureVariants(
