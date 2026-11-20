@@ -249,10 +249,12 @@ enum NativeWallpaperDeployment {
             let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
             // Under the entry lock, so a copy of the previous source that is
             // being published finishes first and can't land after the reset.
+            // TrustedDirectory, so an entry folder swapped for a symlink
+            // loses the link and not what it points at.
             try entryLock.withLock {
-                if fm.fileExists(atPath: dir.path) {
-                    try fm.removeItem(at: dir)
-                }
+                do {
+                    try TrustedDirectory(url: videosFolderURL, below: containerURL).removeItem(named: entryID)
+                } catch POSIXError.ENOENT {}
             }
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             let filename =

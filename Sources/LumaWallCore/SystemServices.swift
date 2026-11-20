@@ -36,21 +36,28 @@ public enum CacheCleaner {
         URLCache.shared.removeAllCachedResponses()
     }
 
-    public static func clearDisk(preservingLibraryRoot root: URL) throws -> Int {
-        let fm = FileManager.default
+    /// Empties `<caches>/LumaWall` and deletes the library's `Scratch`
+    /// folder. Both are opened without following symlinks, so a folder
+    /// swapped for a link loses the link, not the files it points at.
+    /// Returns how many items were removed.
+    public static func clearDisk(
+        preservingLibraryRoot root: URL,
+        cachesURL: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    ) throws -> Int {
         var removed = 0
-        let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LumaWall", isDirectory: true)
-        if fm.fileExists(atPath: caches.path) {
-            let items = try fm.contentsOfDirectory(at: caches, includingPropertiesForKeys: nil)
-            for item in items {
-                try? fm.removeItem(at: item)
+        let caches: TrustedDirectory?
+        do {
+            caches = try TrustedDirectory(url: cachesURL).subdirectory("LumaWall")
+        } catch let error as POSIXError where [.ENOENT, .ELOOP, .ENOTDIR].contains(error.code) {
+            // No cache folder, or a symlink in its place: nothing of ours to clear.
+            caches = nil
+        }
+        if let caches {
+            for item in try caches.entries() where (try? caches.removeItem(named: item.name)) != nil {
                 removed += 1
             }
         }
-        let tmp = root.appendingPathComponent("Scratch", isDirectory: true)
-        if fm.fileExists(atPath: tmp.path) {
-            try? fm.removeItem(at: tmp)
+        if (try? TrustedDirectory(url: root).removeItem(named: "Scratch")) != nil {
             removed += 1
         }
         return removed

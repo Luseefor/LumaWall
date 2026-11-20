@@ -26,7 +26,12 @@ public actor LibraryStore {
         let base = try StorePaths.appSupportBase(rootURL: rootURL)
         self.rootURL = base
         self.indexURL = base.appendingPathComponent("Library.json")
-        if let decoded: [WallpaperAsset] = StoreIO.readJSON(from: indexURL, as: [WallpaperAsset].self) {
+        // A repeated ID means the index was edited or damaged; building the
+        // dictionary from it would trap.
+        if let decoded = StoreIO.readJSON(
+            from: indexURL, as: [WallpaperAsset].self,
+            isValid: { Set($0.map(\.id)).count == $0.count })
+        {
             assetsByID = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
         }
     }
@@ -96,21 +101,48 @@ public actor LibraryStore {
         try persist()
     }
 
+    /// Deletes the entry's folder, then drops it from the index, so a failed
+    /// delete leaves an entry the user can remove again.
+    ///
+    /// The media folder must be exactly this entry's own folder. A corrupt or
+    /// hand-edited Library.json could otherwise point mediaURL at an arbitrary
+    /// directory or a sibling entry's folder. Such an entry is dropped from
+    /// the index without touching disk, and the call throws `invalidLocation`.
+    /// The delete itself goes through `TrustedDirectory`, so an entry folder
+    /// swapped for a symlink loses the link, not what it points at.
     public func remove(id: WallpaperID) throws {
-        guard let asset = assetsByID.removeValue(forKey: id) else { throw StoreError.missingAsset }
-        try persist()
-        // The media folder must be exactly this entry's own folder. A corrupt
-        // or hand-edited Library.json could otherwise point mediaURL at an
-        // arbitrary directory (or a sibling entry's folder) and this delete
-        // would wipe it. The index entry is already gone; refuse the disk
-        // delete loudly instead of silently honoring a bad path.
-        let folder = asset.mediaURL.deletingLastPathComponent().resolvingSymlinksInPath()
-        let expected = self.folder(for: id).resolvingSymlinksInPath()
-        guard folder == expected else {
+        guard let asset = assetsByID[id] else { throw StoreError.missingAsset }
+        var remaining = assetsByID
+        remaining[id] = nil
+        let folder = asset.mediaURL.deletingLastPathComponent().standardizedFileURL
+        guard isEntryFolder(folder, of: id) else {
+            try persist(remaining)
             throw StoreError.invalidLocation
         }
-        try? FileManager.default.removeItem(at: folder)
-        cachedDiskUsage = nil
+        do {
+            // The name as validated, which may be spelled in lower case.
+            try TrustedDirectory(url: rootURL).removeItem(named: folder.lastPathComponent)
+        } catch POSIXError.ENOENT {
+            // Already gone; nothing left to delete.
+        }
+        // The row leaves memory only once the index no longer lists it, so a
+        // failed write can be retried.
+        try persist(remaining)
+    }
+
+    /// Checks the entry folder's name and parent without resolving the
+    /// folder itself: resolving it is what let a symlinked folder match.
+    /// The name is parsed as a UUID, so a lower-case spelling still matches,
+    /// and the parent is compared to the root by device and inode, so `/var`
+    /// and `/private/var` spellings of the same root match too.
+    private func isEntryFolder(_ folder: URL, of id: WallpaperID) -> Bool {
+        guard UUID(uuidString: folder.lastPathComponent) == id.rawValue else { return false }
+        var parent = stat()
+        var root = stat()
+        guard stat(folder.deletingLastPathComponent().path, &parent) == 0, stat(rootURL.path, &root) == 0 else {
+            return false
+        }
+        return parent.st_dev == root.st_dev && parent.st_ino == root.st_ino
     }
 
     public func folder(for id: WallpaperID) -> URL {
@@ -138,11 +170,15 @@ public actor LibraryStore {
         return total
     }
 
-    private func persist() throws {
+    /// Writes `assets` (the current rows by default) and, once written, makes
+    /// them the current rows.
+    private func persist(_ assets: [WallpaperID: WallpaperAsset]? = nil) throws {
         // Every index write changes the measured size, and install, update and
         // remove change the library folders around it.
         cachedDiskUsage = nil
-        let values = assetsByID.values.sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
+        let assets = assets ?? assetsByID
+        let values = assets.values.sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
         try StoreIO.writeJSON(values, to: indexURL)
+        assetsByID = assets
     }
 }
