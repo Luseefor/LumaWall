@@ -130,25 +130,61 @@ final class LumaWallExtension: NSObject, AppExtension {
     /// Track screen lock state via distributed notifications from loginwindow.
     /// This lets us know the lock screen is showing even before the WallpaperAgent
     /// sends a presentation mode update, fixing the race where a video paused
-    /// on the desktop doesn't resume on the lock screen after lid open.
+    /// on the desktop doesn't resume on the lock screen after lid open. Any
+    /// process can post these names, so each hint is checked against the
+    /// login session first (`ScreenLockHint`).
     private func observeScreenLockState() {
+        let sessionLocked = ScreenLockHint.sessionIsLocked()
+        Self.lockHints.withLock { $0 = LockHintTracker(sessionLocked: sessionLocked) }
         let dnc = DistributedNotificationCenter.default()
         dnc.addObserver(
             forName: .init("com.apple.screenIsLocked"),
             object: nil, queue: .main,
         ) { _ in
-            WallpaperState.shared.isScreenLocked = true
-            extensionLog("[Extension] Screen locked")
+            Self.applyLockHint(locked: true, retries: 1)
         }
         dnc.addObserver(
             forName: .init("com.apple.screenIsUnlocked"),
             object: nil, queue: .main,
         ) { _ in
-            WallpaperState.shared.isScreenLocked = false
-            Self.recomputeAndApplyPolicy()
-            ShuffleController.shared.noteWake()
-            extensionLog("[Extension] Screen unlocked, recomputed policy")
+            Self.applyLockHint(locked: false, retries: 1)
         }
+    }
+
+    /// Confirmed lock hints so far, plus locks the Agent reported. Locked:
+    /// hints arrive on the main queue, Agent updates on the lifecycle queue.
+    private static let lockHints = OSAllocatedUnfairLock(initialState: LockHintTracker(sessionLocked: nil))
+
+    /// The Agent reported the lock screen (`WallpaperXPCHandler.update`).
+    static func noteAgentLocked() {
+        lockHints.withLock { $0.noteAgentLocked() }
+    }
+
+    /// Main queue. The session flag can trail loginwindow's notification, so
+    /// a hint the session doesn't confirm yet is checked again a second later
+    /// before it's dropped. A confirmed hint recomputes policy itself: a
+    /// retry can land after the wake's own recomputes.
+    private static func applyLockHint(locked: Bool, retries: Int) {
+        let session = ScreenLockHint.sessionIsLocked()
+        guard ScreenLockHint.shouldApply(claimsLocked: locked, sessionLocked: session) else {
+            if retries > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    applyLockHint(locked: locked, retries: retries - 1)
+                }
+            } else {
+                extensionLog(
+                    "[Extension] Ignored screen \(locked ? "lock" : "unlock") hint: session says locked=\(session.map(String.init) ?? "unknown")"
+                )
+            }
+            return
+        }
+        let woke = lockHints.withLock { $0.confirm(locked: locked) }
+        WallpaperState.shared.isScreenLocked = locked
+        recomputeAndApplyPolicy()
+        if woke {
+            ShuffleController.shared.noteWake()
+        }
+        extensionLog("[Extension] Screen \(locked ? "locked" : "unlocked"), recomputed policy")
     }
 
     /// Power notifications waiting to be applied (`PowerSignal`). Notified

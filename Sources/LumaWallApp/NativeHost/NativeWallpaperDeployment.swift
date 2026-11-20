@@ -326,6 +326,30 @@ enum NativeWallpaperDeployment {
         )
     }
 
+    /// Ask the extension to clear its stills from WallpaperAgent's cache. Any
+    /// process can post `clearCaches`, so the extension acts on it only when
+    /// this request file is there and fresh (`CacheClearRequest` in the
+    /// extension).
+    static func requestSnapshotCacheClear(
+        documentsURL: URL = WallpaperHostCapabilities.extensionDocumentsURL,
+        post: () -> Void = postClearCaches
+    ) {
+        // Atomic: replaces whatever is at the path, symlink included, and
+        // gives the file a fresh modification date.
+        try? Data().write(to: documentsURL.appendingPathComponent("clear-caches.request"), options: .atomic)
+        post()
+    }
+
+    private static func postClearCaches() {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("app.lumawall.personal.clearCaches" as CFString),
+            nil,
+            nil,
+            true
+        )
+    }
+
     private struct Probe {
         let duration: Double
         let fps: Double

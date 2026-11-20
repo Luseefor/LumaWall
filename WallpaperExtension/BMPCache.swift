@@ -2,19 +2,24 @@ import AVFoundation
 import Foundation
 import ImageIO
 
-/// Removes reproducible WallpaperAgent snapshots while preserving every source
-/// video and user assignment. The Agent regenerates the right poster on demand.
+/// Removes the extension's own stills from WallpaperAgent's cache directory,
+/// leaving every source video, user assignment and Agent file alone. Runs
+/// only when the app left a fresh request (`CacheClearRequest`): the
+/// notification that triggers it can come from any process.
 func clearWallpaperSnapshotCache() {
+    let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    guard CacheClearRequest.consume(in: documents) else {
+        extensionLog("[BMPCache] Ignored clearCaches: no fresh request from the app")
+        return
+    }
     guard let cacheDir = WallpaperState.shared.cacheDirectoryURL else { return }
     let gained = cacheDir.startAccessingSecurityScopedResource()
     defer { if gained { cacheDir.stopAccessingSecurityScopedResource() } }
-    guard gained,
-        let contents = try? FileManager.default.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil)
-    else { return }
-    for file in contents where file.pathExtension == "bmp" {
-        try? FileManager.default.removeItem(at: file)
+    guard gained, let cleared = StillCacheSweep.clear(in: cacheDir) else {
+        extensionLog("[BMPCache] Cache directory unavailable or not a directory, cleared nothing")
+        return
     }
-    extensionLog("[BMPCache] Cleared generated wallpaper snapshots")
+    extensionLog("[BMPCache] Cleared \(cleared) generated wallpaper snapshot(s)")
 }
 
 /// Serializes every write, copy and eviction in the cache directory.
