@@ -140,6 +140,7 @@ targets:
       - path: WallpaperExtension/CallerAdmission.swift
       - path: WallpaperExtension/ChoiceRemoval.swift
       - path: WallpaperExtension/NotificationGuards.swift
+      - path: WallpaperExtension/RuntimeLayout.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:
