@@ -172,12 +172,13 @@ enum NativeWallpaperDeployment {
     /// and which battery copy to encode first.
     @MainActor
     static func ensureDeployed(asset: WallpaperAsset, surfaces: [Surface]) async throws -> EntryInfo {
-        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
         }
+        // A removed wallpaper is refused whatever the mode.
         guard !removedEntries.contains(entryID) else { throw DeploymentError.removed }
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         if !copyEncodingPrepared {
             copyEncodingPrepared = true
             Task.detached(priority: .utility) { await prepareCopyEncoding() }
