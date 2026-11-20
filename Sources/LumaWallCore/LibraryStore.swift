@@ -18,6 +18,10 @@ public actor LibraryStore {
     public let rootURL: URL
     private let indexURL: URL
     private var assetsByID: [WallpaperID: WallpaperAsset] = [:]
+    /// True when `Library.json` was there and read at init. False on a first
+    /// launch and when the index was unreadable and quarantined, so callers
+    /// can tell an empty library from a lost one.
+    public nonisolated let loadedIndex: Bool
     /// Last folder-walk result. Cleared whenever the library changes, so the
     /// walk runs once per change instead of once per ask.
     private var cachedDiskUsage: Int64?
@@ -33,6 +37,9 @@ public actor LibraryStore {
             isValid: { Set($0.map(\.id)).count == $0.count })
         {
             assetsByID = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
+            loadedIndex = true
+        } else {
+            loadedIndex = false
         }
     }
 

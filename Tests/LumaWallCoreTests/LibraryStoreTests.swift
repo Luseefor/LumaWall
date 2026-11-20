@@ -19,6 +19,22 @@ struct LibraryStoreTests {
         #expect(loaded?.applyCount == 0)
     }
 
+    @Test func saysWhetherItsIndexWasRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // A first launch and a quarantined index both start empty, unread.
+        #expect(try LibraryStore(rootURL: root).loadedIndex == false)
+        let asset = sampleAsset(hash: "only")
+        let store = try LibraryStore(rootURL: root)
+        try await store.install(asset)
+        // Outside the library folder: the row goes, the file stays.
+        await #expect(throws: LibraryStore.StoreError.invalidLocation) { try await store.remove(id: asset.id) }
+        // An index emptied by removing the last wallpaper still reads.
+        #expect(try LibraryStore(rootURL: root).loadedIndex == true)
+        try Data("not json".utf8).write(to: root.appendingPathComponent("Library.json"))
+        #expect(try LibraryStore(rootURL: root).loadedIndex == false)
+    }
+
     @Test func rejectsContentDuplicatesWithDifferentNames() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

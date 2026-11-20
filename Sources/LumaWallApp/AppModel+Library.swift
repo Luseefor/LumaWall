@@ -169,6 +169,15 @@ extension AppModel {
 
     func remove(_ asset: WallpaperAsset) {
         let entryID = asset.id.rawValue.uuidString
+        // Kept until the deployed copy is gone, so a quit or a failed delete
+        // is finished at the next launch. Without the record, a quit after
+        // the row goes would leave the copy for good, so don't start.
+        do {
+            try NativeWallpaperDeployment.pendingRemovals.add(entryID)
+        } catch {
+            present("LumaWall", "\(asset.name) couldn't be removed. " + error.localizedDescription)
+            return
+        }
         // Before any suspension: an apply or restore running meanwhile must
         // not deploy or assign the wallpaper being removed.
         NativeWallpaperDeployment.markRemoved(entryID: entryID)
@@ -193,10 +202,13 @@ extension AppModel {
             // deployed copy goes too, so System Settings stops offering it.
             guard await store.asset(id: asset.id) == nil else {
                 NativeWallpaperDeployment.unmarkRemoved(entryID: entryID)
+                NativeWallpaperDeployment.pendingRemovals.remove(entryID)
                 return
             }
+            NativeWallpaperDeployment.pendingRemovals.markRowRemoved(entryID)
             do {
                 try await NativeWallpaperDeployment.removeDeployment(entryID: entryID)
+                NativeWallpaperDeployment.pendingRemovals.remove(entryID)
             } catch {
                 present(
                     "LumaWall",
