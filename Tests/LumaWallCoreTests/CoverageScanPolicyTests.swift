@@ -62,6 +62,14 @@ struct CoverageDebouncerTests {
         var runs = 0
         let debouncer = CoverageDebouncer(delay: .milliseconds(40)) { runs += 1 }
         for _ in 0..<5 { debouncer.signal() }
+        // Wait for the run instead of a fixed sleep: under load the main actor
+        // can be starved for a second, and a fixed 150 ms read too early.
+        let deadline = ContinuousClock.now + .seconds(10)
+        while runs == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(runs == 1)
+        // A burst must not schedule a second run after the first.
         try await Task.sleep(for: .milliseconds(150))
         #expect(runs == 1)
     }
