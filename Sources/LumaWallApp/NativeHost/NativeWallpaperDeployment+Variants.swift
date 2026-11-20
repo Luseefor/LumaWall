@@ -20,6 +20,12 @@ extension NativeWallpaperDeployment {
         var recordedFPS: Int { Int(fps.rounded()) }
     }
 
+    /// The frame rates `MediaInfo.isPlausible` accepts from a probe. Anything
+    /// else (NaN, infinite, negative, huge) would trap converting to `Int`.
+    static func isPlausibleFPS(_ fps: Double) -> Bool {
+        fps.isFinite && fps >= 0 && fps <= 1_000
+    }
+
     /// Battery copies above 30 fps drop to a whole divisor of the source rate
     /// (60 to 30, 59.94 to 29.97, 120 to 30, 50 to 25), keeping frames evenly
     /// spaced. Decoding and redrawing 60 frames a second at 720p on battery
@@ -34,8 +40,9 @@ extension NativeWallpaperDeployment {
     /// so Full Quality on a 1440p monitor can skip decoding 4K. Copies at or
     /// above the source size are never made. With `displayPixels` (connected
     /// displays, in pixels) the 1440p copy is planned only when one of them
-    /// would play it.
+    /// would play it. A frame rate outside `isPlausibleFPS` plans nothing.
     static func variantSpecs(sourceSize: CGSize, sourceFPS: Double, displayPixels: [CGSize]? = nil) -> [VariantSpec] {
+        guard isPlausibleFPS(sourceFPS) else { return [] }
         let specs = allVariantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS)
         guard let displayPixels else { return specs }
         return specs.filter { spec in
@@ -50,7 +57,7 @@ extension NativeWallpaperDeployment {
     /// `display`: the smallest one at the source rate that aspect-fills it
     /// without upscaling. Mirrors `VariantSelection.smallestFilling`.
     static func fullQualityPick(among specs: [VariantSpec], sourceSize: CGSize, sourceFPS: Double, display: CGSize) -> VariantSpec? {
-        guard display.width > 0, display.height > 0 else { return nil }
+        guard display.width > 0, display.height > 0, isPlausibleFPS(sourceFPS) else { return nil }
         let sourceRate = Int(sourceFPS.rounded())
         func area(_ spec: VariantSpec) -> CGFloat {
             let size = copySize(source: sourceSize, fitting: spec.fitting)

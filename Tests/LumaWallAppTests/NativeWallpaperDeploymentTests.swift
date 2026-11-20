@@ -53,6 +53,39 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos))
     }
 
+    func testOutOfRangeFrameRateInMetadataReadsAsMissing() throws {
+        // A frame rate past Int's range trapped when reapply converted it.
+        let fm = FileManager.default
+        let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: videos) }
+        func read(fps: String) throws -> NativeWallpaperDeployment.EntryInfo? {
+            let id = UUID().uuidString
+            let dir = videos.appendingPathComponent(id)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let json = """
+                {"id":"\(id)","name":"x","filename":"Wallpaper.mov","duration":5,"fps":\(fps),\
+                "resolution":[3840,2160],"dateAdded":0}
+                """
+            try Data(json.utf8).write(to: dir.appendingPathComponent("metadata.json"))
+            return try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)
+        }
+        XCTAssertEqual(try read(fps: "29.97")?.fps, 29.97)
+        XCTAssertEqual(try read(fps: "0")?.fps, 0)
+        XCTAssertNil(try read(fps: "1e300"))
+        XCTAssertNil(try read(fps: "-30"))
+        XCTAssertNil(try read(fps: "1001"))
+    }
+
+    func testNonFiniteOrHugeFrameRatePlansNoCopies() {
+        let uhd = CGSize(width: 3840, height: 2160)
+        for fps in [Double.nan, .infinity, -.infinity, 1e300, -1, 1_001] {
+            XCTAssertEqual(NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: fps, displayPixels: [uhd]), [], "\(fps)")
+            XCTAssertEqual(NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: fps), [], "\(fps)")
+        }
+        let specs = NativeWallpaperDeployment.variantSpecs(sourceSize: uhd, sourceFPS: 60)
+        XCTAssertNil(NativeWallpaperDeployment.fullQualityPick(among: specs, sourceSize: uhd, sourceFPS: .nan, display: uhd))
+    }
+
     func testDefaultDeployStagingIsOnTheVideosVolumeAndFresh() throws {
         let fm = FileManager.default
         let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
