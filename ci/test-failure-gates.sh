@@ -142,7 +142,10 @@ grep -Fq 'ci/bootstrap.sh' "$fixture_dir/command.log"
 
 # ci/xcodegen.sh prefers the copy ci/bootstrap.sh installs in .tools.
 mkdir -p "$fixture_dir/.tools/xcodegen/bin"
-printf '#!/bin/bash\ntouch "$LUMAWALL_GATE_MARKERS/pinned"\n' > "$fixture_dir/.tools/xcodegen/bin/xcodegen"
+cat > "$fixture_dir/.tools/xcodegen/bin/xcodegen" <<'SH'
+#!/bin/bash
+touch "$LUMAWALL_GATE_MARKERS/pinned"
+SH
 chmod +x "$fixture_dir/.tools/xcodegen/bin/xcodegen"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 expect_exit 0 bash "$fixture_dir/ci/xcodegen.sh" generate
 [[ -e "$fixture_dir/pinned" ]] || fail "line $LINENO"
@@ -239,7 +242,8 @@ case " $* " in
       sleep 5
       exit 0
     fi
-    mkdir -p "$archive_path/Products/Applications/LumaWall.app/Contents/MacOS"
+    mkdir -p "$archive_path/Products/Applications/LumaWall.app/Contents/MacOS" \
+      "$archive_path/Products/Applications/LumaWall.app/Contents/XPCServices/LumaWallMediaService.xpc"
     cat > "$archive_path/Products/Applications/LumaWall.app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -254,7 +258,11 @@ cat > "$fixture_dir/bin/codesign" <<'SH'
 #!/bin/bash
 case "$1" in
   -dvv)
-    printf 'flags=0x10000(runtime)\nTimestamp=2026-11-19\n' >&2
+    if [[ -n "${LUMAWALL_FAKE_XPC_WITHOUT_RUNTIME:-}" && "$2" == *.xpc ]]; then
+      printf 'flags=0x0(none)\nTimestamp=2026-11-19\n' >&2
+    else
+      printf 'flags=0x10000(runtime)\nTimestamp=2026-11-19\n' >&2
+    fi
     ;;
   -d)
     exit "${LUMAWALL_FAKE_CODESIGN_ENTITLEMENTS_EXIT:-0}"
@@ -297,6 +305,12 @@ real_fixture_dir="$(cd "$fixture_dir" && pwd -P)"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_CODESIGN_ENTITLEMENTS_EXIT=1 expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
 [[ "$(cat "$fixture_dir/dist/SHA256SUMS")" == 'previous-checksum  LumaWall.dmg' ]] || fail "line $LINENO"
+
+# An XPC service signed without Hardened Runtime must refuse release.
+LUMAWALL_FAKE_XPC_WITHOUT_RUNTIME=1 expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
+grep -Fq 'Hardened Runtime is missing' "$fixture_dir/command.log" || fail "line $LINENO"
+grep -Fq 'LumaWallMediaService.xpc' "$fixture_dir/command.log" || fail "line $LINENO"
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
 
 # Failure during Gatekeeper verification must preserve existing dist/ outputs.
 rm -f "$fixture_dir/pinned" "$fixture_dir/release-steps.log"

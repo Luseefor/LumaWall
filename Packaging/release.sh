@@ -135,7 +135,8 @@ xcodebuild \
 [[ -d "${app_path}" ]] || { print -u2 "Archive did not contain LumaWall.app"; exit 3; }
 
 codesign --verify --deep --strict --verbose=2 "${app_path}"
-if ! nested_items="$(find "${app_path}/Contents" -type d \( -name '*.appex' -o -name '*.framework' \))"; then
+# Every nested bundle: helper apps, extensions, XPC services, frameworks.
+if ! nested_items="$(find "${app_path}/Contents" -type d \( -name '*.app' -o -name '*.appex' -o -name '*.xpc' -o -name '*.framework' \))"; then
     print -u2 "Refusing release: failed to enumerate nested code inside ${app_path}."
     exit 3
 fi
