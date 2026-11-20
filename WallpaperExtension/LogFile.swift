@@ -85,7 +85,7 @@ final class LogFile: Sendable {
             }
         }
         if fm.fileExists(atPath: url.path) { try? fm.moveItem(at: url, to: copy(1)) }
-        for i in rotatedCopies + 1 ... rotatedCopies + 3 where fm.fileExists(atPath: copy(i).path) {
+        for i in rotatedCopies + 1...rotatedCopies + 3 where fm.fileExists(atPath: copy(i).path) {
             try? fm.removeItem(at: copy(i))
         }
     }

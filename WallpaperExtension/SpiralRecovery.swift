@@ -30,22 +30,29 @@ enum SpiralRecovery {
     /// A connection was accepted then invalidated without any method call. Signals recovery
     /// synchronously once a run of these hits the threshold.
     static func noteEmptyConnection(pid: Int32) {
-        let count = counter.withLock { n -> Int in n += 1; return n }
+        let count = counter.withLock { n -> Int in
+            n += 1; return n
+        }
         guard count >= emptyThreshold else { return }
         recover(pid: pid, count: count)
     }
 
     private static func recover(pid: Int32, count: Int) {
         if let data = try? Data(contentsOf: lastRecoveryURL),
-           let last = Double((String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) {
+            let last = Double((String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+        {
             let since = Date().timeIntervalSince1970 - last
             if since < recoveryCooldown {
-                extensionLog("  [spiral] STUCK (agent pid \(pid), \(count) empty) but signaled \(Int(since))s ago (< \(Int(recoveryCooldown))s cooldown), holding off")
+                extensionLog(
+                    "  [spiral] STUCK (agent pid \(pid), \(count) empty) but signaled \(Int(since))s ago (< \(Int(recoveryCooldown))s cooldown), holding off"
+                )
                 return
             }
         }
         try? Data("\(Date().timeIntervalSince1970)".utf8).write(to: lastRecoveryURL)
-        extensionLog("  [spiral] STUCK, \(count) consecutive empty connections from agent pid \(pid), no acquire. Signaling app to killall WallpaperAgent.")
+        extensionLog(
+            "  [spiral] STUCK, \(count) consecutive empty connections from agent pid \(pid), no acquire. Signaling app to killall WallpaperAgent."
+        )
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(agentStuckNotification as CFString),

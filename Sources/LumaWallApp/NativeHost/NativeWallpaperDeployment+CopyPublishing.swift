@@ -17,12 +17,13 @@ extension NativeWallpaperDeployment {
         sourceFPS: Double, sourceSize: CGSize, displayPixels: [CGSize]
     ) async {
         guard PathSafety.isValidEntryID(entryID),
-              FileManager.default.fileExists(atPath: entryDirectory(entryID).path)
+            FileManager.default.fileExists(atPath: entryDirectory(entryID).path)
         else { return }
         let specs = variantSpecs(sourceSize: sourceSize, sourceFPS: sourceFPS, displayPixels: displayPixels)
-        await encodeQueue.enqueue(specs.map {
-            VariantEncodeQueue.Job(entryID: entryID, sourceURL: sourceURL, contentHash: contentHash, spec: $0)
-        })
+        await encodeQueue.enqueue(
+            specs.map {
+                VariantEncodeQueue.Job(entryID: entryID, sourceURL: sourceURL, contentHash: contentHash, spec: $0)
+            })
     }
 
     /// Removes exports a previous run left behind. Safe to call more than
@@ -114,10 +115,11 @@ extension NativeWallpaperDeployment {
         // A wallpaper removed or redeployed while its jobs waited has
         // nothing to encode for them.
         guard let entry = try? entry(id: job.entryID), entry.contentHash == job.contentHash,
-              !isRecorded(job.spec, in: entry)
+            !isRecorded(job.spec, in: entry)
         else { return .drop }
-        return copyReadiness(job.spec, sourceSize: entry.resolution, sourceFPS: entry.fps,
-                             surfaces: surfaces(for: job.entryID), canMakeOptionalCopies: canMakeFullQualityCopies)
+        return copyReadiness(
+            job.spec, sourceSize: entry.resolution, sourceFPS: entry.fps,
+            surfaces: surfaces(for: job.entryID), canMakeOptionalCopies: canMakeFullQualityCopies)
     }
 
     /// The one queue every copy encode goes through.
@@ -184,7 +186,8 @@ extension NativeWallpaperDeployment {
             let current: EntryInfo
             do {
                 guard let entry = try entry(id: job.entryID, videosFolderURL: videosFolderURL),
-                      entry.contentHash == job.contentHash else {
+                    entry.contentHash == job.contentHash
+                else {
                     try? fm.removeItem(at: staged)
                     return .stale
                 }
@@ -219,7 +222,8 @@ extension NativeWallpaperDeployment {
         let staged = (try? fm.contentsOfDirectory(at: stagingFolderURL, includingPropertiesForKeys: nil)) ?? []
         for file in staged {
             let parts = file.lastPathComponent.split(separator: ".", maxSplits: 2).map(String.init)
-            let keep = !file.lastPathComponent.hasSuffix(".partial.mov")
+            let keep =
+                !file.lastPathComponent.hasSuffix(".partial.mov")
                 && parts.count == 3
                 && PathSafety.isValidEntryID(parts[0])
                 && (try? entry(id: parts[0], videosFolderURL: videosFolderURL))??.contentHash == parts[1]
@@ -233,7 +237,7 @@ extension NativeWallpaperDeployment {
         for dir in entries {
             let id = dir.lastPathComponent
             guard PathSafety.isValidEntryID(id),
-                  let entry = try? entry(id: id, videosFolderURL: videosFolderURL)
+                let entry = try? entry(id: id, videosFolderURL: videosFolderURL)
             else { continue }
             let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
             for file in files where file.lastPathComponent != entry.filename && isLegacyExport(file.lastPathComponent) {
@@ -245,7 +249,7 @@ extension NativeWallpaperDeployment {
     private static func isLegacyExport(_ name: String) -> Bool {
         let copies = ["Wallpaper.reduced.mov", "Wallpaper.minimal.mov", "Wallpaper.qhd.mov"]
         guard name.hasSuffix(".tmp.mov"),
-              let copy = copies.first(where: { name.hasPrefix($0 + ".") })
+            let copy = copies.first(where: { name.hasPrefix($0 + ".") })
         else { return false }
         let uuid = name.dropFirst(copy.count + 1).dropLast(".tmp.mov".count)
         return UUID(uuidString: String(uuid)) != nil

@@ -80,9 +80,10 @@ final class SharedPlaybackHubTests: XCTestCase {
         try await Self.writeVideo(to: url)
         let screen = try XCTUnwrap(NSScreen.screens.first)
         let display = try XCTUnwrap(DisplayCoordinator().displays.first)
-        let asset = WallpaperAsset(name: "Motion fixture", mediaURL: url, duration: 3,
-                                   framesPerSecond: 30, pixelSize: CGSize(width: 32, height: 32),
-                                   contentHash: "fixture", containsAudio: false)
+        let asset = WallpaperAsset(
+            name: "Motion fixture", mediaURL: url, duration: 3,
+            framesPerSecond: 30, pixelSize: CGSize(width: 32, height: 32),
+            contentHash: "fixture", containsAudio: false)
         let existingWindows = Set(NSApp.windows.map(ObjectIdentifier.init))
         let session = DesktopVideoSession(asset: asset, composition: .init(), screen: screen, connected: display)
         defer { session.tearDown() }
@@ -165,9 +166,10 @@ final class SharedPlaybackHubTests: XCTestCase {
     }
 
     private func fixtureAsset(url: URL) -> WallpaperAsset {
-        WallpaperAsset(name: url.lastPathComponent, mediaURL: url, duration: 3,
-                       framesPerSecond: 30, pixelSize: CGSize(width: 32, height: 32),
-                       contentHash: url.lastPathComponent, containsAudio: false)
+        WallpaperAsset(
+            name: url.lastPathComponent, mediaURL: url, duration: 3,
+            framesPerSecond: 30, pixelSize: CGSize(width: 32, height: 32),
+            contentHash: url.lastPathComponent, containsAudio: false)
     }
 
     @MainActor
@@ -197,9 +199,11 @@ final class SharedPlaybackHubTests: XCTestCase {
 
     @MainActor
     private func render(_ layer: CALayer) throws -> [UInt8] {
-        let context = try XCTUnwrap(CGContext(data: nil, width: 32, height: 32, bitsPerComponent: 8,
-                                            bytesPerRow: 128, space: CGColorSpaceCreateDeviceRGB(),
-                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let context = try XCTUnwrap(
+            CGContext(
+                data: nil, width: 32, height: 32, bitsPerComponent: 8,
+                bytesPerRow: 128, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.scaleBy(x: 32 / layer.bounds.width, y: 32 / layer.bounds.height)
         layer.render(in: context)
         let bytes = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
@@ -210,13 +214,18 @@ final class SharedPlaybackHubTests: XCTestCase {
     // XCTest flags as a runtime issue when they run on the main thread.
     nonisolated private static func writeVideo(to url: URL, blue: Bool = false) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 32, AVVideoHeightKey: 32
-        ])
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input,
-            sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-                                         kCVPixelBufferWidthKey as String: 32,
-                                         kCVPixelBufferHeightKey as String: 32])
+        let input = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: [
+                AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 32, AVVideoHeightKey: 32,
+            ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+                kCVPixelBufferWidthKey as String: 32,
+                kCVPixelBufferHeightKey as String: 32,
+            ])
         writer.add(input)
         guard writer.startWriting() else { throw try XCTUnwrap(writer.error) }
         writer.startSession(atSourceTime: .zero)

@@ -56,18 +56,20 @@ struct PathSafetyTests {
     @Test func descendantAndSelfAreContained() throws {
         let base = URL(fileURLWithPath: "/tmp/LumaWall-lib", isDirectory: true)
         #expect(PathSafety.contained(base, in: base))
-        #expect(PathSafety.contained(
-            base.appendingPathComponent("550E8400").appendingPathComponent("wallpaper.mov"),
-            in: base
-        ))
+        #expect(
+            PathSafety.contained(
+                base.appendingPathComponent("550E8400").appendingPathComponent("wallpaper.mov"),
+                in: base
+            ))
     }
 
     @Test func dotDotEscapeIsNotContained() {
         let base = URL(fileURLWithPath: "/tmp/LumaWall-lib", isDirectory: true)
-        #expect(!PathSafety.contained(
-            base.appendingPathComponent("..").appendingPathComponent("evil.mov"),
-            in: base
-        ))
+        #expect(
+            !PathSafety.contained(
+                base.appendingPathComponent("..").appendingPathComponent("evil.mov"),
+                in: base
+            ))
         #expect(!PathSafety.contained(URL(fileURLWithPath: "/etc/passwd"), in: base))
     }
 
@@ -75,9 +77,10 @@ struct PathSafetyTests {
         // "/tmp/LumaWall-lib-evil" shares a string prefix with the base but is
         // NOT inside it. The trailing-slash check must reject it.
         let base = URL(fileURLWithPath: "/tmp/LumaWall-lib", isDirectory: true)
-        #expect(!PathSafety.contained(
-            URL(fileURLWithPath: "/tmp/LumaWall-lib-evil/x.mov"),
-            in: base
-        ))
+        #expect(
+            !PathSafety.contained(
+                URL(fileURLWithPath: "/tmp/LumaWall-lib-evil/x.mov"),
+                in: base
+            ))
     }
 }

@@ -286,7 +286,7 @@ final class PowerMonitor: Sendable {
     /// returns nothing.
     private static func readBattery() -> (onBattery: Bool, level: Int)? {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
+            let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
         else { return nil }
 
         // Walk EVERY source: the list mixes battery + AC adapter entries, and
@@ -324,18 +324,20 @@ final class PowerMonitor: Sendable {
         var brightness: Float?
         while case let service = IOIteratorNext(iter), service != IO_OBJECT_NULL {
             defer { IOObjectRelease(service) }
-            guard let propsRef = unsafe IORegistryEntryCreateCFProperty(
-                service,
-                "IODisplayParameters" as CFString,
-                kCFAllocatorDefault,
-                0,
-            ) else { continue }
+            guard
+                let propsRef = unsafe IORegistryEntryCreateCFProperty(
+                    service,
+                    "IODisplayParameters" as CFString,
+                    kCFAllocatorDefault,
+                    0,
+                )
+            else { continue }
             guard let params = unsafe propsRef.takeRetainedValue() as? [String: Any],
-                  let brightnessParam = params["brightness"] as? [String: Any],
-                  let value = brightnessParam["value"] as? Int,
-                  let min = brightnessParam["min"] as? Int,
-                  let max = brightnessParam["max"] as? Int,
-                  max > min
+                let brightnessParam = params["brightness"] as? [String: Any],
+                let value = brightnessParam["value"] as? Int,
+                let min = brightnessParam["min"] as? Int,
+                let max = brightnessParam["max"] as? Int,
+                max > min
             else { continue }
             brightness = Float(value - min) / Float(max - min)
             break

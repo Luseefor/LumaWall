@@ -28,9 +28,10 @@ struct MediaImporterTests {
         #expect(inspection.contentHash.count == 64)
         #expect(inspection.fileSize > 0)
         // 1280 wide is below the 1080p bar: softness warning must fire.
-        #expect(inspection.recommendations.contains {
-            $0.contains("below 1080p")
-        })
+        #expect(
+            inspection.recommendations.contains {
+                $0.contains("below 1080p")
+            })
     }
 
     @Test func importsSilentVideoByCopyWithPoster() async throws {
@@ -118,8 +119,9 @@ struct MediaImporterTests {
     }
 
     @Test func importErrorMessagesAreHumanReadable() {
-        #expect(MediaImporter.ImportError.noVideoTrack.errorDescription?
-            .contains("no video track") == true)
+        #expect(
+            MediaImporter.ImportError.noVideoTrack.errorDescription?
+                .contains("no video track") == true)
         #expect(!(MediaImporter.ImportError.invalidDuration.errorDescription?.isEmpty ?? true))
         #expect(!(MediaImporter.ImportError.unsupportedMedia.errorDescription?.isEmpty ?? true))
         #expect(!(MediaImporter.ImportError.posterGenerationFailed.errorDescription?.isEmpty ?? true))
@@ -134,15 +136,18 @@ struct MediaImporterTests {
                 containsAudio: false
             )
         }
-        #expect(inspection(duration: 61, fps: 30, fileSize: 10).recommendations.contains {
-            $0.contains("Long loops")
-        })
-        #expect(inspection(duration: 5, fps: 30, fileSize: 201 * 1_024 * 1_024).recommendations.contains {
-            $0.contains("200 MB")
-        })
-        #expect(inspection(duration: 5, fps: 240, fileSize: 10).recommendations.contains {
-            $0.contains("120 FPS")
-        })
+        #expect(
+            inspection(duration: 61, fps: 30, fileSize: 10).recommendations.contains {
+                $0.contains("Long loops")
+            })
+        #expect(
+            inspection(duration: 5, fps: 30, fileSize: 201 * 1_024 * 1_024).recommendations.contains {
+                $0.contains("200 MB")
+            })
+        #expect(
+            inspection(duration: 5, fps: 240, fileSize: 10).recommendations.contains {
+                $0.contains("120 FPS")
+            })
         #expect(inspection(duration: 5, fps: 30, fileSize: 10).recommendations.isEmpty)
     }
 
@@ -159,10 +164,11 @@ struct MediaImporterTests {
     /// Encodes a 1-second 1280×720 black H.264 movie, optionally with a silent
     /// mono AAC track, and returns its URL.
     private func makeVideo(withAudio: Bool, in dir: URL? = nil, name: String = "source.mov") async throws -> URL {
-        let dir = try dir.map {
-            try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
-            return $0
-        } ?? FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let dir =
+            try dir.map {
+                try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
+                return $0
+            } ?? FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name)
 
@@ -193,16 +199,20 @@ struct MediaImporterTests {
                 mChannelsPerFrame: 1, mBitsPerChannel: 32, mReserved: 0
             )
             var format: CMFormatDescription?
-            guard CMAudioFormatDescriptionCreate(
-                allocator: kCFAllocatorDefault, asbd: &asbd, layoutSize: 0,
-                layout: nil, magicCookieSize: 0, magicCookie: nil,
-                extensions: nil, formatDescriptionOut: &format
-            ) == noErr, let format else { throw MediaImporter.ImportError.unsupportedMedia }
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 44_100,
-                AVNumberOfChannelsKey: 1,
-            ], sourceFormatHint: format)
+            guard
+                CMAudioFormatDescriptionCreate(
+                    allocator: kCFAllocatorDefault, asbd: &asbd, layoutSize: 0,
+                    layout: nil, magicCookieSize: 0, magicCookie: nil,
+                    extensions: nil, formatDescriptionOut: &format
+                ) == noErr, let format
+            else { throw MediaImporter.ImportError.unsupportedMedia }
+            let input = AVAssetWriterInput(
+                mediaType: .audio,
+                outputSettings: [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 44_100,
+                    AVNumberOfChannelsKey: 1,
+                ], sourceFormatHint: format)
             input.expectsMediaDataInRealTime = false
             writer.add(input)
             audioInput = input
@@ -280,9 +290,11 @@ struct MediaImporterTests {
 
     private func makeBlackPixelBuffer() throws -> CVPixelBuffer {
         var buffer: CVPixelBuffer?
-        guard CVPixelBufferCreate(
-            kCFAllocatorDefault, 1280, 720, kCVPixelFormatType_32BGRA, nil, &buffer
-        ) == kCVReturnSuccess, let buffer else {
+        guard
+            CVPixelBufferCreate(
+                kCFAllocatorDefault, 1280, 720, kCVPixelFormatType_32BGRA, nil, &buffer
+            ) == kCVReturnSuccess, let buffer
+        else {
             throw MediaImporter.ImportError.unsupportedMedia
         }
         CVPixelBufferLockBaseAddress(buffer, [])

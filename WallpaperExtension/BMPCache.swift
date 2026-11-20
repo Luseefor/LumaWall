@@ -9,7 +9,7 @@ func clearWallpaperSnapshotCache() {
     let gained = cacheDir.startAccessingSecurityScopedResource()
     defer { if gained { cacheDir.stopAccessingSecurityScopedResource() } }
     guard gained,
-          let contents = try? FileManager.default.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil)
+        let contents = try? FileManager.default.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil)
     else { return }
     for file in contents where file.pathExtension == "bmp" {
         try? FileManager.default.removeItem(at: file)
@@ -38,7 +38,9 @@ func loadCachedSnapshotImage(forChoice videoID: String?, videoURL: URL, pixelWid
         version: stillVersion(of: videoURL),
         size: StillSize(width: pixelWidth, height: pixelHeight),
     )
-    traceLog("  [InitContent] cached still for \(videoURL.lastPathComponent) at \(pixelWidth)x\(pixelHeight): \(image.map { "\($0.width)x\($0.height)" } ?? "none")")
+    traceLog(
+        "  [InitContent] cached still for \(videoURL.lastPathComponent) at \(pixelWidth)x\(pixelHeight): \(image.map { "\($0.width)x\($0.height)" } ?? "none")"
+    )
     return image
 }
 
@@ -48,7 +50,8 @@ func loadCachedStill(ofVideo videoURL: URL, pixelWidth: Int, pixelHeight: Int) -
     guard let cacheDir = WallpaperState.shared.cacheDirectoryURL else { return nil }
     let gained = cacheDir.startAccessingSecurityScopedResource()
     defer { if gained { cacheDir.stopAccessingSecurityScopedResource() } }
-    return stillStore.load(in: cacheDir, choiceHash: nil, version: stillVersion(of: videoURL), size: StillSize(width: pixelWidth, height: pixelHeight))
+    return stillStore.load(
+        in: cacheDir, choiceHash: nil, version: stillVersion(of: videoURL), size: StillSize(width: pixelWidth, height: pixelHeight))
 }
 
 /// Make sure the Agent's cache directory holds a BMP of the video's first

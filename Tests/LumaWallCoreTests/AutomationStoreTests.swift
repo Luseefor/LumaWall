@@ -39,7 +39,7 @@ struct AutomationStoreTests {
     @Test func weekdayMaskAllowsSelectedDaysOnly() throws {
         let monday = try #require(calendar.date(from: DateComponents(year: 2026, month: 1, day: 5)))
         let sunday = try #require(calendar.date(from: DateComponents(year: 2026, month: 1, day: 4)))
-        let weekdaysOnly = WallpaperAutomations(weekdayMask: 0b0111110) // Mon–Fri
+        let weekdaysOnly = WallpaperAutomations(weekdayMask: 0b0111110)  // Mon–Fri
         #expect(weekdaysOnly.allowsWeekday(at: monday, calendar: calendar))
         #expect(!weekdaysOnly.allowsWeekday(at: sunday, calendar: calendar))
         #expect(WallpaperAutomations().allowsWeekday(at: sunday, calendar: calendar))

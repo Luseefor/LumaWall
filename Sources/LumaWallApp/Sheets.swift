@@ -140,8 +140,8 @@ struct PreviewSheet: View {
                 url: NativeWallpaperDeployment.previewURL(for: asset, minPixelWidth: NativeWallpaperDeployment.PreviewSize.sheet),
                 isSuspended: model.screenIsHidden
             )
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .background(.black)
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .background(.black)
             HStack(spacing: 12) {
                 BrandMark(size: 28)
                 VStack(alignment: .leading, spacing: 4) {
@@ -150,10 +150,13 @@ struct PreviewSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Picker("Category", selection: Binding(
-                    get: { asset.category },
-                    set: { model.setCategory($0, for: asset) }
-                )) {
+                Picker(
+                    "Category",
+                    selection: Binding(
+                        get: { asset.category },
+                        set: { model.setCategory($0, for: asset) }
+                    )
+                ) {
                     ForEach(WallpaperCategory.allCases) { category in
                         Text(category.title).tag(category)
                     }
@@ -204,7 +207,9 @@ struct PlaylistEditorSheet: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(model.assets) { asset in
-                                Button { model.toggleEditorEntry(asset) } label: {
+                                Button {
+                                    model.toggleEditorEntry(asset)
+                                } label: {
                                     HStack {
                                         Text(asset.name).lineLimit(1)
                                         Spacer()

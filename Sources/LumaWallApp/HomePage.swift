@@ -37,10 +37,16 @@ struct HomePage: View {
                 }
 
                 HStack(spacing: 12) {
-                    QuickLink(symbol: "display.2", title: "Displays", detail: model.displays.isEmpty ? "Detect screens" : "\(model.displays.count) connected") {
+                    QuickLink(
+                        symbol: "display.2", title: "Displays",
+                        detail: model.displays.isEmpty ? "Detect screens" : "\(model.displays.count) connected"
+                    ) {
                         model.section = .displays
                     }
-                    QuickLink(symbol: "rectangle.stack.fill", title: "Library", detail: model.playlists.isEmpty ? "Playlists & schedules" : "\(model.playlists.count) playlists") {
+                    QuickLink(
+                        symbol: "rectangle.stack.fill", title: "Library",
+                        detail: model.playlists.isEmpty ? "Playlists & schedules" : "\(model.playlists.count) playlists"
+                    ) {
                         model.section = .library
                     }
                     QuickLink(symbol: "leaf.fill", title: "Energy", detail: model.powerProfile.label) {
@@ -175,9 +181,11 @@ struct FeaturedHero: View {
         .onChange(of: assets.map(\.id)) { _, _ in
             syncSlideIndex()
         }
-        .background(WindowVisibilityReader { visible in
-            if isOnScreen != visible { isOnScreen = visible }
-        })
+        .background(
+            WindowVisibilityReader { visible in
+                if isOnScreen != visible { isOnScreen = visible }
+            }
+        )
         // Auto-cancelled by SwiftUI on disappear / count / visibility change.
         // Keyed on the count (not the ID list) so metadata reloads from
         // apply/recordApply don't restart the 4s cadence and make the hero jitter.
@@ -202,14 +210,14 @@ struct FeaturedHero: View {
                     url: NativeWallpaperDeployment.previewURL(for: asset, minPixelWidth: NativeWallpaperDeployment.PreviewSize.hero),
                     isSuspended: model.screenIsHidden
                 )
-                    .id(asset.id)
-                    .transition(.opacity)
+                .id(asset.id)
+                .transition(.opacity)
             } else {
                 LinearGradient(
                     colors: [
                         Color(red: 0.06, green: 0.18, blue: 0.20),
                         Color(red: 0.03, green: 0.06, blue: 0.09),
-                        Color(red: 0.02, green: 0.04, blue: 0.06)
+                        Color(red: 0.02, green: 0.04, blue: 0.06),
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -264,7 +272,8 @@ struct FeaturedHero: View {
             slideIndex = 0
         }
         if let featured = model.featured,
-           let index = assets.firstIndex(where: { $0.id == featured.id }) {
+            let index = assets.firstIndex(where: { $0.id == featured.id })
+        {
             slideIndex = index
         }
     }

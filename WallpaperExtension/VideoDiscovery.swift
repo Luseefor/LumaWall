@@ -12,8 +12,8 @@ import ImageIO
 /// wallpaper on the display ("when i put one it goes another").
 func findVideoURL(forChoice videoID: String?) -> URL? {
     guard let videoID,
-          let url = VideoLibrary.shared.videoURL(for: videoID),
-          FileManager.default.fileExists(atPath: url.path)
+        let url = VideoLibrary.shared.videoURL(for: videoID),
+        FileManager.default.fileExists(atPath: url.path)
     else {
         if videoID != nil {
             extensionLog("  [VideoDiscovery] no file for choice \(videoID ?? "nil"), returning nil (no wrong-video fallback)")
@@ -50,15 +50,19 @@ func generateThumbnail(from videoURL: URL) async -> URL? {
     try? FileManager.default.createDirectory(at: docsDir, withIntermediateDirectories: true)
     let thumbnailURL = docsDir.appendingPathComponent("thumbnail.jpg")
 
-    guard let dest = CGImageDestinationCreateWithURL(
-        thumbnailURL as CFURL, "public.jpeg" as CFString, 1, nil,
-    ) else {
+    guard
+        let dest = CGImageDestinationCreateWithURL(
+            thumbnailURL as CFURL, "public.jpeg" as CFString, 1, nil,
+        )
+    else {
         extensionLog("  Thumbnail: failed to create image destination")
         return nil
     }
-    CGImageDestinationAddImage(dest, cgImage, [
-        kCGImageDestinationLossyCompressionQuality: 0.85,
-    ] as CFDictionary)
+    CGImageDestinationAddImage(
+        dest, cgImage,
+        [
+            kCGImageDestinationLossyCompressionQuality: 0.85
+        ] as CFDictionary)
     guard CGImageDestinationFinalize(dest) else {
         extensionLog("  Thumbnail: failed to finalize")
         return nil

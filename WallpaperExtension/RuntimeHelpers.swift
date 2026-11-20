@@ -6,24 +6,28 @@ import IOSurface
 /// WallpaperExtensionRemoteContext with a single UInt32 remoteContextID.
 func createRemoteContextXPC(contextId: UInt32) -> AnyObject? {
     guard let realClass = objc_getClass("WallpaperRemoteContextXPC") as? AnyClass,
-          let raw = class_createInstance(realClass, 0) else {
+        let raw = class_createInstance(realClass, 0)
+    else {
         extensionLog("  ERROR: Could not create WallpaperRemoteContextXPC")
         return nil
     }
 
     let obj = raw as AnyObject
     let ptr = Unmanaged.passUnretained(obj).toOpaque()
-    let ivarOffset: Int = if let ivar = class_getInstanceVariable(realClass, "box") {
-        ivar_getOffset(ivar)
-    } else {
-        8
-    }
+    let ivarOffset: Int =
+        if let ivar = class_getInstanceVariable(realClass, "box") {
+            ivar_getOffset(ivar)
+        } else {
+            8
+        }
     // Bounds-check before the raw write: if the runtime layout shrank or the
     // offset assumption is stale, writing past the instance would corrupt the
     // heap. Fail closed instead.
     guard ivarOffset >= 0,
-          ivarOffset + MemoryLayout<UInt32>.size <= class_getInstanceSize(realClass) else {
-        extensionLog("  ERROR: WallpaperRemoteContextXPC layout unexpected (offset \(ivarOffset), size \(class_getInstanceSize(realClass)))")
+        ivarOffset + MemoryLayout<UInt32>.size <= class_getInstanceSize(realClass)
+    else {
+        extensionLog(
+            "  ERROR: WallpaperRemoteContextXPC layout unexpected (offset \(ivarOffset), size \(class_getInstanceSize(realClass)))")
         return nil
     }
     ptr.advanced(by: ivarOffset).storeBytes(of: contextId, as: UInt32.self)
@@ -36,7 +40,8 @@ func createRemoteContextXPC(contextId: UInt32) -> AnyObject? {
 /// a WallpaperSnapshot struct (8 bytes = IOSurface refcounted pointer).
 func createSnapshotXPC(surface: IOSurface) -> AnyObject? {
     guard let snapshotXPCClass = objc_getClass("WallpaperSnapshotXPC") as? AnyClass,
-          let instance = class_createInstance(snapshotXPCClass, 0) else {
+        let instance = class_createInstance(snapshotXPCClass, 0)
+    else {
         extensionLog("  [Snapshot] Failed to create WallpaperSnapshotXPC")
         return nil
     }

@@ -12,7 +12,7 @@ public struct PowerStatus: Sendable, Equatable {
 
     public static func current() -> PowerStatus {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let list = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
+            let list = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef]
         else {
             return PowerStatus(isOnBattery: false, percent: 100)
         }

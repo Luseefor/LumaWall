@@ -27,8 +27,8 @@ enum WallpaperStoreProbe {
         let url = storeURL ?? defaultStoreURL
         // attributesOfItem reads fresh; URL.resourceValues caches per URL value.
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let modified = attributes[.modificationDate] as? Date,
-              let size = (attributes[.size] as? NSNumber)?.intValue
+            let modified = attributes[.modificationDate] as? Date,
+            let size = (attributes[.size] as? NSNumber)?.intValue
         else {
             cached = nil
             return false
@@ -39,7 +39,7 @@ enum WallpaperStoreProbe {
         // Cache only a successful read: a transient failure (permissions, a
         // half-written file) keeps the same stamp and must be retried.
         guard let data = try? Data(contentsOf: url),
-              let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+            let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
         else {
             cached = nil
             return false
@@ -63,8 +63,8 @@ enum WallpaperStoreProbe {
 
     private static func hasOurChoice(in node: Any?, provider: String) -> Bool {
         guard let idle = node as? [String: Any],
-              let content = idle["Content"] as? [String: Any],
-              let choices = content["Choices"] as? [[String: Any]]
+            let content = idle["Content"] as? [String: Any],
+            let choices = content["Choices"] as? [[String: Any]]
         else { return false }
         return choices.contains { ($0["Provider"] as? String) == provider }
     }

@@ -28,7 +28,8 @@ extension AppModel {
             LocationDaylightProvider.shared.requestIfNeeded()
         }
         if let lockID = automations.lockScreenWallpaperID,
-           let asset = assets.first(where: { $0.id == lockID }) {
+            let asset = assets.first(where: { $0.id == lockID })
+        {
             await applyLockScreenWallpaper(asset)
         }
         await consumePendingShortcutIfNeeded()
@@ -41,13 +42,16 @@ extension AppModel {
         if pending == "__featured__" {
             asset = featured
         } else {
-            asset = assets.first { $0.name.compare(pending, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+            asset =
+                assets.first { $0.name.compare(pending, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
                 ?? assets.first { $0.name.localizedCaseInsensitiveContains(pending) }
         }
         guard let asset else {
-            present("Shortcuts", pending == "__featured__"
-                ? "No wallpaper is ready to apply."
-                : "No wallpaper matched \"\(pending)\".")
+            present(
+                "Shortcuts",
+                pending == "__featured__"
+                    ? "No wallpaper is ready to apply."
+                    : "No wallpaper matched \"\(pending)\".")
             return
         }
         stopPlaylistRotation()
@@ -69,10 +73,11 @@ extension AppModel {
     }
 
     func refreshActive() {
-        activeByDisplay = Dictionary(uniqueKeysWithValues: engine.activeDisplayIDs.compactMap { id in
-            guard let wallpaper = engine.wallpaperID(on: id) else { return nil }
-            return (id, wallpaper)
-        })
+        activeByDisplay = Dictionary(
+            uniqueKeysWithValues: engine.activeDisplayIDs.compactMap { id in
+                guard let wallpaper = engine.wallpaperID(on: id) else { return nil }
+                return (id, wallpaper)
+            })
         displays = displayCoordinator.displays
     }
 

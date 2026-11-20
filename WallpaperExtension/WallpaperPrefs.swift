@@ -133,7 +133,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         do {
             data = try Data(contentsOf: Self.prefsURL)
         } catch {
-            return .none // File doesn't exist yet, normal on first launch
+            return .none  // File doesn't exist yet, normal on first launch
         }
         do {
             let prefs = try JSONDecoder().decode(WallpaperPrefsFile.self, from: data)
@@ -141,7 +141,9 @@ final class WallpaperPrefs: @unchecked Sendable {
                 defer { state = prefs }
                 return state
             }
-            traceLog("[WallpaperPrefs] Loaded: userPaused=\(prefs.userPaused), alwaysPauseDesktop=\(prefs.alwaysPauseDesktop), pauseWhenOccluded=\(prefs.pauseWhenOccluded), desktopOccluded=\(prefs.desktopOccluded)")
+            traceLog(
+                "[WallpaperPrefs] Loaded: userPaused=\(prefs.userPaused), alwaysPauseDesktop=\(prefs.alwaysPauseDesktop), pauseWhenOccluded=\(prefs.pauseWhenOccluded), desktopOccluded=\(prefs.desktopOccluded)"
+            )
             return PrefsReload.between(old, prefs)
         } catch {
             extensionLog("[WallpaperPrefs] Failed to decode prefs: \(error)")
@@ -246,12 +248,14 @@ final class WallpaperPrefs: @unchecked Sendable {
         for displayID in displayIDs.map(Optional.some) + [nil] {
             let displayPolicy = policy(for: displayID)
             state.forLiveRenderers(displayID: displayID) { renderer in
-                renderer.applyPolicy(displayPolicy, animated: animated, hardPause: hardPause && displayPolicy == .paused, onBattery: powerState.isOnBattery)
+                renderer.applyPolicy(
+                    displayPolicy, animated: animated, hardPause: hardPause && displayPolicy == .paused, onBattery: powerState.isOnBattery)
             }
         }
         let previewTier = previewPolicy(powerState: powerState)
         state.forPreviewRenderers { renderer in
-            renderer.applyPolicy(previewTier, animated: false, hardPause: hardPause && previewTier == .paused, onBattery: powerState.isOnBattery)
+            renderer.applyPolicy(
+                previewTier, animated: false, hardPause: hardPause && previewTier == .paused, onBattery: powerState.isOnBattery)
         }
     }
 

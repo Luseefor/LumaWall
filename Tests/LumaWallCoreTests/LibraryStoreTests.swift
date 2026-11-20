@@ -51,8 +51,8 @@ struct LibraryStoreTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let legacy = """
-        [{"id":{"rawValue":"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"},"name":"Legacy","mediaURL":"file:///tmp/a.mov","duration":10,"framesPerSecond":30,"pixelSize":[1920,1080],"contentHash":"legacy","containsAudio":false}]
-        """
+            [{"id":{"rawValue":"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"},"name":"Legacy","mediaURL":"file:///tmp/a.mov","duration":10,"framesPerSecond":30,"pixelSize":[1920,1080],"contentHash":"legacy","containsAudio":false}]
+            """
         try Data(legacy.utf8).write(to: root.appendingPathComponent("Library.json"))
         let store = try LibraryStore(rootURL: root)
         let assets = await store.assets()
@@ -227,16 +227,18 @@ struct LibraryStoreTests {
 
         // Points at a sibling entry's folder: also refused.
         let hijackID = WallpaperID()
-        try await store.install(asset(
-            id: hijackID, hash: "hijacker",
-            mediaURL: siblingFolder.appendingPathComponent("w.mov")
-        ))
+        try await store.install(
+            asset(
+                id: hijackID, hash: "hijacker",
+                mediaURL: siblingFolder.appendingPathComponent("w.mov")
+            ))
         await #expect(throws: LibraryStore.StoreError.invalidLocation) {
             try await store.remove(id: hijackID)
         }
         #expect(FileManager.default.fileExists(atPath: siblingFolder.path))
-        #expect(LibraryStore.StoreError.invalidLocation.errorDescription?
-            .contains("outside the library") == true)
+        #expect(
+            LibraryStore.StoreError.invalidLocation.errorDescription?
+                .contains("outside the library") == true)
     }
 
     @Test func corruptLibraryIsQuarantinedNotSilentlyReset() async throws {

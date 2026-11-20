@@ -21,7 +21,9 @@ final class StillCacheStoreTests: XCTestCase {
 
     /// A still at its final name, as an earlier write would have left it.
     @discardableResult
-    private func place(_ hash: String, _ size: StillSize, version: String?, usedAgo: TimeInterval, data: Data? = stillFixture(stillBlue)) throws -> URL {
+    private func place(_ hash: String, _ size: StillSize, version: String?, usedAgo: TimeInterval, data: Data? = stillFixture(stillBlue))
+        throws -> URL
+    {
         let entry = StillCacheEntry(key: StillCacheKey(choiceHash: hash, width: size.width, height: size.height), written: 1)
         let url = dir.appendingPathComponent(entry.fileName)
         try XCTUnwrap(data).write(to: url)
@@ -88,17 +90,19 @@ final class StillCacheStoreTests: XCTestCase {
         let seedFound = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let seedWasBlocked = OSAllocatedUnfairLock<Bool?>(initialState: nil)
         let seedDone = expectation(description: "seed returned")
-        let store = StillCacheStore(budget: 2 * stillFixtureBytes, onEvictionScan: {
-            DispatchQueue.global().async {
-                let image = shared.withLock { $0 }?.load(in: dir, choiceHash: seedHash, version: "v1", size: qhd)
-                seedFound.withLock { $0 = image != nil }
-                seedDone.fulfill()
-            }
-            // Hold the scan until the seed has found the lock taken, however
-            // late it is scheduled. Without the lock it never blocks.
-            let blocked = seedBlocked.wait(timeout: .now() + 5) == .success
-            seedWasBlocked.withLock { $0 = blocked }
-        }, onSeedBlocked: { seedBlocked.signal() })
+        let store = StillCacheStore(
+            budget: 2 * stillFixtureBytes,
+            onEvictionScan: {
+                DispatchQueue.global().async {
+                    let image = shared.withLock { $0 }?.load(in: dir, choiceHash: seedHash, version: "v1", size: qhd)
+                    seedFound.withLock { $0 = image != nil }
+                    seedDone.fulfill()
+                }
+                // Hold the scan until the seed has found the lock taken, however
+                // late it is scheduled. Without the lock it never blocks.
+                let blocked = seedBlocked.wait(timeout: .now() + 5) == .success
+                seedWasBlocked.withLock { $0 = blocked }
+            }, onSeedBlocked: { seedBlocked.signal() })
         shared.withLock { $0 = store }
         let writeDone = expectation(description: "write returned")
         let hashB = hashB, fourK = fourK
@@ -348,7 +352,8 @@ final class StillCacheStoreTests: XCTestCase {
         let gate = StillTestGate()
         let decodes = OSAllocatedUnfairLock(initialState: 0)
         let dir = dir!, hashA = hashA, qhd = qhd
-        let leader = startHeldWrite(store, in: dir, choiceHash: hashA, version: "v1", size: qhd, gate: gate, bgr: stillBlue, decodes: decodes)
+        let leader = startHeldWrite(
+            store, in: dir, choiceHash: hashA, version: "v1", size: qhd, gate: gate, bgr: stillBlue, decodes: decodes)
         guard await gate.reached() else { gate.open(); return XCTFail("the leader never started decoding") }
         let follower = await store.write(in: dir, choiceHash: hashA, version: "v1", size: fourK) {
             decodes.withLock { $0 += 1 }
@@ -417,8 +422,12 @@ final class StillTestGate: Sendable {
     /// store that never encodes fails the test instead of hanging it.
     func reached() async -> Bool {
         await withTaskGroup(of: Bool.self) { group in
-            group.addTask { for await _ in self.arrived.stream { return true }; return false }
-            group.addTask { try? await Task.sleep(for: .seconds(5)); return false }
+            group.addTask {
+                for await _ in self.arrived.stream { return true }; return false
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5)); return false
+            }
             let first = await group.next() ?? false
             group.cancelAll()
             return first

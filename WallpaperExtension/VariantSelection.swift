@@ -40,12 +40,13 @@ enum VariantSelection {
             return nil
         case .full:
             if let displayPixels,
-               let fitted = smallestFilling(displayPixels, sourceFPS: sourceFPS, sourceResolution: sourceResolution, variants: variants) {
+                let fitted = smallestFilling(displayPixels, sourceFPS: sourceFPS, sourceResolution: sourceResolution, variants: variants)
+            {
                 return fitted
             }
             guard let top = sorted.first,
-                  top.fps >= sourceFPS,
-                  covers(top.resolution, sourceResolution)
+                top.fps >= sourceFPS,
+                covers(top.resolution, sourceResolution)
             else { return nil }
             return top
         case .reduced:
@@ -103,7 +104,8 @@ enum VariantSelection {
     ) -> VideoVariant? {
         guard display.width > 0, display.height > 0 else { return nil }
         let sourceArea = sourceResolution.width * sourceResolution.height
-        return variants
+        return
+            variants
             .filter { $0.fps >= sourceFPS }
             .filter { $0.resolution.width * $0.resolution.height < sourceArea }
             .filter { fills($0.resolution, display) }

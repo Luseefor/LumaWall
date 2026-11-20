@@ -26,7 +26,9 @@ extension VideoRenderer {
         // The second check catches a preview whose copy didn't open (a held
         // switch fell back to the original) at an unchanged tier.
         guard policy != lifecycle.policy || playedTier(requested, playing: asset.url) != lifecycle.policy else { return }
-        extensionLog("  [applyPolicy #\(debugID)] \(lifecycle.policy) → \(policy) animated=\(animated) asleep=\(lifecycle.displayAsleep) asset=\(asset.url.lastPathComponent)")
+        extensionLog(
+            "  [applyPolicy #\(debugID)] \(lifecycle.policy) → \(policy) animated=\(animated) asleep=\(lifecycle.displayAsleep) asset=\(asset.url.lastPathComponent)"
+        )
         // Battery tiers resolve to downscaled siblings via the selector,
         // but the selector is otherwise consulted only at loop boundaries,
         // without this, flipping to Battery Saver (or unplugging on
@@ -34,7 +36,8 @@ extension VideoRenderer {
         // to a minute later. Switch now when the URL differs. The asset
         // change goes first so the tier's resume waits for its reset.
         if lifecycle.wouldPlay(policy),
-           case let .opened(loaded) = copy.retier(current: asset.url, tier: policy, displayPixels: displayPixelSize, open: loadBlocking) {
+            case let .opened(loaded) = copy.retier(current: asset.url, tier: policy, displayPixels: displayPixelSize, open: loadBlocking)
+        {
             adopt(loaded)
             send(.assetChanged)
         }
@@ -90,7 +93,9 @@ extension VideoRenderer {
             guard open else { send(.surfaceClosed); return }
             var changed = false
             if !lifecycle.displayAsleep,
-               case let .opened(loaded) = copy.reopen(current: asset.url, tier: requestedTier, displayPixels: displayPixelSize, open: loadBlocking) {
+                case let .opened(loaded) = copy.reopen(
+                    current: asset.url, tier: requestedTier, displayPixels: displayPixelSize, open: loadBlocking)
+            {
                 adopt(loaded)
                 changed = true
             }
@@ -110,7 +115,9 @@ extension VideoRenderer {
             var changed = false
             // A closed surface keeps its held switch and copy for the reopen.
             if lifecycle.surfaceOpen,
-               case let .opened(loaded) = copy.wake(current: asset.url, tier: requestedTier, displayPixels: displayPixelSize, open: loadBlocking) {
+                case let .opened(loaded) = copy.wake(
+                    current: asset.url, tier: requestedTier, displayPixels: displayPixelSize, open: loadBlocking)
+            {
                 adopt(loaded)
                 changed = true
             }

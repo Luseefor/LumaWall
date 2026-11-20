@@ -8,9 +8,14 @@ extension WallpaperXPCHandler {
     /// Bisection acquire: identical CAContext reuse/create/reply as `acquireBody`, but
     /// hosts a still (via `bisectShowStill`) instead of a VideoRenderer. Runs on
     /// `Lifecycle.queue`. See StillBisect.swift.
-    func acquireStillOnlyBisect(key: DisplayKey, displayID: UInt32?, destSize: CGSize, scaleFactor: CGFloat, videoURL: URL?, cachedStill: CGImage?, choice: String?, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
+    func acquireStillOnlyBisect(
+        key: DisplayKey, displayID: UInt32?, destSize: CGSize, scaleFactor: CGFloat, videoURL: URL?, cachedStill: CGImage?, choice: String?,
+        reply: @escaping @Sendable (Any?, (any Error)?) -> Void
+    ) {
         if let existing = WallpaperState.shared.context(for: key) {
-            traceLog("  [bisect] REUSE ctx=\(existing.contextId) display=\(key.displayID) stored=\(existing.videoID ?? "nil") new=\(choice ?? "nil")")
+            traceLog(
+                "  [bisect] REUSE ctx=\(existing.contextId) display=\(key.displayID) stored=\(existing.videoID ?? "nil") new=\(choice ?? "nil")"
+            )
             guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
                 reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
             }
@@ -29,11 +34,14 @@ extension WallpaperXPCHandler {
 
         var contextOptions: [String: Any] = [:]
         if let did = displayID { contextOptions["displayId"] = did }
-        let caContextRaw: Any? = contextOptions.isEmpty
+        let caContextRaw: Any? =
+            contextOptions.isEmpty
             ? CAContext.remoteContext()
             : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
         guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
-            reply(nil, NSError(domain: "LumaWallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
+            reply(
+                nil,
+                NSError(domain: "LumaWallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
             return
         }
         let rootLayer = CALayer()
@@ -46,7 +54,9 @@ extension WallpaperXPCHandler {
             reply(nil, NSError(domain: "LumaWallExtension", code: 3, userInfo: nil)); return
         }
         WallpaperState.shared.installContext(
-            ActiveWallpaper(caContext: caContext, contextId: caContext.contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choice, isPreview: acquiredAsPreview, destSize: destSize, scaleFactor: scaleFactor),
+            ActiveWallpaper(
+                caContext: caContext, contextId: caContext.contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID,
+                videoID: choice, isPreview: acquiredAsPreview, destSize: destSize, scaleFactor: scaleFactor),
             for: key,
         )
         // `bisectShowStill` decodes synchronously on `Lifecycle.queue`, where

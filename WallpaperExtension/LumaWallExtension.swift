@@ -67,7 +67,8 @@ final class LumaWallExtension: NSObject, AppExtension {
         if missing.isEmpty {
             extensionLog("  [SelfCheck] Runtime layout OK, all \(critical.count) critical classes present")
         } else {
-            extensionLog("  [SelfCheck] UNSUPPORTED RUNTIME, missing: \(missing.joined(separator: ", ")). Rendering/snapshots may be degraded.")
+            extensionLog(
+                "  [SelfCheck] UNSUPPORTED RUNTIME, missing: \(missing.joined(separator: ", ")). Rendering/snapshots may be degraded.")
         }
     }
 

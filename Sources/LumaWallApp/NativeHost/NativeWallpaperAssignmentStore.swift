@@ -11,26 +11,28 @@ enum NativeWallpaperAssignmentStore {
     ) -> Set<String> {
         var changed = Set<String>()
         if let displays = root["Displays"] as? NSMutableDictionary {
-            changed.formUnion(updateDisplays(
-                displays,
-                choiceID: choiceID,
-                videoURL: videoURL,
-                targets: displayUUIDs,
-                includeLockScreen: includeLockScreen
-            ))
-        }
-        if let spaces = root["Spaces"] as? NSMutableDictionary {
-            for value in spaces.allValues {
-                guard let space = value as? NSMutableDictionary,
-                      let displays = space["Displays"] as? NSMutableDictionary
-                else { continue }
-                changed.formUnion(updateDisplays(
+            changed.formUnion(
+                updateDisplays(
                     displays,
                     choiceID: choiceID,
                     videoURL: videoURL,
                     targets: displayUUIDs,
                     includeLockScreen: includeLockScreen
                 ))
+        }
+        if let spaces = root["Spaces"] as? NSMutableDictionary {
+            for value in spaces.allValues {
+                guard let space = value as? NSMutableDictionary,
+                    let displays = space["Displays"] as? NSMutableDictionary
+                else { continue }
+                changed.formUnion(
+                    updateDisplays(
+                        displays,
+                        choiceID: choiceID,
+                        videoURL: videoURL,
+                        targets: displayUUIDs,
+                        includeLockScreen: includeLockScreen
+                    ))
             }
         }
         return changed
@@ -63,13 +65,15 @@ enum NativeWallpaperAssignmentStore {
         videoURL: URL
     ) -> Bool {
         guard let surface,
-              let content = surface["Content"] as? NSMutableDictionary
+            let content = surface["Content"] as? NSMutableDictionary
         else { return false }
-        content["Choices"] = [[
-            "Configuration": Data(choiceID.utf8),
-            "Files": [["relative": videoURL.absoluteString]],
-            "Provider": WallpaperHostCapabilities.extensionBundleID,
-        ]]
+        content["Choices"] = [
+            [
+                "Configuration": Data(choiceID.utf8),
+                "Files": [["relative": videoURL.absoluteString]],
+                "Provider": WallpaperHostCapabilities.extensionBundleID,
+            ]
+        ]
         // Apple's wallpaper store uses the literal sentinel "$null". NSNull is
         // not a property-list value and makes PropertyListSerialization fail
         // with the misleading "error in the destination for the data" message.
@@ -97,7 +101,7 @@ enum NativeWallpaperAssignmentStore {
         if let spaces = root["Spaces"] as? NSMutableDictionary {
             for value in spaces.allValues {
                 guard let space = value as? NSMutableDictionary,
-                      let displays = space["Displays"] as? NSMutableDictionary
+                    let displays = space["Displays"] as? NSMutableDictionary
                 else { continue }
                 walkDisplays(displays)
             }

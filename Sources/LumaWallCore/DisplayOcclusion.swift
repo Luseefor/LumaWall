@@ -21,10 +21,12 @@ public struct OnscreenWindow: Equatable, Sendable {
 
     /// Reads the current on-screen window list. Desktop elements are excluded.
     public static func current() -> [OnscreenWindow] {
-        guard let info = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: Any]] else { return [] }
+        guard
+            let info = CGWindowListCopyWindowInfo(
+                [.optionOnScreenOnly, .excludeDesktopElements],
+                kCGNullWindowID
+            ) as? [[String: Any]]
+        else { return [] }
         var regularByPID: [pid_t: Bool] = [:]
         func isRegular(_ pid: pid_t) -> Bool {
             if let known = regularByPID[pid] { return known }
@@ -74,7 +76,8 @@ public enum DisplayOcclusion {
         // ScreenGeometry.cocoaWindow): the union's maxY is only correct when
         // no display extends above the primary.
         let primaryHeight = displays.first(where: \.isMain)?.frame.height ?? desktop.maxY
-        let rects = windows
+        let rects =
+            windows
             .filter(isAppWindow)
             .map { ScreenGeometry.cocoaWindow(fromQuartz: $0.bounds, primaryHeight: primaryHeight) }
 

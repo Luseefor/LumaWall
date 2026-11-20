@@ -27,12 +27,14 @@ enum MenuBarIcon {
 
             // Core orb, offset slightly up-right like the app icon.
             let coreCenter = NSPoint(x: center.x + 1.1, y: center.y + 0.9)
-            NSBezierPath(ovalIn: NSRect(
-                x: coreCenter.x - Metrics.coreRadius,
-                y: coreCenter.y - Metrics.coreRadius,
-                width: Metrics.coreRadius * 2,
-                height: Metrics.coreRadius * 2
-            )).fill()
+            NSBezierPath(
+                ovalIn: NSRect(
+                    x: coreCenter.x - Metrics.coreRadius,
+                    y: coreCenter.y - Metrics.coreRadius,
+                    width: Metrics.coreRadius * 2,
+                    height: Metrics.coreRadius * 2
+                )
+            ).fill()
 
             // Crescent: outer arc sweeping the lower-left, closed by an inner
             // arc, producing a filled tapering ribbon.
@@ -56,12 +58,14 @@ enum MenuBarIcon {
 
             if badge {
                 let offset = Metrics.crescentOuter * 0.7071
-                NSBezierPath(ovalIn: NSRect(
-                    x: center.x + offset - Metrics.badgeRadius,
-                    y: center.y + offset - Metrics.badgeRadius,
-                    width: Metrics.badgeRadius * 2,
-                    height: Metrics.badgeRadius * 2
-                )).fill()
+                NSBezierPath(
+                    ovalIn: NSRect(
+                        x: center.x + offset - Metrics.badgeRadius,
+                        y: center.y + offset - Metrics.badgeRadius,
+                        width: Metrics.badgeRadius * 2,
+                        height: Metrics.badgeRadius * 2
+                    )
+                ).fill()
             }
             return true
         }

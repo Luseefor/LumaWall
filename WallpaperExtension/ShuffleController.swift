@@ -77,8 +77,8 @@ final class ShuffleController: @unchecked Sendable {
 
         let advanceForLogin = lock.withLock { state -> Bool in
             guard var item = state.choices[choice],
-                  item.frequency == .onLogin,
-                  !item.advancedThisLaunch
+                item.frequency == .onLogin,
+                !item.advancedThisLaunch
             else { return false }
             item.advancedThisLaunch = true
             state.choices[choice] = item
@@ -140,8 +140,9 @@ final class ShuffleController: @unchecked Sendable {
                     if item.pendingAdvance {
                         result.append((id, "pending tick"))
                     } else if let interval = item.frequency.interval,
-                              let last = item.lastAdvance,
-                              Date().timeIntervalSince(last) > interval {
+                        let last = item.lastAdvance,
+                        Date().timeIntervalSince(last) > interval
+                    {
                         result.append((id, "elapsed during sleep"))
                     }
                 }

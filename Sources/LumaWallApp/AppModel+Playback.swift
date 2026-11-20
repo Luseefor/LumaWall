@@ -74,7 +74,8 @@ extension AppModel {
         // Advance once on wake so overnight playlists move without waiting for the next timer fire.
         stepPlaylist(1, persist: false)
         if let playlistID = activePlaylistID,
-           let playlist = playlists.first(where: { $0.id == playlistID }) {
+            let playlist = playlists.first(where: { $0.id == playlistID })
+        {
             startPlaylistRotation(ids: playlistIDs, intervalMinutes: playlist.intervalMinutes)
         }
     }
@@ -87,7 +88,8 @@ extension AppModel {
         guard activePlaylistID != nil else { return }
         stepPlaylist(1, persist: false)
         if let playlistID = activePlaylistID,
-           let playlist = playlists.first(where: { $0.id == playlistID }) {
+            let playlist = playlists.first(where: { $0.id == playlistID })
+        {
             startPlaylistRotation(ids: playlistIDs, intervalMinutes: playlist.intervalMinutes)
         }
     }
@@ -96,7 +98,7 @@ extension AppModel {
         let center = NotificationCenter.default
         for name in [
             ProcessInfo.thermalStateDidChangeNotification,
-            Notification.Name.NSProcessInfoPowerStateDidChange
+            Notification.Name.NSProcessInfoPowerStateDidChange,
         ] {
             powerObservers.append(
                 center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -118,10 +120,12 @@ extension AppModel {
             let model = Unmanaged<AppModel>.fromOpaque(context).takeUnretainedValue()
             Task { @MainActor in model.handlePowerSourceCallback() }
         }
-        guard let source = IOPSNotificationCreateRunLoopSource(
-            callback,
-            Unmanaged.passUnretained(self).toOpaque()
-        )?.takeRetainedValue() else { return }
+        guard
+            let source = IOPSNotificationCreateRunLoopSource(
+                callback,
+                Unmanaged.passUnretained(self).toOpaque()
+            )?.takeRetainedValue()
+        else { return }
         powerSourceRegistration.set(source)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
     }
@@ -157,7 +161,7 @@ extension AppModel {
         let names: [NSNotification.Name] = [
             NSWorkspace.didActivateApplicationNotification,
             NSWorkspace.didDeactivateApplicationNotification,
-            NSWorkspace.activeSpaceDidChangeNotification
+            NSWorkspace.activeSpaceDidChangeNotification,
         ]
         for name in names {
             coverageObservers.append(
@@ -222,7 +226,8 @@ extension AppModel {
         let fullscreenDisplays = occlusionLatch.fullscreen
         let allowLiveOnLock = engine.mode == .native
         for display in displays {
-            let obscured = (pauseWhenObscured && coveredDisplays.contains(display.displayID))
+            let obscured =
+                (pauseWhenObscured && coveredDisplays.contains(display.displayID))
                 || fullscreenDisplays.contains(display.displayID)
             let conditions = PlaybackConditions(
                 profile: powerProfile,
@@ -257,7 +262,8 @@ extension AppModel {
                 powerProfile: powerProfile.rawValue
             )
         }
-        playbackStopped = displays.contains { engine.wallpaperID(on: $0.displayID) != nil }
+        playbackStopped =
+            displays.contains { engine.wallpaperID(on: $0.displayID) != nil }
             && displays.allSatisfy { display in
                 guard engine.wallpaperID(on: display.displayID) != nil else { return true }
                 switch engine.tier(on: display.displayID) {

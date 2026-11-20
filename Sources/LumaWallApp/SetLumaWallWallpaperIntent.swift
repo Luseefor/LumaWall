@@ -32,7 +32,7 @@ struct LumaWallShortcutsProvider: AppShortcutsProvider {
             intent: SetLumaWallWallpaperIntent(),
             phrases: [
                 "Set wallpaper with \(.applicationName)",
-                "Apply \(.applicationName) wallpaper"
+                "Apply \(.applicationName) wallpaper",
             ],
             shortTitle: "Set Wallpaper",
             systemImageName: "rectangle.on.rectangle.angled"

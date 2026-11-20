@@ -28,9 +28,10 @@ public enum DisplayTopology {
         let missing = connectedIDs.subtracting(covered)
         guard !missing.isEmpty else { return [] }
         let enabled = stored.filter(\.isEnabled)
-        let donor = mainDisplayID.flatMap { id in
-            enabled.first { $0.displayID == id && $0.wallpaperID != nil }
-        } ?? enabled.first { $0.wallpaperID != nil }
+        let donor =
+            mainDisplayID.flatMap { id in
+                enabled.first { $0.displayID == id && $0.wallpaperID != nil }
+            } ?? enabled.first { $0.wallpaperID != nil }
         guard let donor, let wallpaperID = donor.wallpaperID else { return [] }
         return missing.sorted { $0.rawValue < $1.rawValue }.map {
             DisplayAssignment(

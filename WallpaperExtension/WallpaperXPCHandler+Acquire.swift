@@ -38,7 +38,11 @@ func heldReply<Reply>(
     {
         guard WallpaperState.shared.context(for: key)?.contextId == contextId else {
             extensionLog("  [acquire] context \(contextId) was torn down before its reply, failing the acquire")
-            reply(nil, NSError(domain: "LumaWallExtension", code: 5, userInfo: [NSLocalizedDescriptionKey: "Surface was torn down before the acquire replied"]))
+            reply(
+                nil,
+                NSError(
+                    domain: "LumaWallExtension", code: 5,
+                    userInfo: [NSLocalizedDescriptionKey: "Surface was torn down before the acquire replied"]))
             return
         }
         reply(boxedReply.value, nil)
@@ -67,7 +71,7 @@ extension WallpaperXPCHandler {
         LumaWallExtension.catchUpDisplaySleep()
 
         // Extract destination size from WallpaperCreationRequestXPC
-        var destSize = CGSize(width: 2_560, height: 1_440) // fallback
+        var destSize = CGSize(width: 2_560, height: 1_440)  // fallback
         var scaleFactor: CGFloat = 2.0
         var isPreview = false
         var displayID: UInt32?
@@ -162,7 +166,9 @@ extension WallpaperXPCHandler {
             }
         }
 
-        traceLog("  destination: \(destSize) @\(scaleFactor)x, isPreview: \(isPreview), pid: \(connectionPID), choice: \(choiceConfiguration ?? "nil"), files: \(choiceFiles)")
+        traceLog(
+            "  destination: \(destSize) @\(scaleFactor)x, isPreview: \(isPreview), pid: \(connectionPID), choice: \(choiceConfiguration ?? "nil"), files: \(choiceFiles)"
+        )
 
         // Native shuffle: adopt the frequency the host sent (optionValues in the
         // descriptor; absent until the user touches the picker), then resolve the
@@ -214,7 +220,9 @@ extension WallpaperXPCHandler {
         // Diagnostic bisection: host a still only (no video pipeline). Same context
         // reuse/create/reply as below. That's what we're stress-testing, but there is no renderer.
         if Bisect.stillOnly {
-            acquireStillOnlyBisect(key: key, displayID: displayID, destSize: destSize, scaleFactor: scaleFactor, videoURL: videoURL, cachedStill: videoURL.flatMap(loadStill), choice: choiceConfiguration, reply: reply)
+            acquireStillOnlyBisect(
+                key: key, displayID: displayID, destSize: destSize, scaleFactor: scaleFactor, videoURL: videoURL,
+                cachedStill: videoURL.flatMap(loadStill), choice: choiceConfiguration, reply: reply)
             return
         }
 

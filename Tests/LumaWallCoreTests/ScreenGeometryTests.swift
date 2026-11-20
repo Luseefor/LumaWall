@@ -67,10 +67,11 @@ struct ScreenGeometryTests {
         let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
         let left = CGRect(x: 0, y: 0, width: 960, height: 1080)
         let right = CGRect(x: 960, y: 0, width: 960, height: 1080)
-        #expect(!ScreenGeometry.isCovered(
-            screen: screen, windows: [left, right],
-            threshold: PlaybackPolicyThresholds.occlusionCovered
-        ))
+        #expect(
+            !ScreenGeometry.isCovered(
+                screen: screen, windows: [left, right],
+                threshold: PlaybackPolicyThresholds.occlusionCovered
+            ))
     }
 
     @Test func unionCoverageMatchesExactGridOnManyWindows() {

@@ -4,19 +4,24 @@ import Testing
 
 struct CoverageScanPolicyTests {
     @Test func fallbackScansWhenPlaying() {
-        #expect(CoverageScanPolicy.fallbackScanNeeded(
-            userPausedEverywhere: false, displaysAsleep: false, sessionLocked: false, hasAssignedWallpaper: true))
+        #expect(
+            CoverageScanPolicy.fallbackScanNeeded(
+                userPausedEverywhere: false, displaysAsleep: false, sessionLocked: false, hasAssignedWallpaper: true))
     }
 
     @Test func fallbackSkipsWhenCoverageCannotMatter() {
-        #expect(!CoverageScanPolicy.fallbackScanNeeded(
-            userPausedEverywhere: true, displaysAsleep: false, sessionLocked: false, hasAssignedWallpaper: true))
-        #expect(!CoverageScanPolicy.fallbackScanNeeded(
-            userPausedEverywhere: false, displaysAsleep: true, sessionLocked: false, hasAssignedWallpaper: true))
-        #expect(!CoverageScanPolicy.fallbackScanNeeded(
-            userPausedEverywhere: false, displaysAsleep: false, sessionLocked: true, hasAssignedWallpaper: true))
-        #expect(!CoverageScanPolicy.fallbackScanNeeded(
-            userPausedEverywhere: false, displaysAsleep: false, sessionLocked: false, hasAssignedWallpaper: false))
+        #expect(
+            !CoverageScanPolicy.fallbackScanNeeded(
+                userPausedEverywhere: true, displaysAsleep: false, sessionLocked: false, hasAssignedWallpaper: true))
+        #expect(
+            !CoverageScanPolicy.fallbackScanNeeded(
+                userPausedEverywhere: false, displaysAsleep: true, sessionLocked: false, hasAssignedWallpaper: true))
+        #expect(
+            !CoverageScanPolicy.fallbackScanNeeded(
+                userPausedEverywhere: false, displaysAsleep: false, sessionLocked: true, hasAssignedWallpaper: true))
+        #expect(
+            !CoverageScanPolicy.fallbackScanNeeded(
+                userPausedEverywhere: false, displaysAsleep: false, sessionLocked: false, hasAssignedWallpaper: false))
     }
 
     @Test func powerChangeClassification() {

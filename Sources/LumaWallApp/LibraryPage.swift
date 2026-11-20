@@ -109,10 +109,13 @@ struct LibraryPage: View {
                 ForEach(WallpaperCategory.allCases) { Text($0.title).tag(Optional($0)) }
             }
             .frame(width: 150)
-            Picker("Sort", selection: Binding(
-                get: { model.librarySort },
-                set: { model.setSort($0) }
-            )) {
+            Picker(
+                "Sort",
+                selection: Binding(
+                    get: { model.librarySort },
+                    set: { model.setSort($0) }
+                )
+            ) {
                 ForEach(LibrarySort.allCases) { Text($0.title).tag($0) }
             }
             .frame(width: 125)
@@ -437,7 +440,8 @@ struct LibraryPage: View {
                     .toggleStyle(.switch)
 
                     if model.automations.doNotInterruptStartHour != nil,
-                       model.automations.doNotInterruptEndHour != nil {
+                        model.automations.doNotInterruptEndHour != nil
+                    {
                         HStack(spacing: 14) {
                             schedulePicker(
                                 "Quiet from",

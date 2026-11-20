@@ -107,7 +107,8 @@ extension AppModel {
     func applyPlaylist(_ playlist: WallpaperPlaylist) {
         let ids = playlist.shuffled ? playlist.wallpaperIDs.shuffled() : playlist.wallpaperIDs
         guard let firstID = ids.first,
-              let asset = assets.first(where: { $0.id == firstID }) else { return }
+            let asset = assets.first(where: { $0.id == firstID })
+        else { return }
         automations.dayNightEnabled = false
         automations.appearanceEnabled = false
         persistAutomations()
@@ -145,7 +146,6 @@ extension AppModel {
         Task { try? await playlistPlaybackStore.clear() }
     }
 
-
     func startPlaylistRotation(
         ids: [WallpaperID],
         intervalMinutes: Int,
@@ -159,7 +159,8 @@ extension AppModel {
         let timer = Timer(fire: fireDate, interval: 0, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let playlistID = self.activePlaylistID,
-                      let playlist = self.playlists.first(where: { $0.id == playlistID }) else { return }
+                    let playlist = self.playlists.first(where: { $0.id == playlistID })
+                else { return }
                 self.stepPlaylist(1, persist: false)
                 self.startPlaylistRotation(ids: self.playlistIDs, intervalMinutes: playlist.intervalMinutes)
             }
@@ -183,11 +184,13 @@ extension AppModel {
 
     func restorePlaylistPlaybackState() async {
         guard let saved = await playlistPlaybackStore.current(),
-              let playlist = playlists.first(where: { $0.id == saved.playlistID }) else {
+            let playlist = playlists.first(where: { $0.id == saved.playlistID })
+        else {
             try? await playlistPlaybackStore.clear()
             return
         }
-        let ids = Set(saved.orderedIDs) == Set(playlist.wallpaperIDs)
+        let ids =
+            Set(saved.orderedIDs) == Set(playlist.wallpaperIDs)
             ? saved.orderedIDs
             : (playlist.shuffled ? playlist.wallpaperIDs.shuffled() : playlist.wallpaperIDs)
         guard !ids.isEmpty else {
@@ -197,15 +200,18 @@ extension AppModel {
         activePlaylistID = playlist.id
         playlistIDs = ids
         playlistCursor = min(max(saved.cursor, 0), ids.count - 1)
-        guard let schedule = PlaylistSchedule.resume(
-            nextAdvanceAt: saved.nextAdvanceAt,
-            intervalMinutes: playlist.intervalMinutes,
-            cursor: playlistCursor,
-            itemCount: ids.count
-        ) else { return }
+        guard
+            let schedule = PlaylistSchedule.resume(
+                nextAdvanceAt: saved.nextAdvanceAt,
+                intervalMinutes: playlist.intervalMinutes,
+                cursor: playlistCursor,
+                itemCount: ids.count
+            )
+        else { return }
         playlistCursor = schedule.cursor
         if playlistCursor != saved.cursor,
-           let asset = assets.first(where: { $0.id == ids[playlistCursor] }) {
+            let asset = assets.first(where: { $0.id == ids[playlistCursor] })
+        {
             try? await engine.applyToAll(asset)
         }
         startPlaylistRotation(

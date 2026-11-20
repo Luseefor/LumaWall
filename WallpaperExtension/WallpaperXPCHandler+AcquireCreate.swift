@@ -21,16 +21,21 @@ extension WallpaperXPCHandler {
     /// `Lifecycle.queue`.
     func acquireCreate(_ acquired: AcquiredRequest, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
         let key = acquired.key, displayID = acquired.displayID, displayID0 = acquired.displayID0, destSize = acquired.destSize
-        let scaleFactor = acquired.scaleFactor, isPreview = acquired.isPreview, choiceConfiguration = acquired.choiceConfiguration, renderChoice = acquired.renderChoice
-        let videoURL = acquired.videoURL, pixelWidth = acquired.pixelWidth, pixelHeight = acquired.pixelHeight, loadStill = acquired.loadStill
+        let scaleFactor = acquired.scaleFactor, isPreview = acquired.isPreview, choiceConfiguration = acquired.choiceConfiguration,
+            renderChoice = acquired.renderChoice
+        let videoURL = acquired.videoURL, pixelWidth = acquired.pixelWidth, pixelHeight = acquired.pixelHeight,
+            loadStill = acquired.loadStill
         var contextOptions: [String: Any] = [:]
         if let did = displayID { contextOptions["displayId"] = did }
-        let caContextRaw: Any? = contextOptions.isEmpty
+        let caContextRaw: Any? =
+            contextOptions.isEmpty
             ? CAContext.remoteContext()
             : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
         guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
             extensionLog("  ERROR: remote CAContext creation failed, failing acquire")
-            reply(nil, NSError(domain: "LumaWallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
+            reply(
+                nil,
+                NSError(domain: "LumaWallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
             return
         }
         let contextId = caContext.contextId
@@ -54,7 +59,10 @@ extension WallpaperXPCHandler {
         // Install the persistent slot now (renderer added async) so a concurrent
         // acquire for the same display reuses this context instead of creating another.
         WallpaperState.shared.installContext(
-            ActiveWallpaper(caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID, videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor, slot: SurfaceSlot(acquiredBy: connectionSerial, ownerIsPreview: isPreview)),
+            ActiveWallpaper(
+                caContext: caContext, contextId: contextId, rootLayer: rootLayer, renderer: nil, displayID: displayID,
+                videoID: choiceConfiguration, isPreview: isPreview, destSize: destSize, scaleFactor: scaleFactor,
+                slot: SurfaceSlot(acquiredBy: connectionSerial, ownerIsPreview: isPreview)),
             for: key,
         )
         extensionLog("  Created context \(contextId) for display \(key.displayID)")
@@ -106,9 +114,14 @@ extension WallpaperXPCHandler {
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
             // The reply waits in the gate, with those of acquires that reuse
             // this surface meanwhile, until surfaceReady for this token.
-            let displaced = Lifecycle.replies.open(key, token: token, reply: heldReply(SendableBox(value: replyObj), contextId: contextId, key: key, reply: reply))
+            let displaced = Lifecycle.replies.open(
+                key, token: token, reply: heldReply(SendableBox(value: replyObj), contextId: contextId, key: key, reply: reply))
             displaced.forEach { $0() }
-            Task { [coldStart, boxedRoot, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview, pixelWidth, pixelHeight] in
+            Task {
+                [
+                    coldStart, boxedRoot, videoURL, cachedStill, selector, key, token, choiceConfiguration, displayID, isPreview,
+                    pixelWidth, pixelHeight
+                ] in
                 // A cold start replies once create() has seeded the display
                 // layer, so a cache miss seeds the decoded first frame, or the
                 // gradient, rather than leaving the layer empty. A preview that
@@ -122,7 +135,8 @@ extension WallpaperXPCHandler {
                                 ? await seedStill(cached: cachedStill, videoURL: videoURL, decode: !holds)
                                 : (cachedStill, cachedStill == nil ? "nothing" : "the cached still", cachedStill != nil)
                         },
-                        fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) }, variantSelector: selector,
+                        fallbackStill: { loadCachedStill(ofVideo: $0, pixelWidth: pixelWidth, pixelHeight: pixelHeight) },
+                        variantSelector: selector,
                         tierSource: { LumaWallExtension.policyForRenderer(displayID: displayID, isPreview: isPreview) },
                         isPreview: isPreview,
                     )
@@ -134,7 +148,10 @@ extension WallpaperXPCHandler {
                     surfaceReady(key, token: token)
                     return
                 }
-                guard case let .installed(old) = WallpaperState.shared.installRenderer(renderer, token: token, videoID: choiceConfiguration, for: key) else {
+                guard
+                    case let .installed(old) = WallpaperState.shared.installRenderer(
+                        renderer, token: token, videoID: choiceConfiguration, for: key)
+                else {
                     // The context was torn down while the renderer loaded, and
                     // teardown failed its replies. A create under the same key
                     // since then holds its own; this token releases none of them.
@@ -188,6 +205,9 @@ extension WallpaperXPCHandler {
             traceLog("  [acquire] renderer create already in flight for display \(key.displayID), skipping duplicate (create path)")
             reply(replyObj, nil)
         }
-        Task { [pixelWidth, pixelHeight] in await writeBMPSnapshot(videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: pixelWidth, displayPixelHeight: pixelHeight) }
+        Task { [pixelWidth, pixelHeight] in
+            await writeBMPSnapshot(
+                videoURL: videoURL, videoID: choiceConfiguration, displayPixelWidth: pixelWidth, displayPixelHeight: pixelHeight)
+        }
     }
 }

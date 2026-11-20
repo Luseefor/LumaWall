@@ -131,7 +131,7 @@ final class SharedPlaybackHub {
     private func refreshSourceFrameRate(for url: URL) async {
         let asset = AVURLAsset(url: url)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-              let fps = try? await track.load(.nominalFrameRate)
+            let fps = try? await track.load(.nominalFrameRate)
         else { return }
         let rate = Double(fps)
         guard rate.isFinite, rate > 0 else { return }
@@ -177,7 +177,7 @@ final class SharedPlaybackHub {
         }
         let time = output.itemTime(forHostTime: CACurrentMediaTime())
         guard output.hasNewPixelBuffer(forItemTime: time),
-              let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil)
+            let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil)
         else { return }
         for (id, entry) in layers {
             // Paused layers hold their last frame; overwriting them here is

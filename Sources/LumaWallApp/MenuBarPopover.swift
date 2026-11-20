@@ -17,7 +17,8 @@ struct MenuBarPopover: View {
     private var slides: [ActiveSlide] {
         model.displays.compactMap { display in
             guard let wallpaperID = model.activeByDisplay[display.displayID],
-                  let asset = model.asset(for: wallpaperID) else { return nil }
+                let asset = model.asset(for: wallpaperID)
+            else { return nil }
             return ActiveSlide(
                 id: "\(display.displayID.rawValue)-\(wallpaperID.rawValue)",
                 asset: asset,
@@ -160,7 +161,7 @@ struct MenuBarPopover: View {
 
     private var pageDots: some View {
         HStack(spacing: 4) {
-            ForEach(0 ..< slides.count, id: \.self) { index in
+            ForEach(0..<slides.count, id: \.self) { index in
                 Circle()
                     .fill(Color(white: 1, opacity: index == selectedIndex ? 1 : 0.35))
                     .frame(width: 5, height: 5)
@@ -305,14 +306,18 @@ struct MenuBarPopover: View {
                 .padding(.horizontal, 4)
 
             HStack(spacing: 6) {
-                Toggle("Launch at Login", isOn: Binding(
-                    get: { model.launchAtLogin },
-                    set: { model.setLaunchAtLogin($0) }
-                ))
-                Toggle("Pause When Hidden", isOn: Binding(
-                    get: { model.pauseWhenObscured },
-                    set: { model.setPauseWhenObscured($0) }
-                ))
+                Toggle(
+                    "Launch at Login",
+                    isOn: Binding(
+                        get: { model.launchAtLogin },
+                        set: { model.setLaunchAtLogin($0) }
+                    ))
+                Toggle(
+                    "Pause When Hidden",
+                    isOn: Binding(
+                        get: { model.pauseWhenObscured },
+                        set: { model.setPauseWhenObscured($0) }
+                    ))
             }
             .toggleStyle(MenuBarPillToggleStyle())
         }
@@ -320,7 +325,9 @@ struct MenuBarPopover: View {
 
     private var footerSection: some View {
         HStack(spacing: 5) {
-            Button { openMainWindow() } label: {
+            Button {
+                openMainWindow()
+            } label: {
                 Label("Library", systemImage: "film.stack")
             }
             .buttonStyle(MenuBarChipButtonStyle())
@@ -338,12 +345,16 @@ struct MenuBarPopover: View {
             Spacer(minLength: 0)
 
             if model.activePlaylistID != nil {
-                Button { model.stepPlaylist(-1) } label: {
+                Button {
+                    model.stepPlaylist(-1)
+                } label: {
                     Image(systemName: "backward.end.fill")
                 }
                 .buttonStyle(MenuBarRoundIconButtonStyle())
 
-                Button { model.stepPlaylist(1) } label: {
+                Button {
+                    model.stepPlaylist(1)
+                } label: {
                     Image(systemName: "forward.end.fill")
                 }
                 .buttonStyle(MenuBarRoundIconButtonStyle())
@@ -355,7 +366,9 @@ struct MenuBarPopover: View {
             .buttonStyle(MenuBarRoundIconButtonStyle())
             .help("Reapply active wallpapers")
 
-            Button { NSApp.terminate(nil) } label: {
+            Button {
+                NSApp.terminate(nil)
+            } label: {
                 Image(systemName: "xmark")
             }
             .buttonStyle(MenuBarRoundIconButtonStyle())

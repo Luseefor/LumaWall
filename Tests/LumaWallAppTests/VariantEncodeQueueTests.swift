@@ -65,9 +65,11 @@ private extension Queue.Job {
 }
 
 final class VariantEncodeQueueTests: XCTestCase {
-    private let specs = Dictionary(uniqueKeysWithValues: NativeWallpaperDeployment
-        .variantSpecs(sourceSize: CGSize(width: 3840, height: 2160), sourceFPS: 60)
-        .map { ($0.filename, $0) })
+    private let specs = Dictionary(
+        uniqueKeysWithValues:
+            NativeWallpaperDeployment
+            .variantSpecs(sourceSize: CGSize(width: 3840, height: 2160), sourceFPS: 60)
+            .map { ($0.filename, $0) })
 
     private func job(_ entry: String, _ filename: String) -> Queue.Job {
         Queue.Job(entryID: entry, sourceURL: URL(fileURLWithPath: "/tmp/\(entry).mov"), contentHash: "h", spec: specs[filename]!)
@@ -91,10 +93,12 @@ final class VariantEncodeQueueTests: XCTestCase {
         log.openAll()
         await queue.drained()
         XCTAssertEqual(log.maxRunning, 1)
-        XCTAssertEqual(log.order, [
-            "a/Wallpaper.reduced.mov", "b/Wallpaper.minimal.mov", "a/Wallpaper.minimal.mov",
-            "b/Wallpaper.reduced.mov", "a/Wallpaper.qhd.mov",
-        ])
+        XCTAssertEqual(
+            log.order,
+            [
+                "a/Wallpaper.reduced.mov", "b/Wallpaper.minimal.mov", "a/Wallpaper.minimal.mov",
+                "b/Wallpaper.reduced.mov", "a/Wallpaper.qhd.mov",
+            ])
     }
 
     func testABatteryCopyPreemptsARunningQHDExport() async {

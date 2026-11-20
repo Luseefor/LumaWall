@@ -65,8 +65,8 @@ struct WallpaperModelsTests {
 
     @Test func legacyDecodingFillsModernDefaults() throws {
         let legacy = """
-        {"id":{"rawValue":"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"},"name":"Legacy","mediaURL":"file:///tmp/a.mov","duration":10,"framesPerSecond":30,"pixelSize":[1920,1080],"contentHash":"legacy","containsAudio":false}
-        """
+            {"id":{"rawValue":"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"},"name":"Legacy","mediaURL":"file:///tmp/a.mov","duration":10,"framesPerSecond":30,"pixelSize":[1920,1080],"contentHash":"legacy","containsAudio":false}
+            """
         let asset = try JSONDecoder.lumaWall.decode(WallpaperAsset.self, from: Data(legacy.utf8))
         #expect(asset.category == .other)
         #expect(asset.applyCount == 0)

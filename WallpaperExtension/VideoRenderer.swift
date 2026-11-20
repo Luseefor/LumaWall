@@ -10,7 +10,8 @@ import os
 private func setDisallowsVideoLayerDisplayCompositing(_ layer: CALayer, _ flag: Bool) {
     let sel = NSSelectorFromString("_setDisallowsVideoLayerDisplayCompositing:")
     guard layer.responds(to: sel),
-          let imp = class_getMethodImplementation(type(of: layer), sel) else { return }
+        let imp = class_getMethodImplementation(type(of: layer), sel)
+    else { return }
     typealias SetBoolFn = @convention(c) (AnyObject, Selector, ObjCBool) -> Void
     unsafeBitCast(imp, to: SetBoolFn.self)(layer, sel, ObjCBool(flag))
 }
@@ -19,7 +20,9 @@ final class VideoRenderer: @unchecked Sendable {
     /// Process-wide instance counter so log lines can be attributed to a specific
     /// renderer object (to catch stale/duplicate renderers from acquire races).
     private static let idCounter = OSAllocatedUnfairLock(initialState: 0)
-    let debugID: Int = VideoRenderer.idCounter.withLock { $0 += 1; return $0 }
+    let debugID: Int = VideoRenderer.idCounter.withLock {
+        $0 += 1; return $0
+    }
 
     let displayLayer: AVSampleBufferDisplayLayer
     /// The display's size in pixels, so Full Quality can pick a copy that
@@ -124,7 +127,9 @@ final class VideoRenderer: @unchecked Sendable {
             height: rootLayer.bounds.height * rootLayer.contentsScale
         )
         let policy = tierSource()
-        let opened = await RendererCopy.openingSeeded(videoURL, selector: variantSelector, tier: policy, displayPixels: pixels, isPreview: isPreview) { (url: URL) async -> (AVURLAsset, AVAssetTrack)? in
+        let opened = await RendererCopy.openingSeeded(
+            videoURL, selector: variantSelector, tier: policy, displayPixels: pixels, isPreview: isPreview
+        ) { (url: URL) async -> (AVURLAsset, AVAssetTrack)? in
             let asset = AVURLAsset(url: url)
             guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
                 traceLog("  [Renderer] no video track in \(url.lastPathComponent)")
@@ -135,9 +140,11 @@ final class VideoRenderer: @unchecked Sendable {
             await seed($0)
         }
         guard let ((asset, track), seeded) = opened else {
-            throw CocoaError(.fileReadCorruptFile, userInfo: [
-                NSLocalizedDescriptionKey: "No video track found in \(videoURL.lastPathComponent)",
-            ])
+            throw CocoaError(
+                .fileReadCorruptFile,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "No video track found in \(videoURL.lastPathComponent)"
+                ])
         }
         let nominalFrameRate = Double(try await track.load(.nominalFrameRate))
 
@@ -194,10 +201,11 @@ final class VideoRenderer: @unchecked Sendable {
         self.isPreview = isPreview
         self.requestedTier = policy
         self.lifecycle = RendererLifecycle(policy: policy)
-        self.pixelSize = OSAllocatedUnfairLock(initialState: CGSize(
-            width: rootLayer.bounds.width * rootLayer.contentsScale,
-            height: rootLayer.bounds.height * rootLayer.contentsScale
-        ))
+        self.pixelSize = OSAllocatedUnfairLock(
+            initialState: CGSize(
+                width: rootLayer.bounds.width * rootLayer.contentsScale,
+                height: rootLayer.bounds.height * rootLayer.contentsScale
+            ))
         self.renderer = LWSampleBufferRenderer(displayLayer)
         self.asset = asset
         self.videoTrack = videoTrack
@@ -245,7 +253,9 @@ final class VideoRenderer: @unchecked Sendable {
         rootLayer.sublayers?.filter { $0 is CAGradientLayer }.forEach { $0.removeFromSuperlayer() }
         rootLayer.addSublayer(displayLayer)
         rootLayer.addSublayer(stillFrameLayer)
-        traceLog("  [Renderer #\(debugID)] CREATED for \(asset.url.lastPathComponent) tier=\(policy), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0)), pixels=\(Int(displayPixelSize.width))x\(Int(displayPixelSize.height))")
+        traceLog(
+            "  [Renderer #\(debugID)] CREATED for \(asset.url.lastPathComponent) tier=\(policy), displayLayer=\(ObjectIdentifier(displayLayer)), rootLayer sublayers=\((rootLayer.sublayers?.count ?? 0)), pixels=\(Int(displayPixelSize.width))x\(Int(displayPixelSize.height))"
+        )
         if let stillImage, let stillBuffer = makeStillSampleBuffer(from: stillImage) {
             // Tag DisplayImmediately so the still is shown the instant it's enqueued,
             // rather than waiting on the control timebase (which is frozen at rate 0 here).
@@ -257,7 +267,9 @@ final class VideoRenderer: @unchecked Sendable {
             seedIsOfVideo = seed.isStill
             traceLog("  [Renderer #\(debugID)] Seeded still into display layer (\(stillImage.width)x\(stillImage.height))")
         } else {
-            traceLog("  [Renderer #\(debugID)] Seeded nothing (stillImage present: \(stillImage != nil)); the display layer is empty until the first frame")
+            traceLog(
+                "  [Renderer #\(debugID)] Seeded nothing (stillImage present: \(stillImage != nil)); the display layer is empty until the first frame"
+            )
         }
         CATransaction.commit()
         // flush() (not just commit()) is what pushes the layer tree to the render

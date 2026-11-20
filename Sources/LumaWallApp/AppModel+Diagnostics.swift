@@ -38,9 +38,11 @@ extension AppModel {
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(proof, forType: .string)
-        present("Energy Log", energySoakReport?.meets24HourGate == true
-            ? "Copied 24h energy report to the clipboard."
-            : "Copied in-progress energy report to the clipboard.")
+        present(
+            "Energy Log",
+            energySoakReport?.meets24HourGate == true
+                ? "Copied 24h energy report to the clipboard."
+                : "Copied in-progress energy report to the clipboard.")
     }
 
     func refreshEnergyReport() async {

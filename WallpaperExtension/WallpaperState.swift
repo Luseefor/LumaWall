@@ -7,7 +7,7 @@ import QuartzCore
 /// and only the `renderer`/`videoID` swap when the wallpaper changes, so the Agent
 /// never drops the context on switch (no gray gap) and contexts never accumulate.
 struct ActiveWallpaper: @unchecked Sendable {
-    let caContext: AnyObject // CAContext (private class, hold as AnyObject)
+    let caContext: AnyObject  // CAContext (private class, hold as AnyObject)
     let contextId: UInt32
     let rootLayer: CALayer
     var renderer: VideoRenderer?
@@ -135,7 +135,9 @@ final class WallpaperState: Sendable {
             state.contexts[key] = context
             return state.lastCreateToken
         }
-        traceLog("  [claimRendererCreate] display=\(key.displayID) → \(token.map { "CLAIMED #\($0) (will create)" } ?? "denied (renderer exists or create pending)")")
+        traceLog(
+            "  [claimRendererCreate] display=\(key.displayID) → \(token.map { "CLAIMED #\($0) (will create)" } ?? "denied (renderer exists or create pending)")"
+        )
         return token
     }
 
@@ -173,9 +175,13 @@ final class WallpaperState: Sendable {
         }
         switch result {
         case let .installed(previous):
-            traceLog("  [setRenderer] display=\(key.displayID) new=#\(renderer.debugID) replacing=\(previous.map { "#\($0.debugID)" } ?? "nil") videoID=\(videoID ?? "nil")")
+            traceLog(
+                "  [setRenderer] display=\(key.displayID) new=#\(renderer.debugID) replacing=\(previous.map { "#\($0.debugID)" } ?? "nil") videoID=\(videoID ?? "nil")"
+            )
         case .stale:
-            extensionLog("  [setRenderer] display=\(key.displayID) renderer #\(renderer.debugID) finished after its context was torn down, dropping it")
+            extensionLog(
+                "  [setRenderer] display=\(key.displayID) renderer #\(renderer.debugID) finished after its context was torn down, dropping it"
+            )
         }
         return result
     }
@@ -190,7 +196,8 @@ final class WallpaperState: Sendable {
             guard var context = state.contexts[key] else { return nil }
             let held = context.slot.holdsPreviewFrame(contextIsPreview: context.isPreview)
             // A preview handed a closed live surface keeps its frame.
-            let reopened = context.slot.acquired(by: connection, replyOnly: byPreview != context.isPreview, reopens: !(byPreview && !context.isPreview))
+            let reopened = context.slot.acquired(
+                by: connection, replyOnly: byPreview != context.isPreview, reopens: !(byPreview && !context.isPreview))
             state.contexts[key] = context
             if reopened { context.renderer?.setSurfaceOpen(true) }
             if held, !context.slot.holdsPreviewFrame(contextIsPreview: context.isPreview) { context.renderer?.playAsLive() }
@@ -263,8 +270,11 @@ final class WallpaperState: Sendable {
         lock.withLock { state -> ActiveWallpaper? in
             guard var context = state.contexts[key] else { return nil }
             if abs(context.destSize.width - destSize.width) < 0.5,
-               abs(context.destSize.height - destSize.height) < 0.5,
-               abs(context.scaleFactor - scaleFactor) < 0.01 { return nil }
+                abs(context.destSize.height - destSize.height) < 0.5,
+                abs(context.scaleFactor - scaleFactor) < 0.01
+            {
+                return nil
+            }
             context.destSize = destSize
             context.scaleFactor = scaleFactor
             state.contexts[key] = context

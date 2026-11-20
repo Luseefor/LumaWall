@@ -236,11 +236,13 @@ final class AppModel {
                 .compactMap(UUID.init(uuidString:)).map { WallpaperID(rawValue: $0) } ?? []
         )
         if let raw = UserDefaults.standard.string(forKey: "lumawall.powerProfile"),
-           let profile = PowerProfile(rawValue: raw) {
+            let profile = PowerProfile(rawValue: raw)
+        {
             powerProfile = profile
         }
         if let raw = UserDefaults.standard.string(forKey: "lumawall.librarySort"),
-           let sort = LibrarySort(rawValue: raw) {
+            let sort = LibrarySort(rawValue: raw)
+        {
             librarySort = sort
         }
         pauseWhenObscured = UserDefaults.standard.object(forKey: "lumawall.pauseWhenObscured") as? Bool ?? true

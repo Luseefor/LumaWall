@@ -5,7 +5,8 @@ enum Brand {
     static let iconImage: NSImage = {
         for bundle in resourceBundles {
             if let url = bundle.url(forResource: "AppIcon", withExtension: "png"),
-               let image = NSImage(contentsOf: url) {
+                let image = NSImage(contentsOf: url)
+            {
                 return image
             }
         }
@@ -14,9 +15,9 @@ enum Brand {
 
     private static var resourceBundles: [Bundle] {
         #if SWIFT_PACKAGE
-        [Bundle.module, Bundle.main]
+            [Bundle.module, Bundle.main]
         #else
-        [Bundle.main]
+            [Bundle.main]
         #endif
     }
 }

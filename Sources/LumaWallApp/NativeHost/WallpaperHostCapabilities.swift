@@ -40,7 +40,8 @@ enum WallpaperHostCapabilities {
     static func isPermissionError(_ error: Error) -> Bool {
         let error = error as NSError
         if error.domain == NSCocoaErrorDomain,
-           [CocoaError.fileReadNoPermission.rawValue, CocoaError.fileWriteNoPermission.rawValue].contains(error.code) {
+            [CocoaError.fileReadNoPermission.rawValue, CocoaError.fileWriteNoPermission.rawValue].contains(error.code)
+        {
             return true
         }
         if error.domain == NSPOSIXErrorDomain, error.code == Int(EPERM) || error.code == Int(EACCES) {
@@ -56,13 +57,15 @@ enum WallpaperHostCapabilities {
         let fm = FileManager.default
         let roots = [
             Bundle.main.builtInPlugInsURL,
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Extensions", isDirectory: true)
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Extensions", isDirectory: true),
         ].compactMap { $0 }
         for root in roots {
-            guard let contents = try? fm.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: nil
-            ) else { continue }
+            guard
+                let contents = try? fm.contentsOfDirectory(
+                    at: root,
+                    includingPropertiesForKeys: nil
+                )
+            else { continue }
             if contents.contains(where: { url in
                 url.pathExtension == "appex"
                     && (Bundle(url: url)?.bundleIdentifier == extensionBundleID
