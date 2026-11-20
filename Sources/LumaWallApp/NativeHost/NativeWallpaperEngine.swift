@@ -77,8 +77,12 @@ final class NativeWallpaperEngine {
         apply(tier: tiers[displayID] ?? .full, to: displayID)
     }
 
-    func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
-        let connected = displays.refresh()
+    /// Applies to every connected display except `excluded`, which the
+    /// overlay plays.
+    func applyToAll(
+        _ asset: WallpaperAsset, composition: DisplayComposition = .init(), excluding excluded: Set<DisplayID> = []
+    ) async throws {
+        let connected = displays.refresh().filter { !excluded.contains($0.displayID) }
         guard !connected.isEmpty else { throw OverlayWallpaperEngine.EngineError.missingDisplay }
         let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, surfaces: connected.map(surface(on:)))
         try NativeWallpaperAssignmentService.apply(
@@ -150,8 +154,15 @@ final class NativeWallpaperEngine {
 
     /// Restores persisted assignments through the system host. When the overlay
     /// owns non-default displays (`onlyDefaultCrop`), those assignments are
-    /// left for the overlay engine. Writing them here would fight it.
-    func restore(using library: [WallpaperAsset], onlyDefaultCrop: Bool = false) async throws {
+    /// left for the overlay engine. Writing them here would fight it. So are
+    /// the `skipping` displays, where native mode already failed.
+    ///
+    /// Returns the displays whose copy or assignment failed, for the caller to
+    /// hand to the overlay. Permission errors are thrown instead.
+    @discardableResult
+    func restore(
+        using library: [WallpaperAsset], onlyDefaultCrop: Bool = false, skipping: Set<DisplayID> = []
+    ) async throws -> Set<DisplayID> {
         let connected = displays.refresh()
         let connectedIDs = Set(connected.map(\.displayID))
         let connectedUUIDs = Set(connected.compactMap { stableUUID(for: $0.cgDisplayID) })
@@ -184,11 +195,14 @@ final class NativeWallpaperEngine {
         let enabled = snapshot.assignments.filter(\.isEnabled)
         nativeHostLog.info("restore: \(enabled.count) enabled assignment(s), \(connected.count) display(s)")
         var map: [UInt32: NativeWallpaperDeployment.EntryInfo] = [:]
-        let skipped: (DisplayAssignment) -> Bool = { Self.leavesToOverlay($0, onlyDefaultCrop: onlyDefaultCrop) }
+        let skipped: (DisplayAssignment) -> Bool = {
+            Self.leavesToOverlay($0, onlyDefaultCrop: onlyDefaultCrop) || skipping.contains($0.displayID)
+        }
+        var failed = Set<DisplayID>()
         // A display that moved to a cropped or spanning overlay no longer
         // plays natively. Leaving its old entry in `active` would tell the
         // copy queue a wallpaper still shows there.
-        for displayID in Self.overlayOwnedDisplays(in: enabled, onlyDefaultCrop: onlyDefaultCrop) {
+        for displayID in Self.overlayOwnedDisplays(in: enabled, onlyDefaultCrop: onlyDefaultCrop).union(skipping) {
             active.removeValue(forKey: displayID)
         }
         // Each wallpaper's copies are planned for the displays it goes on.
@@ -219,11 +233,12 @@ final class NativeWallpaperEngine {
             } catch {
                 if WallpaperHostCapabilities.isPermissionError(error) { throw error }
                 nativeHostLog.error("restore: deploy failed for \(asset.name, privacy: .public): \(error, privacy: .public)")
+                failed.insert(assignment.displayID)
             }
         }
         guard !map.isEmpty else {
             nativeHostLog.info("restore: nothing to assign")
-            return
+            return failed
         }
         let fingerprint = Dictionary(
             uniqueKeysWithValues: map.compactMap { cg, entry in
@@ -232,7 +247,7 @@ final class NativeWallpaperEngine {
         )
         if fingerprint == lastWrittenMap {
             nativeHostLog.info("restore: assignments unchanged, skipping Index.plist rewrite + agent restart")
-            return
+            return failed
         }
         do {
             try NativeWallpaperAssignmentService.apply(assignments: map)
@@ -241,7 +256,11 @@ final class NativeWallpaperEngine {
         } catch {
             if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             nativeHostLog.error("restore: assignment failed: \(error, privacy: .public)")
+            let assigned = Set(map.keys)
+            failed.formUnion(connected.filter { assigned.contains($0.cgDisplayID) }.map(\.displayID))
+            for displayID in failed { active.removeValue(forKey: displayID) }
         }
+        return failed
     }
 
     /// True when the overlay engine owns this assignment, so a native restore
@@ -253,6 +272,15 @@ final class NativeWallpaperEngine {
     /// The displays whose enabled assignment the overlay owns.
     nonisolated static func overlayOwnedDisplays(in assignments: [DisplayAssignment], onlyDefaultCrop: Bool) -> Set<DisplayID> {
         Set(assignments.filter { $0.isEnabled && leavesToOverlay($0, onlyDefaultCrop: onlyDefaultCrop) }.map(\.displayID))
+    }
+
+    /// Forgets what plays natively without touching stored assignments, so
+    /// the copy queue drops this host's jobs when native mode turns off.
+    func detach() {
+        let previous = Set(active.values.map(\.0))
+        active.removeAll()
+        lastWrittenMap.removeAll()
+        reportSurfaces(ofAll: previous)
     }
 
     func reapplyAssignments() {

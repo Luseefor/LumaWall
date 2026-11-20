@@ -50,6 +50,7 @@
 		38275AB6B76A42BC4649EDFA /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636191B69905B65C3526F8DB /* PathSafety.swift */; };
 		38285BC10496F12BA313D101 /* VideoRenderer+Start.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96A02118B8854D2C32E7DD64 /* VideoRenderer+Start.swift */; };
 		3B85579BC4EC8944233BCA90 /* DisplaySleepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18D08255D90687C8795D375F /* DisplaySleepTests.swift */; };
+		3F1627267353E30E8618D6C9 /* NativeModeGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD4499F3700AB6ABE624CB85 /* NativeModeGateTests.swift */; };
 		4065752E34C4880B4B7B9FB1 /* WallpaperXPCHandler+AcquireReuse.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB5EB18FE5953A738668496E /* WallpaperXPCHandler+AcquireReuse.swift */; };
 		40FE8E9A025D712B8404EB07 /* StillBisect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18E44026EDDCE2C7E0EABEEE /* StillBisect.swift */; };
 		4193C13E95DF3E0B8EC69E35 /* LogFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6867E7274898FBDA1C18147D /* LogFile.swift */; };
@@ -352,6 +353,7 @@
 		B5F138BA1F2F0179AE357E78 /* LumaWallWallpaper.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = LumaWallWallpaper.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B626ADE930FE51D5D8881BB0 /* WallpaperXPCHandler+AcquireCreate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WallpaperXPCHandler+AcquireCreate.swift"; sourceTree = "<group>"; };
 		B901457AE4B1AF53C7C9AC6E /* RendererCopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererCopyTests.swift; sourceTree = "<group>"; };
+		BD4499F3700AB6ABE624CB85 /* NativeModeGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeModeGateTests.swift; sourceTree = "<group>"; };
 		BDD958E1864EADAFC4D9E8EC /* LibraryPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryPage.swift; sourceTree = "<group>"; };
 		C21D3442AA3DECB7DF57EFC3 /* AppModel+Automations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Automations.swift"; sourceTree = "<group>"; };
 		C2AD1E2DE928F517BDD6F26C /* WallpaperExtensionConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperExtensionConfig.swift; sourceTree = "<group>"; };
@@ -412,6 +414,7 @@
 			children = (
 				DA921C83D761AB7785CB1D0D /* ContentHashStoreTests.swift */,
 				EDCB9B96D2A6A4DE581A711D /* LoopingVideoViewTests.swift */,
+				BD4499F3700AB6ABE624CB85 /* NativeModeGateTests.swift */,
 				530306DC8CCBF37F8C074112 /* NativeModeSettingTests.swift */,
 				E754FFABC4851272B5B28410 /* NativeWallpaperAssignmentStoreTests.swift */,
 				CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */,
@@ -949,6 +952,7 @@
 			files = (
 				0339CF069DEAE2F5ECC7E7C0 /* ContentHashStoreTests.swift in Sources */,
 				94DFC3618AA4027FA1230638 /* LoopingVideoViewTests.swift in Sources */,
+				3F1627267353E30E8618D6C9 /* NativeModeGateTests.swift in Sources */,
 				523F027301B001A2049EFA27 /* NativeModeSettingTests.swift in Sources */,
 				82DA19E480E2E1891F9F6181 /* NativeWallpaperAssignmentStoreTests.swift in Sources */,
 				A0515B2E9CCB91FD497753DC /* NativeWallpaperDeploymentTests.swift in Sources */,

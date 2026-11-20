@@ -11,19 +11,34 @@ enum WallpaperHostCapabilities {
     static let frameworkPath =
         "/System/Library/PrivateFrameworks/WallpaperExtensionKit.framework/WallpaperExtensionKit"
 
-    static var preferredMode: WallpaperHostMode {
-        if UserDefaults.standard.bool(forKey: "lumawall.forceOverlay") {
-            return .overlay
-        }
-        guard #available(macOS 26, *) else { return .overlay }
+    /// The host to use now. With native mode off this never probes the
+    /// system, so nothing native runs.
+    static func preferredMode(nativeModeEnabled: Bool) -> WallpaperHostMode {
+        mode(
+            nativeModeEnabled: nativeModeEnabled,
+            forceOverlay: UserDefaults.standard.bool(forKey: "lumawall.forceOverlay"),
+            nativeAvailable: { nativeHostIsAvailable }
+        )
+    }
+
+    static func mode(
+        nativeModeEnabled: Bool,
+        forceOverlay: Bool,
+        nativeAvailable: () -> Bool
+    ) -> WallpaperHostMode {
+        guard nativeModeEnabled, !forceOverlay, nativeAvailable() else { return .overlay }
+        return .native
+    }
+
+    private static var nativeHostIsAvailable: Bool {
+        guard #available(macOS 26, *) else { return false }
         // The framework binary lives in the dyld shared cache, not on disk, so
         // a file-existence check always fails. Preflight loadability instead.
-        guard dlopen_preflight(frameworkPath) else { return .overlay }
+        guard dlopen_preflight(frameworkPath) else { return false }
         guard hasEmbeddedWallpaperExtension || UserDefaults.standard.bool(forKey: "lumawall.forceNative") else {
-            return .overlay
+            return false
         }
-        guard nativeStorageIsAccessible() else { return .overlay }
-        return .native
+        return nativeStorageIsAccessible()
     }
 
     static func nativeStorageIsAccessible(at url: URL = extensionDocumentsURL) -> Bool {
