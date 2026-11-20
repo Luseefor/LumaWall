@@ -1,6 +1,5 @@
 import AVFoundation
 import AppKit
-import CryptoKit
 import Foundation
 import LumaWallCore
 
@@ -343,14 +342,7 @@ enum NativeWallpaperDeployment {
 
     private static func contentHash(for url: URL) async throws -> String {
         try await Task.detached(priority: .utility) {
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            var hasher = SHA256()
-            while let data = try handle.read(upToCount: 1_024 * 1_024), !data.isEmpty {
-                try Task.checkCancellation()
-                hasher.update(data: data)
-            }
-            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+            try VerifiedFileCopy.sha256(ofFileAt: url).sha256
         }.value
     }
 

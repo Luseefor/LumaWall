@@ -427,8 +427,7 @@ final class DeploymentStagingTests: XCTestCase {
 
     private func stage(_ source: URL) throws -> NativeWallpaperDeployment.StagedDeployment {
         try NativeWallpaperDeployment.stageDeployment(
-            source: source, entryID: id, filename: "Wallpaper.mov", stagingFolderURL: staging,
-            videosFolderURL: videos, trustedAncestor: root)
+            source: source, entryID: id, filename: "Wallpaper.mov", stagingFolderURL: staging, videosFolderURL: videos)
     }
 
     private func publish(_ staged: NativeWallpaperDeployment.StagedDeployment) throws {
