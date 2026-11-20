@@ -36,17 +36,6 @@ func buildSettingsViewModelsXPC(rescan: Bool = true) async -> AnyObject? {
     var thumbnailByVideoID = [String: URL]()
 
     for entry in entries {
-        let videoURL = library.videoURL(for: entry)
-        let choiceID = ChoiceID(
-            id: entry.id,
-            descriptor: ChoiceIDDescriptor(
-                provider: ChoiceProviderID(rawValue: bundleID),
-                identifier: entry.id,
-                files: [videoURL],
-                configuration: Data(entry.id.utf8),
-            ),
-        )
-
         // Generate thumbnail. Skip the entry if extraction fails.
         guard let thumbnailURL = await library.generateThumbnail(for: entry) else {
             continue
@@ -54,26 +43,12 @@ func buildSettingsViewModelsXPC(rescan: Bool = true) async -> AnyObject? {
         thumbnailURLs.append(thumbnailURL)
         thumbnailByVideoID[entry.id] = thumbnailURL
 
-        let choiceDescriptor = ChoiceDescriptor(
-            id: choiceID,
-            provider: ChoiceProviderID(rawValue: bundleID),
-            identifier: entry.id,
+        let item = makeVideoSettingsItem(
+            bundleID: bundleID,
+            entryID: entry.id,
             name: entry.name,
-            localizedDescription: "Animated video wallpaper",
-            thumbnail: .image(url: thumbnailURL),
-            isDownloaded: true,
-            options: [],
-        )
-
-        let item = SettingsItem(
-            id: choiceID,
-            localizedName: entry.name,
-            thumbnail: .image(url: thumbnailURL),
-            choice: choiceDescriptor,
-            contentBadge: .video,
-            showInTopLevel: true,
-            sortOrder: 0,
-            disposability: .removable,
+            videoURL: library.videoURL(for: entry),
+            thumbnailURL: thumbnailURL,
             contextMenu: addVideoMenu,
         )
         items.append(item)
@@ -458,4 +433,32 @@ private func remapToRealXPC(_ viewModels: SettingsViewModels) -> AnyObject? {
         extensionLog("  [Remap] Decoded result is nil")
     }
     return result as AnyObject?
+}
+
+/// NSObject wrapper that encodes SettingsViewModels using the same key as the real XPC type
+@objc(ShimViewModelsXPC)
+class ShimViewModelsXPC: NSObject, NSSecureCoding {
+    static let supportsSecureCoding = true
+    let value: SettingsViewModels
+
+    init(value: SettingsViewModels) {
+        self.value = value
+        super.init()
+    }
+
+    required init?(coder _: NSCoder) {
+        fatalError("decode not needed")
+    }
+
+    func encode(with coder: NSCoder) {
+        guard let archiver = coder as? NSKeyedArchiver else {
+            extensionLog("  [ShimXPC] encode error: coder is not NSKeyedArchiver")
+            return
+        }
+        do {
+            try archiver.encodeEncodable(value, forKey: "WallpaperSettingsViewModels")
+        } catch {
+            extensionLog("  [ShimXPC] encode error: \(LogRedaction.describe(error))")
+        }
+    }
 }

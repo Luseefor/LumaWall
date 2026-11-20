@@ -401,31 +401,3 @@ struct ContextMenuItemID: Codable {
 }
 
 enum EmptyCodingKeys: CodingKey {}
-
-/// NSObject wrapper that encodes SettingsViewModels using the same key as the real XPC type
-@objc(ShimViewModelsXPC)
-class ShimViewModelsXPC: NSObject, NSSecureCoding {
-    static let supportsSecureCoding = true
-    let value: SettingsViewModels
-
-    init(value: SettingsViewModels) {
-        self.value = value
-        super.init()
-    }
-
-    required init?(coder _: NSCoder) {
-        fatalError("decode not needed")
-    }
-
-    func encode(with coder: NSCoder) {
-        guard let archiver = coder as? NSKeyedArchiver else {
-            extensionLog("  [ShimXPC] encode error: coder is not NSKeyedArchiver")
-            return
-        }
-        do {
-            try archiver.encodeEncodable(value, forKey: "WallpaperSettingsViewModels")
-        } catch {
-            extensionLog("  [ShimXPC] encode error: \(LogRedaction.describe(error))")
-        }
-    }
-}
