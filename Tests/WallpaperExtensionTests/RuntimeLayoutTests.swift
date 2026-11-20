@@ -18,18 +18,24 @@ final class RuntimeLayoutTests: XCTestCase {
         XCTAssertNil(RuntimeLayout.ivarSlot(named: "box", in: FakeRemoteContext.self, bytes: 64))
     }
 
-    func testTheSlotIsTheIvarsOwnOffset() throws {
-        // `box` after another 8-byte field, so a fixed offset of 8 is wrong.
-        let slot = try XCTUnwrap(RuntimeLayout.ivarSlot(named: "box", in: FakeShiftedContext.self, bytes: 8))
-        XCTAssertEqual(slot, ivar_getOffset(try XCTUnwrap(class_getInstanceVariable(FakeShiftedContext.self, "box"))))
-        XCTAssertGreaterThan(slot, class_getInstanceSize(NSObject.self))
+    func testAClassWithAnotherIvarIsRefused() {
+        // Only the verified shape is written into: one ivar after the isa.
+        XCTAssertNil(RuntimeLayout.ivarSlot(named: "box", in: FakeShiftedContext.self, bytes: 8))
     }
 
     func testAWriteThatWouldSpillIntoTheNextFieldHasNoSlot() {
         // A 4-byte `rawValue` followed by another field: an 8-byte pointer
         // fits in the instance but would overwrite `next`.
         XCTAssertNil(RuntimeLayout.ivarSlot(named: "rawValue", in: FakeNarrowSnapshot.self, bytes: 8))
-        XCTAssertNotNil(RuntimeLayout.ivarSlot(named: "rawValue", in: FakeNarrowSnapshot.self, bytes: 4))
+    }
+
+    func testAnInheritedIvarIsRefused() {
+        // The superclass's neighbours aren't in the subclass's ivar list.
+        XCTAssertNil(RuntimeLayout.ivarSlot(named: "box", in: FakeSubclassedContext.self, bytes: 4))
+    }
+
+    func testAnIvarWithAnotherNameIsRefused() {
+        XCTAssertNil(RuntimeLayout.ivarSlot(named: "rawValue", in: FakeRemoteContext.self, bytes: 4))
     }
 
     func testTheLiveWallpaperClassesHaveTheSlotsTheWritesNeed() throws {
@@ -58,7 +64,7 @@ final class RuntimeLayoutTests: XCTestCase {
 
 /// Shaped like WallpaperRemoteContextXPC on macOS 27.2: one 8-byte ivar
 /// named `box` after the isa, 16 bytes in all.
-private final class FakeRemoteContext: NSObject {
+private class FakeRemoteContext: NSObject {
     @objc var box: Int = 0
 }
 
@@ -70,4 +76,8 @@ private final class FakeShiftedContext: NSObject {
 private final class FakeNarrowSnapshot: NSObject {
     @objc var rawValue: Int32 = 0
     @objc var next: Int32 = 0
+}
+
+private final class FakeSubclassedContext: FakeRemoteContext {
+    @objc var extra: Int = 0
 }

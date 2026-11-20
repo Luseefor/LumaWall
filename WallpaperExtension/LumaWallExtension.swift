@@ -76,7 +76,9 @@ final class LumaWallExtension: NSObject, AppExtension {
             missing.append("CAContext.\(selector)")
         }
         if missing.isEmpty {
-            extensionLog("  [SelfCheck] Runtime layout OK, all \(critical.count) critical classes present")
+            extensionLog(
+                "  [SelfCheck] Runtime layout OK: \(critical.count) classes, the XPC ivar layout and CAContext's class methods; instance methods are checked per acquire"
+            )
         } else {
             extensionLog(
                 "  [SelfCheck] UNSUPPORTED RUNTIME, missing: \(missing.joined(separator: ", ")). Rendering/snapshots may be degraded.")

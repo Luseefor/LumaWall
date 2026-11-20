@@ -8,22 +8,26 @@ import Foundation
 import ObjectiveC
 
 enum RuntimeLayout {
-    /// The byte offset of ivar `name` in `cls`, or nil unless it exists,
-    /// sits after NSObject's own storage, is aligned for `bytes`, and has
-    /// room for `bytes` before the next ivar (or the end of the instance),
-    /// so the write can't spill into a neighbouring field. Swift ivars have
-    /// no type encoding, so the gap to the next ivar is the field's size.
+    /// The byte offset of ivar `name` in `cls`, only when `cls` has the
+    /// layout the extension was built against (macOS 27.2): a direct
+    /// NSObject subclass whose one ivar is `name`, right after the isa, in
+    /// an instance one word longer than that, with room for `bytes`. Swift
+    /// ivars carry no type encoding, so the field's type can't be read;
+    /// accepting only this exact shape rules out inherited, neighbouring and
+    /// padded fields. Anything else is an unknown layout.
     static func ivarSlot(named name: String, in cls: AnyClass, bytes: Int) -> Int? {
-        guard bytes > 0, let ivar = class_getInstanceVariable(cls, name) else { return nil }
-        let offset = ivar_getOffset(ivar)
-        guard offset >= class_getInstanceSize(NSObject.self), offset % min(bytes, 8) == 0 else { return nil }
+        let word = MemoryLayout<UnsafeRawPointer>.size
+        let base = class_getInstanceSize(NSObject.self)
+        guard bytes > 0, bytes <= word, class_getSuperclass(cls) == NSObject.self,
+            class_getInstanceSize(cls) == base + word
+        else { return nil }
         var count: UInt32 = 0
         guard let ivars = class_copyIvarList(cls, &count) else { return nil }
         defer { free(ivars) }
-        let fieldEnd =
-            (0..<Int(count)).map { ivar_getOffset(ivars[$0]) }.filter { $0 > offset }.min()
-            ?? class_getInstanceSize(cls)
-        return fieldEnd - offset >= bytes ? offset : nil
+        guard count == 1, let ivarName = ivar_getName(ivars[0]), String(cString: ivarName) == name,
+            ivar_getOffset(ivars[0]) == base
+        else { return nil }
+        return base
     }
 
     /// Whether `object` answers every instance method in `names`.
