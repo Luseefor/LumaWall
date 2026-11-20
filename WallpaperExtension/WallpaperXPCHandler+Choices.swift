@@ -179,7 +179,7 @@ extension WallpaperXPCHandler {
         case let .success(app):
             extensionLog("  Opening the companion app")
             NSWorkspace.shared.openApplication(at: app, configuration: CompanionLaunch.openConfiguration()) { _, error in
-                if let error { extensionLog("  [Companion] Open failed: \(error)") }
+                if let error { extensionLog("  [Companion] Open failed: \(LogRedaction.describe(error))") }
                 reply(error)
             }
         case let .failure(reason):
