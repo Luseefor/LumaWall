@@ -20,6 +20,8 @@ private final class EncodeLog: @unchecked Sendable {
     /// Outcomes for the first encodes, before `result` applies.
     var results: [Queue.Outcome] = []
 
+    private var cancelledNames: [String] = []
+    var cancelled: [String] { lock.withLock { cancelledNames } }
     var order: [String] { lock.withLock { started } }
     var completed: [String] { lock.withLock { finished } }
     var maxRunning: Int { lock.withLock { maxRunningCount } }
@@ -44,12 +46,21 @@ private final class EncodeLog: @unchecked Sendable {
         }
         defer { lock.withLock { running -= 1 } }
         while !lock.withLock({ autoOpen || open.contains(job.name) }) {
-            if Task.isCancelled { return .notNow }
+            if Task.isCancelled {
+                lock.withLock { cancelledNames.append(job.name) }
+                return .notNow
+            }
             try? await Task.sleep(for: .milliseconds(1))
         }
         return lock.withLock {
             finished.append(job.name)
             return results.isEmpty ? result : results.removeFirst()
+        }
+    }
+
+    func waitUntilCancelled(_ name: String) async {
+        for _ in 0..<5_000 where !cancelled.contains(name) {
+            try? await Task.sleep(for: .milliseconds(1))
         }
     }
 
@@ -200,10 +211,14 @@ final class VariantEncodeQueueTests: XCTestCase {
         await log.waitUntilStarted("a/Wallpaper.minimal.mov")
         await queue.enqueue([job("a", "Wallpaper.reduced.mov"), job("b", "Wallpaper.minimal.mov")])
         await queue.cancel(entryID: "a")
+        await log.waitUntilCancelled("a/Wallpaper.minimal.mov")
+        // A deploy's detached enqueue can arrive after the removal.
+        await queue.enqueue([job("a", "Wallpaper.reduced.mov")])
         log.openAll()
         await queue.drained()
-        // The cancelled encode isn't retried and a's other copy never starts.
+        XCTAssertEqual(log.cancelled, ["a/Wallpaper.minimal.mov"])
         XCTAssertEqual(log.order, ["a/Wallpaper.minimal.mov", "b/Wallpaper.minimal.mov"])
+        XCTAssertEqual(log.completed, ["b/Wallpaper.minimal.mov"])
     }
 
     func testDroppedJobsDoNotRun() async {
