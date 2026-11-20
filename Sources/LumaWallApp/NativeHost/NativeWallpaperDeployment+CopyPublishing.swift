@@ -217,31 +217,35 @@ extension NativeWallpaperDeployment {
     /// longer deployed, and the `.tmp.mov` files older versions exported
     /// inside the entry folder, where the extension's recovery scan could
     /// pick one as the wallpaper.
+    ///
+    /// Only `.mov` files are deleted, through `TrustedDirectory`: a staging
+    /// or entry folder swapped for a symlink between listing and deleting
+    /// can't steer the delete outside the container.
     static func cleanUpAbandonedExports(videosFolderURL: URL, stagingFolderURL: URL) {
-        let fm = FileManager.default
-        let staged = (try? fm.contentsOfDirectory(at: stagingFolderURL, includingPropertiesForKeys: nil)) ?? []
-        for file in staged {
-            let parts = file.lastPathComponent.split(separator: ".", maxSplits: 2).map(String.init)
-            let keep =
-                !file.lastPathComponent.hasSuffix(".partial.mov")
-                && parts.count == 3
-                && PathSafety.isValidEntryID(parts[0])
-                && (try? entry(id: parts[0], videosFolderURL: videosFolderURL))??.contentHash == parts[1]
-            if !keep { try? fm.removeItem(at: file) }
+        if let staging = try? TrustedDirectory(url: stagingFolderURL) {
+            for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasSuffix(".mov") {
+                let parts = file.name.split(separator: ".", maxSplits: 2).map(String.init)
+                let keep =
+                    !file.name.hasSuffix(".partial.mov")
+                    && parts.count == 3
+                    && PathSafety.isValidEntryID(parts[0])
+                    && (try? entry(id: parts[0], videosFolderURL: videosFolderURL))??.contentHash == parts[1]
+                if !keep { try? staging.removeFile(named: file.name) }
+            }
         }
         // Older versions exported "<copy name>.<UUID>.tmp.mov" inside the
         // entry. Only entries whose metadata.json reads and names another
         // primary are touched: the extension may have recovered one of these
         // as the primary, and deleting it makes the extension prune the entry.
-        let entries = (try? fm.contentsOfDirectory(at: videosFolderURL, includingPropertiesForKeys: nil)) ?? []
-        for dir in entries {
-            let id = dir.lastPathComponent
-            guard PathSafety.isValidEntryID(id),
-                let entry = try? entry(id: id, videosFolderURL: videosFolderURL)
+        guard let videos = try? TrustedDirectory(url: videosFolderURL) else { return }
+        for dir in (try? videos.entries()) ?? [] where dir.kind == .directory {
+            guard PathSafety.isValidEntryID(dir.name),
+                let entry = try? entry(id: dir.name, videosFolderURL: videosFolderURL),
+                let folder = try? videos.subdirectory(dir.name)
             else { continue }
-            let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-            for file in files where file.lastPathComponent != entry.filename && isLegacyExport(file.lastPathComponent) {
-                try? fm.removeItem(at: file)
+            for file in (try? folder.entries()) ?? []
+            where file.kind == .file && file.name != entry.filename && isLegacyExport(file.name) {
+                try? folder.removeFile(named: file.name)
             }
         }
     }

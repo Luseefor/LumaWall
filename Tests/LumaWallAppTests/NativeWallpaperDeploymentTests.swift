@@ -442,6 +442,42 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: videos.appendingPathComponent(id).appendingPathComponent("metadata.json").path))
     }
 
+    func testStartupCleanupLeavesSymlinkTargetsAlone() throws {
+        // Cleanup listed the staging folder and entry folders by path, so
+        // either one swapped for a symlink had its target's files deleted.
+        let fm = FileManager.default
+        try deploy(hash: "aaa")
+        let victim = root.appendingPathComponent("Documents", isDirectory: true)
+        try fm.createDirectory(at: victim, withIntermediateDirectories: true)
+        let precious = victim.appendingPathComponent("thesis.pages")
+        let legacyName = "Wallpaper.minimal.mov.\(UUID().uuidString).tmp.mov"
+        for url in [precious, victim.appendingPathComponent(legacyName)] { try Data("keep".utf8).write(to: url) }
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: "Wallpaper.mov", duration: 5, fps: 30,
+            resolution: CGSize(width: 1280, height: 720), dateAdded: Date())
+        try JSONEncoder().encode(entry).write(to: victim.appendingPathComponent("metadata.json"))
+        try fm.removeItem(at: staging)
+        try fm.createSymbolicLink(at: staging, withDestinationURL: victim)
+        let linkedEntry = videos.appendingPathComponent(UUID().uuidString)
+        try fm.createSymbolicLink(at: linkedEntry, withDestinationURL: victim)
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        XCTAssertTrue(fm.fileExists(atPath: precious.path))
+        XCTAssertTrue(fm.fileExists(atPath: victim.appendingPathComponent(legacyName).path))
+    }
+
+    func testStartupCleanupDeletesOnlyStagedMovies() throws {
+        let fm = FileManager.default
+        try deploy(hash: "aaa")
+        let note = staging.appendingPathComponent("README.txt")
+        let folder = staging.appendingPathComponent("nested", isDirectory: true)
+        try Data("x".utf8).write(to: note)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        XCTAssertTrue(fm.fileExists(atPath: note.path))
+        XCTAssertTrue(fm.fileExists(atPath: folder.path))
+    }
+
     func testLegacyCleanupKeepsAPrimaryRecoveredFromAnExport() throws {
         // The extension can recover an old export as an entry's primary
         // video. Deleting it made the extension prune the whole entry.
