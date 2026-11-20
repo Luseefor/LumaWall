@@ -776,6 +776,47 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: victimFile), Data("keep".utf8))
     }
 
+    func testAnExportIsKeptWhenTheVideosFolderCantBeTrusted() throws {
+        // A videos folder swapped for a symlink says nothing about whether
+        // the job is stale, so the export stays for a retry.
+        let fm = FileManager.default
+        try deploy(hash: "aaa")
+        let staged = try stage(job(hash: "aaa"))
+        let moved = root.appendingPathComponent("videos-real")
+        try fm.moveItem(at: videos, to: moved)
+        try fm.createSymbolicLink(at: videos, withDestinationURL: moved)
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .failed)
+        XCTAssertTrue(fm.fileExists(atPath: staged.path))
+    }
+
+    func testAnExportOfARemovedEntryIsDiscarded() throws {
+        let staged = try stage(job(hash: "aaa"))
+        try FileManager.default.removeItem(at: videos.appendingPathComponent(id))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .stale)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+    }
+
+    func testOnlyARegularFileCountsAsAFinishedExport() throws {
+        let fm = FileManager.default
+        let folder = try TrustedDirectory(url: staging)
+        XCTAssertFalse(NativeWallpaperDeployment.reusableExport(named: "missing.mov", in: folder))
+        try Data("x".utf8).write(to: staging.appendingPathComponent("done.mov"))
+        XCTAssertTrue(NativeWallpaperDeployment.reusableExport(named: "done.mov", in: folder))
+        // A folder or a symlink there would block the copy for good; it's
+        // cleared so the encode runs again. A symlink's target stays.
+        try fm.createDirectory(at: staging.appendingPathComponent("folder.mov"), withIntermediateDirectories: false)
+        XCTAssertFalse(NativeWallpaperDeployment.reusableExport(named: "folder.mov", in: folder))
+        XCTAssertFalse(fm.fileExists(atPath: staging.appendingPathComponent("folder.mov").path))
+        let outside = root.appendingPathComponent("outside.mov")
+        try Data("keep".utf8).write(to: outside)
+        try fm.createSymbolicLink(at: staging.appendingPathComponent("link.mov"), withDestinationURL: outside)
+        XCTAssertFalse(NativeWallpaperDeployment.reusableExport(named: "link.mov", in: folder))
+        XCTAssertNil(try? fm.destinationOfSymbolicLink(atPath: staging.appendingPathComponent("link.mov").path))
+        XCTAssertEqual(try Data(contentsOf: outside), Data("keep".utf8))
+    }
+
     func testPublishReplacesASymlinkedCopyWithoutTouchingItsTarget() throws {
         let fm = FileManager.default
         try deploy(hash: "aaa")

@@ -354,9 +354,9 @@ enum NativeWallpaperDeployment {
     }
 
     /// Missing, or a symlink or other non-file or non-folder where one
-    /// should be.
+    /// should be. A socket fails `open` with EOPNOTSUPP.
     private static func readsAsMissing(_ error: POSIXError) -> Bool {
-        [.ENOENT, .ELOOP, .ENOTDIR, .EFTYPE].contains(error.code)
+        [.ENOENT, .ELOOP, .ENOTDIR, .EFTYPE, .EOPNOTSUPP].contains(error.code)
     }
 
     /// The extension can write its container, so metadata.json is checked

@@ -141,11 +141,15 @@ extension NativeWallpaperDeployment {
     private static let encodeQueue = VariantEncodeQueue(
         readiness: { readiness(of: $0) },
         encode: { job in
-            let fm = FileManager.default
             let staged = stagedURL(for: job)
+            // Made through the container's descriptors, so a symlinked
+            // Documents folder can't put copy-staging somewhere else.
+            guard
+                let staging = try? trustedFolder(stagingFolderURL.deletingLastPathComponent())
+                    .makeSubdirectory(named: stagingFolderURL.lastPathComponent)
+            else { return .failed }
             // A finished export whose publication failed is reused, not redone.
-            if !fm.fileExists(atPath: staged.path) {
-                try? fm.createDirectory(at: stagingFolderURL, withIntermediateDirectories: true)
+            if !reusableExport(named: staged.lastPathComponent, in: staging) {
                 let result = await transcode(sourceURL: job.sourceURL, to: staged, spec: job.spec) {
                     if case .ready = readiness(of: job) { return true }
                     return false
@@ -157,7 +161,7 @@ extension NativeWallpaperDeployment {
                 }
             }
             guard let resolution = await videoSize(of: staged) else {
-                try? trustedFolder(stagingFolderURL).removeFile(named: staged.lastPathComponent)
+                try? staging.removeFile(named: staged.lastPathComponent)
                 return .failed
             }
             // Publishing writes into the extension's container.
@@ -175,6 +179,20 @@ extension NativeWallpaperDeployment {
                 videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL, trustedAncestor: containerURL)
         }
     )
+
+    /// True when a regular file sits at `name` in `staging`, ready to
+    /// publish. Anything else there (a folder, a symlink) would fail every
+    /// publish and survive cleanup, so it's deleted, without following
+    /// symlinks, and the copy is encoded again.
+    static func reusableExport(named name: String, in staging: TrustedDirectory) -> Bool {
+        switch try? staging.kind(ofItemNamed: name) {
+        case .file: return true
+        case nil: return false
+        default:
+            try? staging.removeItem(named: name)
+            return false
+        }
+    }
 
     private static func isRecorded(_ spec: VariantSpec, in entry: EntryInfo) -> Bool {
         guard (entry.variants ?? []).contains(where: { $0.filename == spec.filename && $0.fps == spec.recordedFPS }) else { return false }
@@ -209,17 +227,24 @@ extension NativeWallpaperDeployment {
         entryLock.withLock {
             let stagedName = staged.lastPathComponent
             guard let staging = try? trustedFolder(staged.deletingLastPathComponent()) else { return .failed }
+            // Stale only when the entry is known gone or holds another
+            // source. A folder that can't be opened safely (a symlink in
+            // place of videos or the entry) keeps the export for a retry.
             let folder: TrustedDirectory
+            do {
+                folder = try trustedFolder(videosFolderURL).subdirectory(job.entryID)
+            } catch POSIXError.ENOENT {
+                try? staging.removeFile(named: stagedName)
+                return .stale
+            } catch {
+                return .failed
+            }
             let current: EntryInfo
             do {
-                guard let opened = try entryFolder(job.entryID, videosFolderURL: videosFolderURL),
-                    let entry = try entry(id: job.entryID, readingFrom: opened),
-                    entry.contentHash == job.contentHash
-                else {
+                guard let entry = try entry(id: job.entryID, readingFrom: folder), entry.contentHash == job.contentHash else {
                     try? staging.removeFile(named: stagedName)
                     return .stale
                 }
-                folder = opened
                 current = entry
             } catch {
                 return .failed
