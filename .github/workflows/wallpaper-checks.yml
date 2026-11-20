@@ -52,10 +52,25 @@ jobs:
           echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/xcodegen/bin/xcodegen" --version
       - name: Show selected toolchain
+        id: toolchain
         run: |
           test -d "$DEVELOPER_DIR" || { echo "::error::$DEVELOPER_DIR is not on this image"; exit 1; }
           xcodebuild -version
           swift --version
+          echo "xcode=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+      # Incremental build state for swift test and both xcodebuild runs.
+      # A source change misses the exact key and falls back to the newest
+      # cache for the same runner, Xcode build and package/project files.
+      - name: Restore build cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            .build
+            .derived
+            !.derived/checks
+          key: wallpaper-${{ matrix.runner }}-${{ runner.arch }}-xcode-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('**/Package.resolved', 'Package.swift', 'project.yml') }}-${{ hashFiles('Sources/**', 'WallpaperExtension/**', 'Tests/**') }}
+          restore-keys: |
+            wallpaper-${{ matrix.runner }}-${{ runner.arch }}-xcode-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('**/Package.resolved', 'Package.swift', 'project.yml') }}-
       - name: Check wallpaper playback and release build
         env:
           LUMAWALL_CHECK_OUTPUT_DIR: ${{ runner.temp }}/lumawall-checks
