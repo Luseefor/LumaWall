@@ -33,13 +33,40 @@ final class MirrorDumpTests: XCTestCase {
         XCTAssertEqual(MirrorDump.leaf(URL(fileURLWithPath: "/x/videos/\(entry)")), "…/\(entry)")
     }
 
-    func testFreeTextIsHashedAndIdentifiersAreKept() {
+    func testTextIsHashedAndOnlyEntryIDsAreKept() {
         XCTAssertEqual(MirrorDump.leaf("Holiday in Rome"), "<text #9a91ef42>")
         XCTAssertEqual(MirrorDump.leaf(entry), entry)
-        XCTAssertEqual(MirrorDump.leaf("app.lumawall.personal.wallpaper"), "app.lumawall.personal.wallpaper")
-        XCTAssertEqual(MirrorDump.leaf("com.apple.wallpaper.agent"), "com.apple.wallpaper.agent")
-        XCTAssertEqual(MirrorDump.leaf("com.apple.Movies"), "com.apple.Movies")
         XCTAssertEqual(MirrorDump.leaf("Movies"), "<text #dff924b6>")
+        // A file can be named like a bundle ID.
+        XCTAssertEqual(MirrorDump.leaf("com.apple.Movies"), "<text #27875e03>")
+        XCTAssertEqual(MirrorDump.leaf("app.lumawall.personal.wallpaper"), "<text #68cb7a60>")
+        XCTAssertEqual(MirrorDump.leaf("Holiday in Rome".dropFirst(0)), "<text #9a91ef42>")
+        XCTAssertEqual(MirrorDump.leaf("Holiday in Rome" as NSString), "<text #9a91ef42>")
+    }
+
+    func testOnlyMediaExtensionsAreKept() {
+        XCTAssertEqual(MirrorDump.leaf(URL(fileURLWithPath: "/Users/x/Pictures/Family.alice")), "…/#f09483d5")
+        XCTAssertEqual(MirrorDump.leaf(URL(fileURLWithPath: "/Users/x/Pictures/Family.alice", isDirectory: true)), "…/#f09483d5")
+        XCTAssertEqual(MirrorDump.leaf(URL(fileURLWithPath: "/Users/x/Movies/Holiday Trip.MOV")), "…/#b09248e7.mov")
+    }
+
+    func testTheAppsFileNameIsKeptOnlyInsideAnEntry() {
+        XCTAssertEqual(MirrorDump.leaf(URL(fileURLWithPath: "/Users/x/Movies/Wallpaper.mp4")), "…/#bb67c42a.mp4")
+    }
+
+    func testANonFileURLIsHashedWhole() {
+        XCTAssertEqual(MirrorDump.leaf(URL(string: "lumawall-private://alice/Holiday")!), "<URL #036ef482>")
+        XCTAssertEqual(MirrorDump.leaf(NSURL(string: "lumawall-private://alice/Holiday")!), "<URL #036ef482>")
+    }
+
+    func testACustomDescriptionOrMirrorDoesntReachTheLog() {
+        XCTAssertEqual(MirrorDump.leaf(Described.folder), "")
+        XCTAssertEqual(
+            MirrorDump.lines(Labelled()),
+            [
+                "[root] Labelled",
+                "  .#0: Int = 1",
+            ])
     }
 
     func testNumbersFlagsCasesAndDataStayReadable() {
@@ -74,6 +101,15 @@ private enum Request {
 
 private enum Kind {
     case removable
+}
+
+private enum Described: CustomStringConvertible {
+    case folder
+    var description: String { "PrivateFolder" }
+}
+
+private struct Labelled: CustomReflectable {
+    var customMirror: Mirror { Mirror(self, children: ["Holiday Trip.mov": 1]) }
 }
 
 private struct Holder {
