@@ -173,4 +173,24 @@ final class NotificationGuardsTests: XCTestCase {
         try Data().write(to: dir.appendingPathComponent(still))
         XCTAssertNil(StillCacheSweep.filesToClear(in: link))
     }
+
+    // MARK: Playlist notifications
+
+    /// Nothing posts `nextPlaylistItem` or `previousPlaylistItem`, and any
+    /// process could, so the extension must not observe them. Stepping a
+    /// playlist goes through the XPC `skip` call, which checks its caller.
+    func testExtensionObservesNoPlaylistStepNotifications() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("WallpaperExtension", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        XCTAssertFalse(files.isEmpty, "no extension sources at \(sources.path)")
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for name in ["nextPlaylistItem", "previousPlaylistItem"] {
+                XCTAssertFalse(text.contains(name), "\(file.lastPathComponent) still names \(name)")
+            }
+        }
+    }
 }
