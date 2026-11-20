@@ -56,7 +56,7 @@ extension AppModel {
         let store = store
         Task {
             let library = Set(await store.assets().map(\.id.rawValue.uuidString))
-            await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: library)
+            await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: library, libraryLoaded: store.loadedIndex)
         }
     }
 

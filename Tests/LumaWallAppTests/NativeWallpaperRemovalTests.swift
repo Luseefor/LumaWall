@@ -67,6 +67,7 @@ final class NativeWallpaperRemovalTests: XCTestCase {
         // not remove the library row.
         let blocked = Pending(fileURL: root.appendingPathComponent("missing/pending-removals.json"))
         XCTAssertThrowsError(try blocked.add(UUID().uuidString))
+        XCTAssertThrowsError(try Pending(fileURL: nil).add(UUID().uuidString))
     }
 
     @MainActor
@@ -79,7 +80,7 @@ final class NativeWallpaperRemovalTests: XCTestCase {
         pending.markRowRemoved(rowGone)
         var deleted: [String] = []
         await NativeWallpaperDeployment.finishPendingRemovals(
-            libraryIDs: [kept, UUID().uuidString], pending: pending, removedThisRun: { [] }
+            libraryIDs: [kept], libraryLoaded: true, pending: pending, removedThisRun: { [] }
         ) { deleted.append($0) }
         // The library still lists `kept`, so its removal never happened.
         XCTAssertEqual(Set(deleted), [rowGone, requested])
@@ -87,20 +88,28 @@ final class NativeWallpaperRemovalTests: XCTestCase {
     }
 
     @MainActor
-    func testAnEmptyLibraryOnlyFinishesRemovalsWhoseRowIsKnownGone() async throws {
-        // An empty library is also what an unreadable index looks like, so a
-        // removal that may not have reached the library waits.
+    func testAnUnreadLibraryOnlyFinishesRemovalsWhoseRowIsKnownGone() async throws {
+        // A library whose index couldn't be read loads empty, so a removal
+        // that may not have reached the library waits.
         let rowGone = UUID().uuidString
         let requested = UUID().uuidString
         let pending = Pending(fileURL: pendingFile)
         for id in [rowGone, requested] { try pending.add(id) }
         pending.markRowRemoved(rowGone)
         var deleted: [String] = []
-        await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: [], pending: pending, removedThisRun: { [] }) {
-            deleted.append($0)
-        }
+        await NativeWallpaperDeployment.finishPendingRemovals(
+            libraryIDs: [], libraryLoaded: false, pending: pending, removedThisRun: { [] }
+        ) { deleted.append($0) }
         XCTAssertEqual(deleted, [rowGone])
         XCTAssertEqual(pending.stages, [requested: .requested])
+
+        // Once an index reads, even an empty one (the last wallpaper was
+        // removed), the requested removal finishes too.
+        await NativeWallpaperDeployment.finishPendingRemovals(
+            libraryIDs: [], libraryLoaded: true, pending: pending, removedThisRun: { [] }
+        ) { deleted.append($0) }
+        XCTAssertEqual(deleted, [rowGone, requested])
+        XCTAssertEqual(pending.stages, [:])
     }
 
     @MainActor
@@ -111,7 +120,9 @@ final class NativeWallpaperRemovalTests: XCTestCase {
         let pending = Pending(fileURL: pendingFile)
         try pending.add(id)
         var deleted: [String] = []
-        await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: [id], pending: pending, removedThisRun: { [id] }) {
+        await NativeWallpaperDeployment.finishPendingRemovals(
+            libraryIDs: [id], libraryLoaded: true, pending: pending, removedThisRun: { [id] }
+        ) {
             deleted.append($0)
         }
         XCTAssertEqual(deleted, [])
@@ -124,7 +135,9 @@ final class NativeWallpaperRemovalTests: XCTestCase {
         let pending = Pending(fileURL: pendingFile)
         try pending.add(gone)
         pending.markRowRemoved(gone)
-        await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: [], pending: pending, removedThisRun: { [] }) { _ in
+        await NativeWallpaperDeployment.finishPendingRemovals(
+            libraryIDs: [], libraryLoaded: true, pending: pending, removedThisRun: { [] }
+        ) { _ in
             throw CocoaError(.fileWriteNoPermission)
         }
         XCTAssertEqual(pending.stages, [gone: .rowRemoved])

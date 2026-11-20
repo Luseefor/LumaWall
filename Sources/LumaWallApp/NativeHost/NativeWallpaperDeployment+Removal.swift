@@ -95,7 +95,8 @@ extension NativeWallpaperDeployment {
         func remove(_ id: String) { try? edit { $0[id] = nil } }
 
         private func edit(_ change: (inout [String: Stage]) -> Void) throws {
-            guard let fileURL else { return }
+            // No app support folder: nothing can be recorded.
+            guard let fileURL else { throw CocoaError(.fileNoSuchFile) }
             try Self.lock.withLockUnchecked {
                 var stages = read()
                 let before = stages
@@ -124,12 +125,13 @@ extension NativeWallpaperDeployment {
     ///   recorded it again; it's left alone.
     /// - An ID the library still lists was never removed, so it's dropped
     ///   without touching the deployment.
-    /// - A `requested` ID waits while the library is empty: that's also
-    ///   what an unreadable index looks like, so its row may still exist.
+    /// - A `requested` ID waits until `libraryLoaded`: a library whose
+    ///   index couldn't be read loads empty, and its row may still exist.
     /// - Anything else is deleted. One whose delete fails again stays.
     @MainActor
     static func finishPendingRemovals(
         libraryIDs: Set<String>,
+        libraryLoaded: Bool,
         pending: PendingRemovals = pendingRemovals,
         removedThisRun: @MainActor () -> Set<String> = { removedEntries },
         remove: @MainActor (String) async throws -> Void = { try await removeDeployment(entryID: $0) }
@@ -141,7 +143,7 @@ extension NativeWallpaperDeployment {
                 pending.remove(id)
                 continue
             }
-            if stage == .requested && libraryIDs.isEmpty { continue }
+            if stage == .requested && !libraryLoaded { continue }
             do {
                 try await remove(id)
                 pending.remove(id)
