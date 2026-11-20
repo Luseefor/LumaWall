@@ -223,7 +223,7 @@ case "$1" in
     printf 'flags=0x10000(runtime)\nTimestamp=2026-11-19\n' >&2
     ;;
   -d)
-    printf ''
+    exit "${LUMAWALL_FAKE_CODESIGN_ENTITLEMENTS_EXIT:-0}"
     ;;
 esac
 SH
@@ -256,6 +256,11 @@ cat > "$fixture_dir/bin/gh" <<'SH'
 printf 'gh %s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/release-steps.log"
 SH
 chmod +x "$fixture_dir/bin/"*
+
+# Failure during codesign entitlements inspection must fail closed and preserve dist/.
+LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_CODESIGN_ENTITLEMENTS_EXIT=1 expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
+[[ ! -e "$fixture_dir/dist/SHA256SUMS" ]] || fail "line $LINENO"
 
 # Failure during Gatekeeper verification must preserve existing dist/ outputs.
 rm -f "$fixture_dir/pinned" "$fixture_dir/release-steps.log"

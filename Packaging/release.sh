@@ -118,8 +118,22 @@ xcodebuild \
 [[ -d "${app_path}" ]] || { print -u2 "Archive did not contain LumaWall.app"; exit 3; }
 
 codesign --verify --deep --strict --verbose=2 "${app_path}"
-while IFS= read -r signed_item; do
-    signature_details="$(codesign -dvv "${signed_item}" 2>&1)"
+if ! nested_items="$(find "${app_path}/Contents" -type d \( -name '*.appex' -o -name '*.framework' \))"; then
+    print -u2 "Refusing release: failed to enumerate nested code inside ${app_path}."
+    exit 3
+fi
+signed_items=()
+while IFS= read -r item; do
+    [[ -n "${item}" ]] && signed_items+=("${item}")
+done <<< "${nested_items}"
+signed_items+=("${app_path}")
+
+for signed_item in "${signed_items[@]}"; do
+    if ! signature_details="$(codesign -dvv "${signed_item}" 2>&1)"; then
+        print -u2 "Refusing release: failed to inspect signature for ${signed_item}."
+        print -u2 "${signature_details}"
+        exit 3
+    fi
     if ! grep -q 'flags=.*runtime' <<<"${signature_details}"; then
         print -u2 "Refusing release: Hardened Runtime is missing from ${signed_item}."
         exit 3
@@ -128,11 +142,16 @@ while IFS= read -r signed_item; do
         print -u2 "Refusing release: secure timestamp is missing from ${signed_item}."
         exit 3
     fi
-    if codesign -d --entitlements - "${signed_item}" 2>/dev/null | grep -A1 -q 'com.apple.security.get-task-allow'; then
+    if ! entitlements="$(codesign -d --entitlements - "${signed_item}" 2>&1)"; then
+        print -u2 "Refusing release: failed to inspect entitlements for ${signed_item}."
+        print -u2 "${entitlements}"
+        exit 3
+    fi
+    if grep -A1 -q 'com.apple.security.get-task-allow' <<<"${entitlements}"; then
         print -u2 "Refusing release: get-task-allow is present in ${signed_item}."
         exit 3
     fi
-done < <(find "${app_path}/Contents" -type d \( -name '*.appex' -o -name '*.framework' \); print -r -- "${app_path}")
+done
 
 ditto -c -k --keepParent "${app_path}" "${app_zip}"
 xcrun notarytool submit "${app_zip}" --keychain-profile "${NOTARY_KEYCHAIN_PROFILE}" --wait
