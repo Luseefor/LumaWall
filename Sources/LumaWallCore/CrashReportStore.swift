@@ -79,7 +79,9 @@ public final class CrashReportStore: @unchecked Sendable {
         // Reports hold backtraces and paths: only the user may read them.
         try FileManager.default.createDirectory(
             at: directoryURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryURL.path)
+        // A folder from an older version that can't be tightened (owned by
+        // another account, say) must not stop the app; new files are 0600.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryURL.path)
     }
 
     // MARK: - Session sentinel

@@ -125,6 +125,12 @@ import Testing
             at: store.directoryURL.appendingPathComponent("session.current"), withDestinationURL: victim)
         _ = store.beginSession(appVersion: "1", osVersion: "26")
         #expect(try Data(contentsOf: victim) == Data("keep".utf8))
+        // The link was replaced by a real sentinel, not left in place.
+        let sentinel = store.directoryURL.appendingPathComponent("session.current")
+        let attributes = try FileManager.default.attributesOfItem(atPath: sentinel.path)
+        #expect(attributes[.type] as? FileAttributeType == .typeRegular)
+        #expect(try mode(of: sentinel) == 0o600)
+        #expect(store.beginSession(appVersion: "1", osVersion: "26")?.kind == .uncleanShutdown)
     }
 
     @Test func ingestDoesNotFollowASymlinkedDump() throws {

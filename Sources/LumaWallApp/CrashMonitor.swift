@@ -72,11 +72,17 @@ extension CrashMonitor {
     }
 
     /// Opens the dump for writing, readable only by the user, and never
-    /// through a symlink planted at `path`. Async-signal-safe: open and
-    /// fchmod only. fchmod covers a dump an older version left 0644.
+    /// through a symlink planted at `path`. Async-signal-safe: open, fchmod,
+    /// ftruncate and close only. fchmod covers a dump an older version left
+    /// 0644; if it fails the dump is skipped, and the old one is truncated
+    /// only once the mode is right. Returns -1 when no dump can be written.
     static func openDumpFile(_ path: UnsafePointer<CChar>) -> Int32 {
-        let fd = open(path, O_CREAT | O_WRONLY | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        if fd >= 0 { _ = fchmod(fd, 0o600) }
+        let fd = open(path, O_CREAT | O_WRONLY | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return -1 }
+        guard fchmod(fd, 0o600) == 0, ftruncate(fd, 0) == 0 else {
+            close(fd)
+            return -1
+        }
         return fd
     }
 
