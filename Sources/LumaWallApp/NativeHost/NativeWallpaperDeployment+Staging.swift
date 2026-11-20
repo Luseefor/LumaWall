@@ -8,12 +8,15 @@ import LumaWallCore
 /// so a library scan could find the entry empty or half-written, and it
 /// hashed the library file before copying it, so a file swapped in between
 /// was deployed under the old file's hash. Now the copy is made with
-/// `VerifiedFileCopy` in `DeployStaging` under Application Support, hashed
-/// as it is written, probed and given its metadata and thumbnail there, then
-/// published with one rename under `entryLock`. The sandboxed extension
-/// can't reach Application Support, so nothing it does can change a staged
-/// entry between the checks and the rename. Both folders sit in the user's
-/// home, so the rename stays on one volume.
+/// `VerifiedFileCopy` in a fresh folder from `makeStagingFolder`, hashed as
+/// it is written, probed and given its metadata and thumbnail there, then
+/// published with one rename under `entryLock`.
+///
+/// The staging folder is the system's item-replacement folder for the
+/// videos folder: on the same volume, so the rename can't fail with
+/// `EXDEV`, outside the extension's container, so the sandboxed extension
+/// can't change a staged entry between the checks and the rename, and new
+/// per deploy, so two deploys never share one.
 extension NativeWallpaperDeployment {
     struct StagedDeployment: Sendable {
         /// The staged entry folder, named "<entryID>.<UUID>".
@@ -25,20 +28,18 @@ extension NativeWallpaperDeployment {
         var videoURL: URL { directoryURL.appendingPathComponent(filename) }
     }
 
-    static var deployStagingFolderURL: URL {
-        let base =
-            (try? StorePaths.appSupportBase())
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LumaWall", isDirectory: true)
-        return base.appendingPathComponent("DeployStaging", isDirectory: true)
+    /// A new, empty folder on the same volume as `url` and outside it. The
+    /// caller deletes it when done; the system also clears these over time.
+    static func makeStagingFolder(appropriateFor url: URL) throws -> URL {
+        try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: url, create: true)
     }
 
-    /// Copies `source` into a fresh staging folder for `entryID`. Staging
-    /// folders an interrupted deploy of the same entry left behind are
-    /// deleted first; one entry deploys at a time (see `ensureDeployed`).
+    /// Copies `source` into a new folder for `entryID` inside
+    /// `stagingFolderURL`, deleting any earlier stage of the same entry
+    /// left there.
     static func stageDeployment(
         source: URL, entryID: String, filename: String,
-        stagingFolderURL: URL = deployStagingFolderURL,
+        stagingFolderURL: URL,
         videosFolderURL: URL = videosFolderURL
     ) throws -> StagedDeployment {
         guard PathSafety.isValidEntryID(entryID), PathSafety.isSafeComponent(filename) else {
@@ -68,7 +69,7 @@ extension NativeWallpaperDeployment {
     /// source being published finishes first and can't land afterwards.
     static func publishDeployment(
         _ staged: StagedDeployment,
-        stagingFolderURL: URL = deployStagingFolderURL,
+        stagingFolderURL: URL,
         videosFolderURL: URL = videosFolderURL,
         trustedAncestor: URL = containerURL
     ) throws {
@@ -79,11 +80,6 @@ extension NativeWallpaperDeployment {
             let videos = try TrustedDirectory(url: videosFolderURL, below: trustedAncestor)
             try staging.publishItem(named: staged.directoryURL.lastPathComponent, into: videos, as: entryID)
         }
-    }
-
-    /// Deletes a staged entry that won't be published.
-    static func discardStaged(_ staged: StagedDeployment, stagingFolderURL: URL = deployStagingFolderURL) {
-        try? TrustedDirectory(url: stagingFolderURL).removeItem(named: staged.directoryURL.lastPathComponent)
     }
 
     /// True when `name` is a regular file directly inside the entry folder,
