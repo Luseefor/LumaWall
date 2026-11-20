@@ -71,53 +71,59 @@ struct SolarScheduleTests {
             ))
     }
 
-    @Test func locationProviderTracksUpdatesAndIgnoresFailures() {
-        // Self-contained against the shared singleton (no order dependence):
-        // record, fail (no-op), update, read back.
-        let provider = LocationDaylightProvider.shared
-        let manager = CLLocationManager()
-        let before = provider.coordinate
-        provider.locationManager(manager, didFailWithError: NSError(domain: "test", code: 1))
-        #expect(provider.coordinate?.latitude == before?.latitude)
+    @Test @MainActor func locationProviderTracksUpdatesAndIgnoresFailures() {
+        let client = FakeLocationClient(authorizationStatus: .authorized, fireAuthOnDelegateAssign: false)
+        let provider = LocationDaylightProvider { client }
+        provider.setActive(true)
+
+        provider.locationManager(client.manager, didFailWithError: NSError(domain: "test", code: 1))
+        #expect(provider.coordinate == nil)
+
         provider.locationManager(
-            manager, didUpdateLocations: [CLLocation(latitude: 52.37, longitude: 4.9)]
+            client.manager, didUpdateLocations: [CLLocation(latitude: 52.37, longitude: 4.9)]
         )
         #expect(abs((provider.coordinate?.latitude ?? 0) - 52.37) < 0.001)
         #expect(abs((provider.coordinate?.longitude ?? 0) - 4.9) < 0.001)
+
+        // Subsequent failure keeps the existing coordinate intact.
+        provider.locationManager(client.manager, didFailWithError: NSError(domain: "test", code: 2))
+        #expect(abs((provider.coordinate?.latitude ?? 0) - 52.37) < 0.001)
     }
 
-    @Test func initAndInactiveCallsDoNotStartLocationManager() {
-        final class Box: @unchecked Sendable {
-            var created = 0
-        }
-        let box = Box()
+    @Test @MainActor func initAndInactiveCallsDoNotStartLocationManager() {
+        var created = 0
+        var firstFixFired = 0
         let provider = LocationDaylightProvider {
-            box.created += 1
+            created += 1
             return FakeLocationClient(authorizationStatus: .authorized)
         }
         #expect(!provider.isActive)
-        #expect(box.created == 0)
+        #expect(created == 0)
 
-        provider.onFirstFix = {}
+        provider.onFirstFix = { firstFixFired += 1 }
         provider.requestIfNeeded()
-        provider.locationManagerDidChangeAuthorization(CLLocationManager())
-        #expect(box.created == 0)
+        let strayManager = CLLocationManager()
+        provider.locationManagerDidChangeAuthorization(strayManager)
+        provider.locationManager(
+            strayManager,
+            didUpdateLocations: [CLLocation(latitude: 37.77, longitude: -122.42)]
+        )
+        #expect(created == 0)
+        #expect(provider.coordinate == nil)
+        #expect(firstFixFired == 0)
     }
 
-    @Test func activatingAuthorizedProviderRequestsSingleFixAndStopsOnDeactivate() {
+    @Test @MainActor func activatingAuthorizedProviderRequestsSingleFixAndStopsOnDeactivate() {
         let client = FakeLocationClient(authorizationStatus: .authorized, fireAuthOnDelegateAssign: true)
-        final class Box: @unchecked Sendable {
-            var created = 0
-        }
-        let box = Box()
+        var created = 0
         let provider = LocationDaylightProvider {
-            box.created += 1
+            created += 1
             return client
         }
 
         provider.setActive(true)
         #expect(provider.isActive)
-        #expect(box.created == 1)
+        #expect(created == 1)
         #expect(client.delegate === provider)
         #expect(client.desiredAccuracy == kCLLocationAccuracyKilometer)
         #expect(client.locationRequests == 1)
@@ -131,7 +137,7 @@ struct SolarScheduleTests {
         var firstFixFired = 0
         provider.onFirstFix = { firstFixFired += 1 }
         provider.locationManager(
-            CLLocationManager(),
+            client.manager,
             didUpdateLocations: [CLLocation(latitude: 37.77, longitude: -122.42)]
         )
         #expect(firstFixFired == 1)
@@ -143,12 +149,54 @@ struct SolarScheduleTests {
         #expect(client.delegate == nil)
         #expect(provider.coordinate == nil)
 
-        // Late authorization callbacks while inactive must not request a fix.
-        provider.locationManagerDidChangeAuthorization(CLLocationManager())
+        // Late callbacks from the deactivated manager must be ignored.
+        provider.locationManagerDidChangeAuthorization(client.manager)
+        provider.locationManager(
+            client.manager,
+            didUpdateLocations: [CLLocation(latitude: 40.71, longitude: -74.0)]
+        )
         #expect(client.locationRequests == 1)
+        #expect(provider.coordinate == nil)
+        #expect(firstFixFired == 1)
     }
 
-    @Test func activatingUndeterminedProviderRequestsAuthorizationThenFixOnGrant() {
+    @Test @MainActor func ignoresCallbacksFromReplacedManagerAndPreservesFirstFix() {
+        let client1 = FakeLocationClient(authorizationStatus: .authorized, fireAuthOnDelegateAssign: false)
+        let client2 = FakeLocationClient(authorizationStatus: .authorized, fireAuthOnDelegateAssign: false)
+        var clients = [client1, client2]
+        let provider = LocationDaylightProvider { clients.removeFirst() }
+
+        provider.setActive(true)
+        provider.setActive(false)
+        provider.setActive(true)
+
+        var firstFixFired = 0
+        provider.onFirstFix = { firstFixFired += 1 }
+
+        // Stale callbacks from the replaced manager must not populate coordinate,
+        // consume onFirstFix, or wake the new manager.
+        let requestsBefore = client2.locationRequests
+        provider.locationManagerDidChangeAuthorization(client1.manager)
+        provider.locationManager(
+            client1.manager,
+            didUpdateLocations: [CLLocation(latitude: 48.85, longitude: 2.35)]
+        )
+        provider.locationManager(client1.manager, didFailWithError: NSError(domain: "test", code: 3))
+        #expect(provider.coordinate == nil)
+        #expect(firstFixFired == 0)
+        #expect(client2.locationRequests == requestsBefore)
+
+        // A fix from the current manager still records and triggers onFirstFix.
+        provider.locationManager(
+            client2.manager,
+            didUpdateLocations: [CLLocation(latitude: 35.68, longitude: 139.76)]
+        )
+        #expect(abs((provider.coordinate?.latitude ?? 0) - 35.68) < 0.001)
+        #expect(abs((provider.coordinate?.longitude ?? 0) - 139.76) < 0.001)
+        #expect(firstFixFired == 1)
+    }
+
+    @Test @MainActor func activatingUndeterminedProviderRequestsAuthorizationThenFixOnGrant() {
         let client = FakeLocationClient(authorizationStatus: .notDetermined, fireAuthOnDelegateAssign: true)
         let provider = LocationDaylightProvider { client }
 
@@ -157,16 +205,24 @@ struct SolarScheduleTests {
         #expect(client.locationRequests == 0)
 
         client.authorizationStatus = .authorized
+        // A foreign manager's callback is ignored.
         provider.locationManagerDidChangeAuthorization(CLLocationManager())
+        #expect(client.locationRequests == 0)
+
+        // The current manager's authorization callback triggers a fix.
+        provider.locationManagerDidChangeAuthorization(client.manager)
         #expect(client.locationRequests == 1)
     }
 }
 
-private final class FakeLocationClient: DaylightLocationClient, @unchecked Sendable {
+@MainActor
+private final class FakeLocationClient: DaylightLocationClient {
+    let manager = CLLocationManager()
+    var managerIdentifier: ObjectIdentifier { ObjectIdentifier(manager) }
     var delegate: (any CLLocationManagerDelegate)? {
         didSet {
             if let delegate, fireAuthOnDelegateAssign {
-                delegate.locationManagerDidChangeAuthorization?(CLLocationManager())
+                delegate.locationManagerDidChangeAuthorization?(manager)
             }
         }
     }

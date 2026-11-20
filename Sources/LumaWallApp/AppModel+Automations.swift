@@ -225,10 +225,8 @@ extension AppModel {
     /// sunrise/sunset immediately.
     func observeFirstLocationFix() {
         LocationDaylightProvider.shared.onFirstFix = { [weak self] in
-            Task { @MainActor in
-                self?.syncDayNightTimer()
-                self?.evaluateAutomations(force: false)
-            }
+            self?.syncDayNightTimer()
+            self?.evaluateAutomations(force: false)
         }
     }
 

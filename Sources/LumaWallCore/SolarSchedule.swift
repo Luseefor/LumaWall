@@ -129,7 +129,9 @@ public enum SolarSchedule: Sendable {
 
 /// Minimal Core Location surface needed for coarse daylight fixes; abstracted
 /// so tests can verify the location lifecycle without waking system hardware.
+@MainActor
 public protocol DaylightLocationClient: AnyObject {
+    var managerIdentifier: ObjectIdentifier { get }
     var delegate: (any CLLocationManagerDelegate)? { get set }
     var desiredAccuracy: CLLocationAccuracy { get set }
     var authorizationStatus: CLAuthorizationStatus { get }
@@ -138,53 +140,31 @@ public protocol DaylightLocationClient: AnyObject {
     func stopUpdatingLocation()
 }
 
-extension CLLocationManager: DaylightLocationClient {}
+extension CLLocationManager: DaylightLocationClient {
+    public var managerIdentifier: ObjectIdentifier { ObjectIdentifier(self) }
+}
 
-/// Rough location for sunrise/sunset. Safe to call from the main actor app model.
-/// Core Location is created only while solar scheduling is active and torn down
-/// as soon as it is turned off.
-public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
+/// Rough location for sunrise/sunset. Isolated to the main actor so Core
+/// Location creation, requests, teardown, and delegate callbacks are strictly
+/// serialized with no window where a request can fire after deactivation.
+@MainActor
+public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate {
     public static let shared = LocationDaylightProvider()
 
-    private let makeClient: @Sendable () -> any DaylightLocationClient
-    private let lock = NSLock()
-    private var _client: (any DaylightLocationClient)?
-    private var _isActive = false
-    private var _coordinate: CLLocationCoordinate2D?
-    private var _lastRequestAt: Date?
-    private var _onFirstFix: (() -> Void)?
-
-    public var isActive: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isActive
-    }
+    private let makeClient: @MainActor () -> any DaylightLocationClient
+    private var client: (any DaylightLocationClient)?
+    public private(set) var isActive = false
+    public private(set) var coordinate: CLLocationCoordinate2D?
+    private var lastRequestAt: Date?
 
     /// Called once, when the first location fix arrives. The app uses it to
     /// re-evaluate solar automations immediately: the fix lands
     /// asynchronously after launch, and without this the sunrise/sunset mode
     /// would sit on the hour-based fallback until the next fixed boundary
     /// (up to 12 hours off).
-    public var onFirstFix: (() -> Void)? {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return _onFirstFix
-        }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            _onFirstFix = newValue
-        }
-    }
+    public var onFirstFix: (@MainActor () -> Void)?
 
-    public var coordinate: CLLocationCoordinate2D? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _coordinate
-    }
-
-    public init(makeClient: @escaping @Sendable () -> any DaylightLocationClient = { CLLocationManager() }) {
+    public init(makeClient: @escaping @MainActor () -> any DaylightLocationClient = { CLLocationManager() }) {
         self.makeClient = makeClient
         super.init()
     }
@@ -197,44 +177,27 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
 
     public func setActive(_ active: Bool) {
         if active {
-            let newlyCreated: (any DaylightLocationClient)? = {
-                lock.lock()
-                defer { lock.unlock() }
-                _isActive = true
-                guard _client == nil else { return nil }
-                let client = makeClient()
-                _client = client
-                return client
-            }()
-            if let newlyCreated {
-                newlyCreated.desiredAccuracy = kCLLocationAccuracyKilometer
-                newlyCreated.delegate = self
+            isActive = true
+            if client == nil {
+                let created = makeClient()
+                client = created
+                created.desiredAccuracy = kCLLocationAccuracyKilometer
+                created.delegate = self
             }
             requestIfNeeded()
         } else {
-            let previous: (any DaylightLocationClient)? = {
-                lock.lock()
-                defer { lock.unlock() }
-                _isActive = false
-                _coordinate = nil
-                _lastRequestAt = nil
-                let current = _client
-                _client = nil
-                return current
-            }()
+            isActive = false
+            coordinate = nil
+            lastRequestAt = nil
+            let previous = client
+            client = nil
             previous?.stopUpdatingLocation()
             previous?.delegate = nil
         }
     }
 
     public func requestIfNeeded() {
-        let client: (any DaylightLocationClient)? = {
-            lock.lock()
-            defer { lock.unlock() }
-            guard _isActive else { return nil }
-            return _client
-        }()
-        guard let client else { return }
+        guard isActive, let client else { return }
 
         switch client.authorizationStatus {
         case .notDetermined:
@@ -252,28 +215,15 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
     }
 
     private func requestThrottledLocation(on client: any DaylightLocationClient) {
-        let shouldRequest: Bool = {
-            lock.lock()
-            defer { lock.unlock() }
-            guard _isActive else { return false }
-            let recent = _lastRequestAt.map { Date().timeIntervalSince($0) < Self.fixThrottle } ?? false
-            if recent { return false }
-            _lastRequestAt = Date()
-            return true
-        }()
-        if shouldRequest {
-            client.requestLocation()
-        }
+        guard isActive else { return }
+        let recent = lastRequestAt.map { Date().timeIntervalSince($0) < Self.fixThrottle } ?? false
+        guard !recent else { return }
+        lastRequestAt = Date()
+        client.requestLocation()
     }
 
-    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        let client: (any DaylightLocationClient)? = {
-            lock.lock()
-            defer { lock.unlock() }
-            guard _isActive else { return nil }
-            return _client
-        }()
-        guard let client else { return }
+    private func handleAuthorizationChange(from senderID: ObjectIdentifier) {
+        guard isActive, let client, client.managerIdentifier == senderID else { return }
 
         switch client.authorizationStatus {
         case .authorized, .authorizedAlways:
@@ -283,18 +233,46 @@ public final class LocationDaylightProvider: NSObject, CLLocationManagerDelegate
         }
     }
 
-    public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        lock.lock()
-        let isFirst = _coordinate == nil
-        _coordinate = locations.last?.coordinate
-        let handler = _onFirstFix
-        lock.unlock()
-        if isFirst { handler?() }
+    private func handleLocationUpdate(_ pair: (latitude: Double, longitude: Double)?, from senderID: ObjectIdentifier) {
+        guard isActive, let client, client.managerIdentifier == senderID else { return }
+        guard let pair else { return }
+        let isFirst = coordinate == nil
+        coordinate = CLLocationCoordinate2D(latitude: pair.latitude, longitude: pair.longitude)
+        if isFirst { onFirstFix?() }
     }
 
-    public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        lock.lock()
-        if _coordinate == nil { _lastRequestAt = nil }
-        lock.unlock()
+    private func handleLocationFailure(from senderID: ObjectIdentifier) {
+        guard isActive, let client, client.managerIdentifier == senderID else { return }
+        if coordinate == nil { lastRequestAt = nil }
+    }
+
+    private nonisolated func runOnMainActor(_ work: @escaping @MainActor @Sendable () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated(work)
+        } else {
+            Task { @MainActor in work() }
+        }
+    }
+
+    public nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let senderID = ObjectIdentifier(manager)
+        runOnMainActor { [weak self] in
+            self?.handleAuthorizationChange(from: senderID)
+        }
+    }
+
+    public nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        let senderID = ObjectIdentifier(manager)
+        let pair = locations.last.map { (latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude) }
+        runOnMainActor { [weak self] in
+            self?.handleLocationUpdate(pair, from: senderID)
+        }
+    }
+
+    public nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        let senderID = ObjectIdentifier(manager)
+        runOnMainActor { [weak self] in
+            self?.handleLocationFailure(from: senderID)
+        }
     }
 }
