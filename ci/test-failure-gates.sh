@@ -49,6 +49,13 @@ printf 'lsregister %s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/unregistered"
 SH
 chmod +x "$fixture_dir/bin/"* "$fixture_dir/ci/"*.sh
 
+# /bin/bash 3.2 doesn't exit on a failed [[ ]] under set -e, so every
+# check states its own failure.
+fail() {
+    printf 'Failure gate check failed: %s\n' "$1" >&2
+    exit 1
+}
+
 expect_unregistered() {
     grep -Fqx "pluginkit -r $built_app/Contents/Extensions/LumaWallWallpaper.appex" "$fixture_dir/unregistered"
     grep -Fqx "lsregister -u $built_app" "$fixture_dir/unregistered"
@@ -69,12 +76,12 @@ expect_exit() {
 
 # A core-test failure must stop before building the app.
 LUMAWALL_FAKE_SWIFT_EXIT=43 expect_exit 43 bash "$fixture_dir/ci/check.sh"
-[[ ! -e "$fixture_dir/generated" ]]
+[[ ! -e "$fixture_dir/generated" ]] || fail "line $LINENO"
 expect_unregistered
 
 # A playback failure must stop before compiling a release.
 expect_exit 44 bash "$fixture_dir/ci/check.sh"
-[[ -e "$fixture_dir/generated" && ! -e "$fixture_dir/packaged" ]]
+[[ -e "$fixture_dir/generated" && ! -e "$fixture_dir/packaged" ]] || fail "line $LINENO"
 expect_unregistered
 
 # An interrupted run must still unregister the built app.
@@ -88,7 +95,7 @@ export DEVELOPER_ID_APPLICATION='Developer ID Application: Release Gate Fixture'
 export DEVELOPMENT_TEAM='FIXTURE'
 export NOTARY_KEYCHAIN_PROFILE='fixture-profile'
 expect_exit 42 zsh "$fixture_dir/Packaging/release.sh"
-[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]]
-[[ ! -e "$fixture_dir/packaged" ]]
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
+[[ ! -e "$fixture_dir/packaged" ]] || fail "line $LINENO"
 
 printf 'Core, playback, release, and cleanup failure gates passed.\n'
