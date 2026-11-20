@@ -325,16 +325,38 @@ enum NativeWallpaperDeployment {
     /// or one where a symlink or other non-file stands in, reads as nil so
     /// the next deploy replaces it. Other read errors throw.
     static func entry(id: String, videosFolderURL: URL = videosFolderURL) throws -> EntryInfo? {
+        guard let folder = try entryFolder(id, videosFolderURL: videosFolderURL) else { return nil }
+        return try entry(id: id, readingFrom: folder)
+    }
+
+    /// The entry's folder, or nil when it's missing or a symlink or file
+    /// stands in for it. Other errors throw.
+    static func entryFolder(_ id: String, videosFolderURL: URL = videosFolderURL) throws -> TrustedDirectory? {
+        do {
+            return try trustedFolder(videosFolderURL).subdirectory(id)
+        } catch let error as POSIXError where readsAsMissing(error) {
+            return nil
+        }
+    }
+
+    /// metadata.json in the open entry `folder`, as `entry(id:)` reads it.
+    static func entry(id: String, readingFrom folder: TrustedDirectory) throws -> EntryInfo? {
         let data: Data
         do {
-            data = try trustedFolder(videosFolderURL).subdirectory(id).readFile(named: "metadata.json")
-        } catch let error as POSIXError where [.ENOENT, .ELOOP, .ENOTDIR, .EFTYPE].contains(error.code) {
+            data = try folder.readFile(named: "metadata.json")
+        } catch let error as POSIXError where readsAsMissing(error) {
             return nil
         }
         // Bytes that don't decode (a truncated write, a hand edit) read as
         // missing so the next deploy replaces them. Read errors still throw.
         guard let decoded = try? JSONDecoder().decode(EntryInfo.self, from: data) else { return nil }
         return validated(decoded, id: id)
+    }
+
+    /// Missing, or a symlink or other non-file or non-folder where one
+    /// should be.
+    private static func readsAsMissing(_ error: POSIXError) -> Bool {
+        [.ENOENT, .ELOOP, .ENOTDIR, .EFTYPE].contains(error.code)
     }
 
     /// The extension can write its container, so metadata.json is checked

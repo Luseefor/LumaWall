@@ -157,7 +157,7 @@ extension NativeWallpaperDeployment {
                 }
             }
             guard let resolution = await videoSize(of: staged) else {
-                try? fm.removeItem(at: staged)
+                try? trustedFolder(stagingFolderURL).removeFile(named: staged.lastPathComponent)
                 return .failed
             }
             // Publishing writes into the extension's container.
@@ -192,41 +192,48 @@ extension NativeWallpaperDeployment {
     /// the export when the entry no longer holds the source it was made from.
     /// When metadata.json can't be written the export goes back to staging,
     /// so a retry publishes it without encoding again.
+    ///
+    /// The staging and entry folders are opened through `TrustedDirectory`
+    /// and every read, move and delete goes through their descriptors, so
+    /// a folder swapped for a symlink fails the publish instead of steering
+    /// it elsewhere.
     static func publish(
         _ staged: URL,
         job: VariantEncodeQueue.Job,
         resolution: CGSize,
         videosFolderURL: URL = videosFolderURL,
-        writeMetadata: (EntryInfo, URL) throws -> Void = { entry, url in
-            try JSONEncoder().encode(entry).write(to: url, options: .atomic)
+        writeMetadata: (EntryInfo, TrustedDirectory) throws -> Void = { entry, folder in
+            try folder.writeFile(named: "metadata.json", contents: JSONEncoder().encode(entry))
         }
     ) -> PublishResult {
         entryLock.withLock {
-            let fm = FileManager.default
+            let stagedName = staged.lastPathComponent
+            guard let staging = try? trustedFolder(staged.deletingLastPathComponent()) else { return .failed }
+            let folder: TrustedDirectory
             let current: EntryInfo
             do {
-                guard let entry = try entry(id: job.entryID, videosFolderURL: videosFolderURL),
+                guard let opened = try entryFolder(job.entryID, videosFolderURL: videosFolderURL),
+                    let entry = try entry(id: job.entryID, readingFrom: opened),
                     entry.contentHash == job.contentHash
                 else {
-                    try? fm.removeItem(at: staged)
+                    try? staging.removeFile(named: stagedName)
                     return .stale
                 }
+                folder = opened
                 current = entry
             } catch {
                 return .failed
             }
-            let dir = entryDirectory(job.entryID, videosFolderURL: videosFolderURL)
-            let dest = dir.appendingPathComponent(job.spec.filename)
-            try? fm.removeItem(at: dest)
-            do { try fm.moveItem(at: staged, to: dest) } catch { return .failed }
+            let name = job.spec.filename
+            do { try staging.publishItem(named: stagedName, into: folder, as: name) } catch { return .failed }
             var updated = current
-            let listed = (current.variants ?? []).filter { fm.fileExists(atPath: dir.appendingPathComponent($0.filename).path) }
-            let variant = NativeVideoVariant(filename: job.spec.filename, fps: job.spec.recordedFPS, resolution: resolution)
+            let listed = (current.variants ?? []).filter { (try? folder.kind(ofItemNamed: $0.filename)) == .file }
+            let variant = NativeVideoVariant(filename: name, fps: job.spec.recordedFPS, resolution: resolution)
             updated.variants = merging(listed, with: [variant])
             do {
-                try writeMetadata(updated, dir.appendingPathComponent("metadata.json"))
+                try writeMetadata(updated, folder)
             } catch {
-                try? fm.moveItem(at: dest, to: staged)
+                try? folder.publishItem(named: name, into: staging, as: stagedName)
                 return .failed
             }
             return .published
@@ -283,10 +290,7 @@ extension NativeWallpaperDeployment {
     }
 
     private static func entry(id: String, inEntry folder: TrustedDirectory) -> EntryInfo? {
-        guard let data = try? folder.readFile(named: "metadata.json"),
-            let entry = try? JSONDecoder().decode(EntryInfo.self, from: data)
-        else { return nil }
-        return validated(entry, id: id)
+        (try? entry(id: id, readingFrom: folder)) ?? nil
     }
 
     private static func isLegacyExport(_ name: String) -> Bool {

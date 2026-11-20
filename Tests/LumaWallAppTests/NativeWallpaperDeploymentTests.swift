@@ -735,6 +735,51 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertEqual(retried, .published)
     }
 
+    /// A staging folder swapped for a symlink to `victim`, holding a file
+    /// named like the export `job` would publish.
+    private func symlinkedStaging(for job: NativeWallpaperDeployment.VariantEncodeQueue.Job) throws -> (staged: URL, victimFile: URL) {
+        let fm = FileManager.default
+        let victim = root.appendingPathComponent("victim", isDirectory: true)
+        try fm.createDirectory(at: victim, withIntermediateDirectories: true)
+        let linked = root.appendingPathComponent("linked-staging", isDirectory: true)
+        try fm.createSymbolicLink(at: linked, withDestinationURL: victim)
+        let staged = NativeWallpaperDeployment.stagedURL(for: job, stagingFolderURL: linked)
+        let victimFile = victim.appendingPathComponent(staged.lastPathComponent)
+        try Data("keep".utf8).write(to: victimFile)
+        return (staged, victimFile)
+    }
+
+    func testAStaleCopyIsNotDeletedThroughASymlinkedStagingFolder() throws {
+        try deploy(hash: "new")
+        let (staged, victimFile) = try symlinkedStaging(for: job(hash: "old"))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "old"), resolution: size, videosFolderURL: videos)
+        XCTAssertNotEqual(result, .published)
+        XCTAssertEqual(try Data(contentsOf: victimFile), Data("keep".utf8))
+    }
+
+    func testACopyIsNotTakenFromASymlinkedStagingFolder() throws {
+        try deploy(hash: "aaa")
+        let (staged, victimFile) = try symlinkedStaging(for: job(hash: "aaa"))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .failed)
+        XCTAssertEqual(try Data(contentsOf: victimFile), Data("keep".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+    }
+
+    func testPublishReplacesASymlinkedCopyWithoutTouchingItsTarget() throws {
+        let fm = FileManager.default
+        try deploy(hash: "aaa")
+        let outside = root.appendingPathComponent("outside.mov")
+        try Data("keep".utf8).write(to: outside)
+        try fm.createSymbolicLink(at: dest, withDestinationURL: outside)
+        let staged = try stage(job(hash: "aaa"))
+        let result = NativeWallpaperDeployment.publish(staged, job: job(hash: "aaa"), resolution: size, videosFolderURL: videos)
+        XCTAssertEqual(result, .published)
+        XCTAssertEqual(try Data(contentsOf: outside), Data("keep".utf8))
+        XCTAssertEqual(try Data(contentsOf: dest), Data("copy".utf8))
+        XCTAssertNil(try? fm.destinationOfSymbolicLink(atPath: dest.path))
+    }
+
     func testStartupCleanupRemovesAbandonedExports() throws {
         // A quit mid-export left a multi-GB temp movie that the extension's
         // recovery scan could pick as the wallpaper.
