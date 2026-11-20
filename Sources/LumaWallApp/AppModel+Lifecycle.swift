@@ -10,6 +10,7 @@ extension AppModel {
     func bootstrap() async {
         observeNativeFallback()
         await reload()
+        finishPendingRemovals()
         startDeploymentSweeps()
         playlists = await playlistStore.all()
         await restorePlaylistPlaybackState()
@@ -47,6 +48,16 @@ extension AppModel {
             return Set((library + assigned).map(\.rawValue.uuidString))
         }
         NativeWallpaperDeployment.scheduleSweep()
+    }
+
+    /// Deletes the deployed copies of wallpapers a previous run removed
+    /// from the library but quit or failed before deleting.
+    private func finishPendingRemovals() {
+        let store = store
+        Task {
+            let library = Set(await store.assets().map(\.id.rawValue.uuidString))
+            await NativeWallpaperDeployment.finishPendingRemovals(libraryIDs: library)
+        }
     }
 
     func consumePendingShortcutIfNeeded() async {

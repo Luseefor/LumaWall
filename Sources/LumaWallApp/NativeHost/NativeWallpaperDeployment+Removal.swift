@@ -1,5 +1,6 @@
 import Foundation
 import LumaWallCore
+import os
 
 /// Takes a removed wallpaper out of the extension's library.
 ///
@@ -63,6 +64,71 @@ extension NativeWallpaperDeployment {
                 return
             }
             do { try videos.removeItem(named: entryID) } catch POSIXError.ENOENT {}
+        }
+    }
+
+    /// Entries removed from the library whose deployed folder may still be
+    /// on disk. `AppModel.remove` adds one before the library row goes and
+    /// drops it once `removeDeployment` succeeds, so a quit or a failed
+    /// delete in between is finished at the next launch.
+    struct PendingRemovals: Sendable {
+        let fileURL: URL?
+
+        private static let lock = OSAllocatedUnfairLock()
+
+        var ids: Set<String> { Self.lock.withLockUnchecked { read() } }
+
+        func add(_ id: String) { edit { $0.insert(id) } }
+
+        func remove(_ id: String) { edit { $0.remove(id) } }
+
+        private func edit(_ change: (inout Set<String>) -> Void) {
+            guard let fileURL else { return }
+            Self.lock.withLockUnchecked {
+                var ids = read()
+                let before = ids
+                change(&ids)
+                guard ids != before else { return }
+                if ids.isEmpty {
+                    try? FileManager.default.removeItem(at: fileURL)
+                } else if let data = try? JSONEncoder().encode(ids.sorted()) {
+                    try? data.write(to: fileURL, options: .atomic)
+                }
+            }
+        }
+
+        private func read() -> Set<String> {
+            guard let fileURL, let data = try? Data(contentsOf: fileURL),
+                let ids = try? JSONDecoder().decode([String].self, from: data)
+            else { return [] }
+            return Set(ids)
+        }
+    }
+
+    static let pendingRemovals = PendingRemovals(
+        fileURL: (try? StorePaths.appSupportBase())?.appendingPathComponent("pending-removals.json"))
+
+    /// Finishes the removals a previous run left pending. An ID the library
+    /// still lists was never removed (the app quit before the row went, or
+    /// the row stayed), so it's dropped without touching the deployment.
+    /// One whose delete fails again stays for the next launch.
+    @MainActor
+    static func finishPendingRemovals(
+        libraryIDs: Set<String>,
+        pending: PendingRemovals = pendingRemovals,
+        remove: @MainActor (String) async throws -> Void = { try await removeDeployment(entryID: $0) }
+    ) async {
+        for id in pending.ids.sorted() {
+            guard !libraryIDs.contains(id) else {
+                pending.remove(id)
+                continue
+            }
+            do {
+                try await remove(id)
+                pending.remove(id)
+            } catch {
+                nativeHostLog.error("removal: pending delete failed again: \(LogRedaction.code(of: error), privacy: .public)")
+            }
         }
     }
 }

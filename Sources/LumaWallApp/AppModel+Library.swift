@@ -172,6 +172,9 @@ extension AppModel {
         // Before any suspension: an apply or restore running meanwhile must
         // not deploy or assign the wallpaper being removed.
         NativeWallpaperDeployment.markRemoved(entryID: entryID)
+        // Kept until the deployed copy is gone, so a quit or a failed delete
+        // is finished at the next launch.
+        NativeWallpaperDeployment.pendingRemovals.add(entryID)
         Task {
             for (displayID, wallpaperID) in activeByDisplay where wallpaperID == asset.id {
                 try? await engine.clear(displayID)
@@ -193,10 +196,12 @@ extension AppModel {
             // deployed copy goes too, so System Settings stops offering it.
             guard await store.asset(id: asset.id) == nil else {
                 NativeWallpaperDeployment.unmarkRemoved(entryID: entryID)
+                NativeWallpaperDeployment.pendingRemovals.remove(entryID)
                 return
             }
             do {
                 try await NativeWallpaperDeployment.removeDeployment(entryID: entryID)
+                NativeWallpaperDeployment.pendingRemovals.remove(entryID)
             } catch {
                 present(
                     "LumaWall",
