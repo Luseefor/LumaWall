@@ -21,6 +21,10 @@ private final class EncodeLog: @unchecked Sendable {
     var results: [Queue.Outcome] = []
 
     private var cancelledNames: [String] = []
+    private var eventLog: [String] = []
+    /// Encode starts and source releases, in order.
+    var events: [String] { lock.withLock { eventLog } }
+    func released(_ job: Queue.Job) { lock.withLock { eventLog.append("release \(job.entryID)") } }
     var cancelled: [String] { lock.withLock { cancelledNames } }
     var order: [String] { lock.withLock { started } }
     var completed: [String] { lock.withLock { finished } }
@@ -41,6 +45,7 @@ private final class EncodeLog: @unchecked Sendable {
     func encode(_ job: Queue.Job) async -> Queue.Outcome {
         lock.withLock {
             started.append(job.name)
+            eventLog.append("encode \(job.name)")
             running += 1
             maxRunningCount = max(maxRunningCount, running)
         }
@@ -87,7 +92,9 @@ final class VariantEncodeQueueTests: XCTestCase {
     }
 
     private func queue(_ log: EncodeLog) -> Queue {
-        Queue(readiness: { log.readiness(of: $0) }, encode: { await log.encode($0) }, now: { log.now })
+        Queue(
+            readiness: { log.readiness(of: $0) }, encode: { await log.encode($0) }, now: { log.now },
+            finishedSource: { log.released($0) })
     }
 
     func testEncodesRunOneAtATimeLowestRankFirst() async {
@@ -280,5 +287,34 @@ final class VariantEncodeQueueTests: XCTestCase {
         log.openAll()
         await queue.drained()
         XCTAssertEqual(log.order, ["a/Wallpaper.qhd.mov", "a/Wallpaper.qhd.mov"])
+    }
+
+    func testASourceIsReleasedOnceTheQueueMovesPastIt() async {
+        // Each source's private copy lives while its jobs run back to back
+        // and goes when the queue turns to another source or stops.
+        let log = EncodeLog()
+        log.set("a/Wallpaper.qhd.mov", .hold)
+        log.results = [.done, .failed]
+        let queue = queue(log)
+        await queue.enqueue([job("a", "Wallpaper.minimal.mov"), job("a", "Wallpaper.reduced.mov"), job("a", "Wallpaper.qhd.mov")])
+        await queue.enqueue([job("b", "Wallpaper.minimal.mov")])
+        log.openAll()
+        await queue.drained()
+        XCTAssertEqual(
+            log.events,
+            [
+                "encode a/Wallpaper.minimal.mov", "encode a/Wallpaper.reduced.mov", "release a",
+                "encode b/Wallpaper.minimal.mov", "release b",
+            ])
+    }
+
+    func testARemovedWallpapersSourceIsReleased() async {
+        let log = EncodeLog()
+        let queue = queue(log)
+        await queue.enqueue([job("a", "Wallpaper.minimal.mov"), job("a", "Wallpaper.reduced.mov")])
+        await log.waitUntilStarted("a/Wallpaper.minimal.mov")
+        await queue.cancel(entryID: "a")
+        await queue.drained()
+        XCTAssertEqual(log.events, ["encode a/Wallpaper.minimal.mov", "release a"])
     }
 }

@@ -12,6 +12,10 @@ extension NativeWallpaperDeployment {
     /// A copy that fails waits `firstRetryDelay`, doubling each time, and
     /// stops after `maxAttempts` tries for the session. Retries happen on the
     /// next request for the copy; nothing is scheduled.
+    ///
+    /// Jobs that share a source run from one private copy of it.
+    /// `finishedSource` is called with the last job of a source once the
+    /// queue moves to another source or stops, however that job ended.
     actor VariantEncodeQueue {
         struct Job: Sendable, Equatable {
             let entryID: String
@@ -20,7 +24,9 @@ extension NativeWallpaperDeployment {
             /// different file makes the job stale.
             let contentHash: String
             let spec: VariantSpec
-            var key: String { entryID + "/" + contentHash + "/" + spec.filename }
+            var key: String { sourceKey + "/" + spec.filename }
+            /// Same for every copy made from one deployed source.
+            var sourceKey: String { entryID + "/" + contentHash }
         }
 
         enum Readiness: Equatable, Sendable {
@@ -46,6 +52,9 @@ extension NativeWallpaperDeployment {
         private let encode: @Sendable (Job) async -> Outcome
         private let now: @Sendable () -> Date
         private let prepare: @Sendable () -> Void
+        private let finishedSource: @Sendable (Job) -> Void
+        /// The last job run, until `finishedSource` is called for its source.
+        private var lastSource: Job?
         private var prepared = false
         private var pending: [Job] = []
         /// Stopped with `.notNow`; back in `pending` on the next `wake()`.
@@ -62,12 +71,14 @@ extension NativeWallpaperDeployment {
             readiness: @escaping @Sendable (Job) -> Readiness,
             encode: @escaping @Sendable (Job) async -> Outcome,
             now: @escaping @Sendable () -> Date = { Date() },
-            prepare: @escaping @Sendable () -> Void = {}
+            prepare: @escaping @Sendable () -> Void = {},
+            finishedSource: @escaping @Sendable (Job) -> Void = { _ in }
         ) {
             self.readiness = readiness
             self.encode = encode
             self.now = now
             self.prepare = prepare
+            self.finishedSource = finishedSource
         }
 
         /// Runs `prepare` once, before any encode starts.
@@ -180,6 +191,8 @@ extension NativeWallpaperDeployment {
 
         private func drain() async {
             while let job = next() {
+                if let last = lastSource, last.sourceKey != job.sourceKey { finishedSource(last) }
+                lastSource = job
                 let encode = self.encode
                 let task = Task(priority: .utility) { await encode(job) }
                 let wakesAtStart = wakes
@@ -202,6 +215,8 @@ extension NativeWallpaperDeployment {
                     failures[job.key] = (count, now().addingTimeInterval(delay))
                 }
             }
+            if let last = lastSource { finishedSource(last) }
+            lastSource = nil
             worker = nil
         }
     }
