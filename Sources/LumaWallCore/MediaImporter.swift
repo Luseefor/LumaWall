@@ -1,5 +1,4 @@
 import AVFoundation
-import CryptoKit
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -49,7 +48,18 @@ public actor MediaImporter {
 
     private let store: LibraryStore
 
-    public init(store: LibraryStore) { self.store = store }
+    /// Imports stage their copy here. Clear Disk Cache empties `Scratch`, so
+    /// a folder of its own keeps an import's copy from vanishing mid-import.
+    private nonisolated let stagingURL: URL
+
+    public init(store: LibraryStore) {
+        self.store = store
+        stagingURL = store.rootURL.appendingPathComponent("Importing", isDirectory: true)
+        // Copies an interrupted run left behind. No import runs yet.
+        if let staging = try? TrustedDirectory(url: stagingURL) {
+            for item in (try? staging.entries()) ?? [] { try? staging.removeItem(named: item.name) }
+        }
+    }
 
     /// The URLs a drop or file panel handed over that name local files.
     /// Anything else (a dragged web link) is dropped before AVFoundation can
@@ -102,15 +112,14 @@ public actor MediaImporter {
         )
     }
 
-    /// Copies the source into the library's Scratch folder once, then
+    /// Copies the source into the library's Importing folder once, then
     /// inspects, hashes and stores only that copy. A source swapped or
     /// rewritten after the copy can't change what was checked.
     public func importVideo(_ sourceURL: URL, preferredName: String? = nil) async throws -> ImportOutcome {
         guard sourceURL.isFileURL else { throw VerifiedFileCopy.CopyError.notALocalFile }
-        let scratch = store.rootURL.appendingPathComponent("Scratch", isDirectory: true)
-        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: stagingURL, withIntermediateDirectories: true)
         let ext = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension.lowercased()
-        let staged = scratch.appendingPathComponent("\(UUID().uuidString).\(ext)")
+        let staged = stagingURL.appendingPathComponent("\(UUID().uuidString).\(ext)")
         defer { try? FileManager.default.removeItem(at: staged) }
         let copy = try await Task.detached(priority: .userInitiated) {
             try VerifiedFileCopy.copy(from: sourceURL, to: staged)
@@ -195,14 +204,7 @@ public actor MediaImporter {
 
     private nonisolated static func sha256(of url: URL) async throws -> String {
         try await Task.detached(priority: .utility) {
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            var hasher = SHA256()
-            while let data = try handle.read(upToCount: 1_048_576), !data.isEmpty {
-                try Task.checkCancellation()
-                hasher.update(data: data)
-            }
-            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+            try VerifiedFileCopy.sha256(ofFileAt: url).sha256
         }.value
     }
 }

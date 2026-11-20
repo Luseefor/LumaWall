@@ -26,6 +26,7 @@ struct VerifiedFileCopyTests {
         #expect(try Data(contentsOf: dest) == bytes)
         #expect(result.size == Int64(bytes.count))
         #expect(result.sha256 == SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined())
+        #expect(try VerifiedFileCopy.sha256(ofFileAt: source) == result)
     }
 
     @Test func refusesAnythingButARegularFile() throws {
@@ -40,6 +41,9 @@ struct VerifiedFileCopyTests {
             #expect(throws: VerifiedFileCopy.CopyError.notARegularFile) {
                 try VerifiedFileCopy.copy(from: source, to: dir.appendingPathComponent(UUID().uuidString))
             }
+        }
+        for source in [folder, fifo] {
+            #expect(throws: VerifiedFileCopy.CopyError.notARegularFile) { try VerifiedFileCopy.sha256(ofFileAt: source) }
         }
         #expect(throws: VerifiedFileCopy.CopyError.notALocalFile) {
             try VerifiedFileCopy.copy(
