@@ -766,6 +766,16 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
     }
 
+    func testNoCopyIsEncodedIntoASymlinkedStagingFolder() async throws {
+        let (staged, victimFile) = try symlinkedStaging(for: job(hash: "aaa"))
+        let result = await NativeWallpaperDeployment.transcode(
+            sourceURL: root.appendingPathComponent("source.mov"), to: staged, spec: minimal
+        ) { true }
+        XCTAssertEqual(result, .failed)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: victimFile.deletingLastPathComponent().path).count, 1)
+        XCTAssertEqual(try Data(contentsOf: victimFile), Data("keep".utf8))
+    }
+
     func testPublishReplacesASymlinkedCopyWithoutTouchingItsTarget() throws {
         let fm = FileManager.default
         try deploy(hash: "aaa")

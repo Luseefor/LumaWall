@@ -134,7 +134,13 @@ extension NativeWallpaperDeployment {
     /// so an interrupted export never sits under the finished name.
     /// `proceed` is asked once more right before the export starts, after
     /// the composition is set up; a no, or task cancellation, skips it.
+    ///
+    /// The export itself needs a path, but the rename into place and the
+    /// cleanup go through the output folder's descriptor (`TrustedDirectory`),
+    /// so a folder swapped for a symlink can't steer them; a folder that is
+    /// a symlink already fails the transcode before it starts.
     static func transcode(sourceURL: URL, to output: URL, spec: VariantSpec, proceed: () -> Bool) async -> TranscodeResult {
+        guard let folder = try? trustedFolder(output.deletingLastPathComponent()) else { return .failed }
         let source = AVURLAsset(url: sourceURL)
         guard let export = AVAssetExportSession(asset: source, presetName: spec.preset) else { return .failed }
         let partial = output.deletingPathExtension().appendingPathExtension("\(UUID().uuidString).partial.mov")
@@ -143,11 +149,12 @@ extension NativeWallpaperDeployment {
             export.videoComposition = composition
             guard !Task.isCancelled, proceed() else { return .skipped }
             try await export.export(to: partial, as: .mov)
-            try? FileManager.default.removeItem(at: output)
-            try FileManager.default.moveItem(at: partial, to: output)
+            // Replaces an older export at `output`, deleted without
+            // following symlinks.
+            try folder.publishItem(named: partial.lastPathComponent, into: folder, as: output.lastPathComponent)
             return .finished
         } catch {
-            try? FileManager.default.removeItem(at: partial)
+            try? folder.removeFile(named: partial.lastPathComponent)
             return Task.isCancelled || error is CancellationError ? .skipped : .failed
         }
     }
