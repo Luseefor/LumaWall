@@ -22,7 +22,16 @@ SwiftPM package. The notes below cover what the code doesn't show.
 `ci/test.sh` finds the target from where the class or suite is declared.
 Run `./ci/check.sh` before you push.
 
-**Lint and format:** run `./ci/check.sh` (it will include lint).
+## Lint, format and warnings
+
+- `./ci/format.sh` formats in place with `swift format` (ships with
+  Xcode; config in `.swift-format`). `./ci/check.sh` fails on any lint
+  finding, so format before you commit.
+- Compiler warnings are errors in every target and in `Package.swift`.
+  Fix the warning; don't silence it.
+- The one-time reformat is listed in `.git-blame-ignore-revs`. Run
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs` once to skip it
+  in `git blame`.
 
 ## Xcode project
 
@@ -50,9 +59,10 @@ each built `LumaWall.app`.
 
 ## CI's Xcode is older
 
-CI builds with an older Xcode than the owner's Mac (see `DEVELOPER_DIR`
-in `.github/workflows/wallpaper-checks.yml`). Code that builds locally
-can fail there, for example on region-isolation errors around `Task`
+CI builds with Xcode 26.3 on both runners (the `xcode` path per matrix
+entry in `.github/workflows/wallpaper-checks.yml`); the owner's Mac has
+Xcode 27. GitHub's standard runners have no Xcode 27 yet. Code that
+builds locally can fail on CI, for example on region-isolation errors around `Task`
 closures in `XCTestCase` methods. Watch CI after pushing.
 
 ## Where tests live
