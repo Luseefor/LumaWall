@@ -1,0 +1,9 @@
+LumaWall
+Copyright 2026 Rijan Ghimire
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The wallpaper extension's XPC bridge in WallpaperExtension/ is adapted
+from Phosphene (https://github.com/kageroumado/phosphene), copyright (c)
+2026 kageroumado, under the MIT License. See THIRD_PARTY_NOTICES.md and
+WallpaperExtension/LICENSE-Phosphene for the full text.

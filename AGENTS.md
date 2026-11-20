@@ -85,5 +85,5 @@ that container.
 ## Rules
 
 - Source files stay under 1,500 lines, tests included.
-- Every commit ends with exactly this trailer and no other:
+- Every maintainer or agent commit ends with exactly this trailer and no other (outside contributors sign off with a DCO `Signed-off-by` trailer per [CONTRIBUTING.md](CONTRIBUTING.md)):
   `Co-Authored-By: spade <bot@acehq.dev>`

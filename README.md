@@ -3,13 +3,15 @@
 Play local video files as macOS wallpapers, with per-display assignments,
 scheduled playlists, and playback rules for power use and Reduce Motion.
 
+LumaWall is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Apple Inc.
+
 No signed, notarized download is available yet.
 See [Build](#build) for setup and [Production DMG](#production-dmg) for distribution requirements.
 
 ## Requirements
 
-- macOS 15 or newer for the overlay path
-- macOS 26 or newer for the embedded WallpaperKit extension (`LumaWallWallpaper.appex`)
+- macOS 15 or newer for Safe mode (the desktop overlay path, default)
+- macOS 26 or newer for the optional extension targeting the macOS 26 wallpaper extension point (`LumaWallWallpaper.appex`)
 - Xcode with XcodeGen for the signed app target
 - Swift 6 toolchain for library tests
 
@@ -21,17 +23,17 @@ Home, Library, Displays, and Settings cover browsing, tags, favorites, recents, 
 
 Shared overlay decoders reuse one player when the same media hits multiple screens. Reduce Motion freezes to a static frame. Game Mode pauses playback. On battery, a 720p variant can replace the full file. Shortcuts can apply a wallpaper. English and Spanish ship in the string catalog. Settings includes an Energy Log with a 24h sample window for soak checks.
 
-Force overlay even on a native-capable Mac:
+## Safe mode and opt-in native mode
+
+- **Safe mode (default)**: LumaWall uses its desktop overlay engine by default on every macOS version. It sets the desktop image to a static poster for each screen via standard macOS APIs and plays a muted looping video in a desktop-level window above it. It never modifies internal system wallpaper files or restarts system wallpaper agents.
+- **Native wallpaper mode (optional, experimental)**: On macOS 26+ with `LumaWallWallpaper.appex` embedded under `Contents/Extensions`, you can opt in to native mode. Native mode uses undocumented interfaces for the macOS 26 wallpaper extension point, deploys the video into the extension container, edits the system wallpaper settings file (`~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`), and restarts `WallpaperAgent` so the system hosts playback.
+- **Risk and fallback**: Native mode is used at your own risk and may break after a macOS update. If a native assignment fails, LumaWall falls back to Safe mode (overlay) automatically and can restore your previous wallpaper settings from its backup. Before uninstalling LumaWall or deleting its `Application Support` and container folders, native-mode users should run **Restore original wallpaper** or switch to another wallpaper in System Settings so macOS no longer references the deployed media or backup.
+
+You can also force Safe mode (overlay) from the command line:
 
 ```sh
 defaults write app.lumawall.personal lumawall.forceOverlay -bool YES
 ```
-
-## How apply works
-
-On macOS 26+ with the wallpaper extension embedded under `Contents/Extensions`, LumaWall deploys the video into the extension container and assigns it through the system wallpaper store (`com.apple.wallpaper`). WallpaperAgent hosts playback. Lock-screen live video depends on what the OS allows.
-
-On macOS 15–25, or in SwiftPM overlay-only builds, LumaWall sets the desktop image to the poster for that screen and plays a muted looping video over it.
 
 ## Build
 
@@ -59,11 +61,11 @@ To use a build as your wallpaper, install it to `/Applications/LumaWall.app`.
 flowchart TD
     App["LumaWall app"] --> Core["Library, displays, playlists and automation"]
     Core --> Policy["Power and Reduce Motion policy"]
-    App -->|"macOS 26+"| Native["WallpaperKit extension and system wallpaper store"]
-    App -->|"macOS 15–25 or SwiftPM"| Overlay["Poster image and muted video overlay"]
+    App -->|"Default (macOS 15+)"| Overlay["Safe mode: poster image and muted video overlay"]
+    App -->|"Opt-in (macOS 26+)"| Native["the macOS 26 wallpaper extension point and system wallpaper store"]
 ```
 
-The native extension and overlay are alternative playback paths. Shared playback
+Safe mode (overlay) and the opt-in native extension are alternative playback paths. Shared playback
 reuses a decoder when multiple displays show the same video. Power and
 accessibility rules determine when playback pauses or uses a lower-resolution file.
 
@@ -102,10 +104,10 @@ production artifact.
 
 ## Author
 
-[Luseefor](https://github.com/Luseefor).
+Rijan Ghimire ([Luseefor](https://github.com/Luseefor)).
 
-Third-party notices for Phosphene reference code live in `THIRD_PARTY_NOTICES.md`.
+Project attribution and third-party notices for Phosphene reference code live in `NOTICE` and `THIRD_PARTY_NOTICES.md`.
 
-## License
+## License and policies
 
-This project is licensed under the MIT License. See `LICENSE`.
+Licensed under the Apache License, Version 2.0. See [`LICENSE`](LICENSE), [`NOTICE`](NOTICE), [`PRIVACY.md`](PRIVACY.md), [`TERMS.md`](TERMS.md), [`SECURITY.md`](SECURITY.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
