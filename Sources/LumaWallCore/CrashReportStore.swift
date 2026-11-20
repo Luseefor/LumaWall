@@ -76,7 +76,10 @@ public final class CrashReportStore: @unchecked Sendable {
         let base = try StorePaths.appSupportBase(rootURL: rootURL)
         directoryURL = base.appendingPathComponent("CrashReports", isDirectory: true)
         sentinelURL = directoryURL.appendingPathComponent("session.current")
-        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        // Reports hold backtraces and paths: only the user may read them.
+        try FileManager.default.createDirectory(
+            at: directoryURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryURL.path)
     }
 
     // MARK: - Session sentinel
@@ -111,7 +114,7 @@ public final class CrashReportStore: @unchecked Sendable {
                     detected = report
                 }
             }
-            StoreIO.tryWriteJSON(now, to: sentinelURL)
+            try? StoreIO.writePrivateJSON(now, to: sentinelURL)
         }
         return detected
     }
@@ -153,7 +156,10 @@ public final class CrashReportStore: @unchecked Sendable {
                 ))?.filter { $0.pathExtension == "stack" } ?? []
             for url in dumps {
                 defer { try? FileManager.default.removeItem(at: url) }
-                guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                // Not through a symlink: that would copy another file into
+                // a report.
+                guard let data = try? StoreIO.readRegularFile(at: url), let text = String(data: data, encoding: .utf8)
+                else { continue }
                 let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
                 guard lines.count >= 2 else { continue }
                 let name = lines[0].isEmpty ? "SIGNAL" : String(lines[0].prefix(Self.maxDumpNameLength))
@@ -176,7 +182,7 @@ public final class CrashReportStore: @unchecked Sendable {
 
     private func unsafeSave(_ report: CrashReport) {
         let url = directoryURL.appendingPathComponent("\(report.id.uuidString).crash.json")
-        StoreIO.tryWriteJSON(report, to: url)
+        try? StoreIO.writePrivateJSON(report, to: url)
         unsafePrune()
     }
 
