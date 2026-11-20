@@ -15,14 +15,11 @@ func clearWallpaperSnapshotCache() {
     guard let cacheDir = WallpaperState.shared.cacheDirectoryURL else { return }
     let gained = cacheDir.startAccessingSecurityScopedResource()
     defer { if gained { cacheDir.stopAccessingSecurityScopedResource() } }
-    guard gained, let stills = StillCacheSweep.filesToClear(in: cacheDir) else {
+    guard gained, let cleared = StillCacheSweep.clear(in: cacheDir) else {
         extensionLog("[BMPCache] Cache directory unavailable or not a directory, cleared nothing")
         return
     }
-    for file in stills {
-        try? FileManager.default.removeItem(at: file)
-    }
-    extensionLog("[BMPCache] Cleared \(stills.count) generated wallpaper snapshot(s)")
+    extensionLog("[BMPCache] Cleared \(cleared) generated wallpaper snapshot(s)")
 }
 
 /// Serializes every write, copy and eviction in the cache directory.

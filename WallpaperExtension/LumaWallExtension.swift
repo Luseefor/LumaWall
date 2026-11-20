@@ -134,6 +134,7 @@ final class LumaWallExtension: NSObject, AppExtension {
     /// process can post these names, so each hint is checked against the
     /// login session first (`ScreenLockHint`).
     private func observeScreenLockState() {
+        Self.lockHints = LockHintTracker(sessionLocked: ScreenLockHint.sessionIsLocked())
         let dnc = DistributedNotificationCenter.default()
         dnc.addObserver(
             forName: .init("com.apple.screenIsLocked"),
@@ -149,9 +150,14 @@ final class LumaWallExtension: NSObject, AppExtension {
         }
     }
 
+    /// Confirmed lock hints so far. Set at launch, then touched only on the
+    /// main queue, where the observers and their retries run.
+    private nonisolated(unsafe) static var lockHints = LockHintTracker(sessionLocked: nil)
+
     /// Main queue. The session flag can trail loginwindow's notification, so
     /// a hint the session doesn't confirm yet is checked again a second later
-    /// before it's dropped.
+    /// before it's dropped. A confirmed hint recomputes policy itself: a
+    /// retry can land after the wake's own recomputes.
     private static func applyLockHint(locked: Bool, retries: Int) {
         let session = ScreenLockHint.sessionIsLocked()
         guard ScreenLockHint.shouldApply(claimsLocked: locked, sessionLocked: session) else {
@@ -166,14 +172,16 @@ final class LumaWallExtension: NSObject, AppExtension {
             }
             return
         }
+        // The Agent's presentation mode also sets isScreenLocked, which
+        // covers a lock hint missed while the process was suspended.
+        let wasLocked = WallpaperState.shared.isScreenLocked
+        let woke = lockHints.confirm(locked: locked) || (wasLocked && !locked)
         WallpaperState.shared.isScreenLocked = locked
-        if locked {
-            extensionLog("[Extension] Screen locked")
-        } else {
-            recomputeAndApplyPolicy()
+        recomputeAndApplyPolicy()
+        if woke {
             ShuffleController.shared.noteWake()
-            extensionLog("[Extension] Screen unlocked, recomputed policy")
         }
+        extensionLog("[Extension] Screen \(locked ? "locked" : "unlocked"), recomputed policy")
     }
 
     /// Power notifications waiting to be applied (`PowerSignal`). Notified

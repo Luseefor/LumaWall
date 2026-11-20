@@ -38,6 +38,24 @@ final class NotificationGuardsTests: XCTestCase {
         XCTAssertNil(ScreenLockHint.isLocked(session: nil))
     }
 
+    func testOnlyAConfirmedUnlockAfterALockCountsAsAWake() {
+        var tracker = LockHintTracker(sessionLocked: false)
+        XCTAssertFalse(tracker.confirm(locked: false), "unlock while already unlocked")
+        XCTAssertFalse(tracker.confirm(locked: true))
+        XCTAssertTrue(tracker.confirm(locked: false))
+        XCTAssertFalse(tracker.confirm(locked: false), "a repeated unlock")
+    }
+
+    func testAnUnknownStartingStateNeverCountsAsAWake() {
+        var tracker = LockHintTracker(sessionLocked: nil)
+        XCTAssertFalse(tracker.confirm(locked: false))
+    }
+
+    func testStartingLockedTheFirstUnlockIsAWake() {
+        var tracker = LockHintTracker(sessionLocked: true)
+        XCTAssertTrue(tracker.confirm(locked: false))
+    }
+
     // MARK: Clear-cache request
 
     func testAClearNeedsTheAppsRequestFile() {
@@ -67,6 +85,15 @@ final class NotificationGuardsTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: target.path))
     }
 
+    func testARequestThatIsADirectoryIsRefusedAndLeftAlone() throws {
+        let request = dir.appendingPathComponent(CacheClearRequest.fileName)
+        try FileManager.default.createDirectory(at: request, withIntermediateDirectories: true)
+        let inside = request.appendingPathComponent("keep.txt")
+        try Data().write(to: inside)
+        XCTAssertFalse(CacheClearRequest.consume(in: dir))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: inside.path))
+    }
+
     func testRequestFreshnessWindow() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertTrue(CacheClearRequest.isFresh(modified: now.addingTimeInterval(-29), now: now))
@@ -90,6 +117,35 @@ final class NotificationGuardsTests: XCTestCase {
         try Data().write(to: target)
         try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent(still), withDestinationURL: target)
         XCTAssertEqual(StillCacheSweep.filesToClear(in: dir), [])
+    }
+
+    func testAClearSkipsNamesTheWriterNeverEmits() throws {
+        let nearMisses = [
+            String(repeating: "z", count: 64) + "-2560-1440-0-41d9f4c2a1b00000.bmp",
+            String(repeating: "a", count: 64) + "-2560-1440-0-1.bmp",
+            String(repeating: "a", count: 64) + "-+2560-1440-0-41d9f4c2a1b00000.bmp",
+            String(repeating: "A", count: 64) + "-2560-1440-0-41d9f4c2a1b00000.bmp",
+        ]
+        for name in nearMisses {
+            try Data().write(to: dir.appendingPathComponent(name))
+        }
+        XCTAssertEqual(StillCacheSweep.filesToClear(in: dir), [])
+    }
+
+    func testAClearDeletesOurStillsAndLeavesEverythingElse() throws {
+        try Data().write(to: dir.appendingPathComponent(still))
+        try Data().write(to: dir.appendingPathComponent("cacheVersion.db"))
+        XCTAssertEqual(StillCacheSweep.clear(in: dir), 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["cacheVersion.db"])
+    }
+
+    func testAClearNeverDeletesADirectoryRecursively() throws {
+        // A still swapped for a directory between the scan and the delete.
+        let swapped = dir.appendingPathComponent(still)
+        try FileManager.default.createDirectory(at: swapped, withIntermediateDirectories: true)
+        try Data().write(to: swapped.appendingPathComponent("keep.txt"))
+        XCTAssertEqual(StillCacheSweep.remove([swapped], in: dir), 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: swapped.appendingPathComponent("keep.txt").path))
     }
 
     func testAClearRefusesADirectoryThatIsASymlink() throws {
