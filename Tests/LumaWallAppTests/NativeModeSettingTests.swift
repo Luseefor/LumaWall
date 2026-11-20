@@ -71,4 +71,22 @@ final class NativeModeSettingTests: XCTestCase {
         XCTAssertFalse(setting.isEnabled)
         XCTAssertFalse(setting.needsDisclosure)
     }
+
+    private func store(provider: String) throws -> Data {
+        let root: [String: Any] = [
+            "Displays": ["DISPLAY-A": ["Desktop": ["Content": ["Choices": [["Provider": provider]]]]]]
+        ]
+        return try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+    }
+
+    func testNativeUseNeedsABackupAndOurChoiceStillInTheStore() throws {
+        let ours = try store(provider: WallpaperHostCapabilities.extensionBundleID)
+        let apple = try store(provider: "com.apple.wallpaper.choice.image")
+        XCTAssertTrue(NativeModeSetting.showsNativeUse(backupExists: true, store: ours))
+        // A backup alone: the old app saved it, then the store write failed.
+        XCTAssertFalse(NativeModeSetting.showsNativeUse(backupExists: true, store: apple))
+        // Our choice alone: picked in System Settings, never written by the app.
+        XCTAssertFalse(NativeModeSetting.showsNativeUse(backupExists: false, store: ours))
+        XCTAssertFalse(NativeModeSetting.showsNativeUse(backupExists: true, store: nil))
+    }
 }

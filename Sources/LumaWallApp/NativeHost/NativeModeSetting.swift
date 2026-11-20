@@ -19,8 +19,32 @@ struct NativeModeSetting {
         self.usedNativeBefore = usedNativeBefore
     }
 
+    /// The stored choice, readable from any thread. Code that writes into
+    /// the extension's container checks it right before writing, so work
+    /// queued while native mode was on stops once it is off.
+    static var isEnabledNow: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
+
     static var standard: NativeModeSetting {
-        NativeModeSetting(defaults: .standard) { NativeWallpaperAssignmentService.hasBackup }
+        NativeModeSetting(defaults: .standard) {
+            showsNativeUse(
+                backupExists: NativeWallpaperAssignmentService.hasBackup,
+                store: try? Data(contentsOf: LiveSystemWallpaperFiles.storeURL)
+            )
+        }
+    }
+
+    /// True when the app wrote the wallpaper store before (it backs it up
+    /// first) and a display still shows the LumaWall extension. A backup
+    /// alone isn't enough: the old app saved it even when the write failed.
+    static func showsNativeUse(backupExists: Bool, store: Data?) -> Bool {
+        guard backupExists, let store,
+            let root = try? PropertyListSerialization.propertyList(from: store, format: nil) as? NSDictionary
+        else { return false }
+        return NativeWallpaperAssignmentStore.surfacePaths(in: root).contains { path in
+            var node: Any? = root
+            for key in path { node = (node as? NSDictionary)?[key] }
+            return (node as? NSDictionary).map { NativeWallpaperAssignmentStore.isOurs($0) } ?? false
+        }
     }
 
     var isEnabled: Bool { defaults.bool(forKey: Self.enabledKey) }
