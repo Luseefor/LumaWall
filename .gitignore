@@ -9,3 +9,5 @@ opencode-skills/
 dist/
 # XcodeGen and other tools installed by ci/bootstrap.sh.
 .tools/
+# Local marketing captures (must be re-shot with owned media).
+marketing-capture/
