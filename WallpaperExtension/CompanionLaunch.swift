@@ -4,7 +4,7 @@
 // contains the extension, and only after checking that the app is signed
 // with the extension's own identifier family and team.
 
-import Foundation
+import AppKit
 import Security
 
 enum CompanionLaunch {
@@ -46,7 +46,17 @@ enum CompanionLaunch {
         guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code,
             SecRequirementCreateWithString(requirementText as CFString, [], &requirement) == errSecSuccess, let requirement
         else { return false }
-        return SecStaticCodeCheckValidity(code, [], requirement) == errSecSuccess
+        // Every slice, so a Rosetta launch can't pick an unchecked one.
+        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures)
+        return SecStaticCodeCheckValidity(code, flags, requirement) == errSecSuccess
+    }
+
+    /// Opens exactly the verified bundle: no activating a copy that's
+    /// already running from another path.
+    static func openConfiguration() -> NSWorkspace.OpenConfiguration {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.allowsRunningApplicationSubstitution = false
+        return configuration
     }
 
     /// The team that signed this process, or nil for an ad hoc signature.

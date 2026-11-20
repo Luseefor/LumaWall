@@ -17,7 +17,7 @@ func buildSettingsViewModelsXPC(rescan: Bool = true) async -> AnyObject? {
 
     // Right-click menu on the group and every tile. Settings routes presses to
     // invokeContextMenuAction with the item's identifier; the handler opens the
-    // matching lumawall:// URL in the companion app.
+    // companion app after checking its signature (CompanionLaunch).
     let addVideoMenu = ContextMenu(items: [
         ContextMenuItem(
             id: ContextMenuItemID(id: "add-video"),

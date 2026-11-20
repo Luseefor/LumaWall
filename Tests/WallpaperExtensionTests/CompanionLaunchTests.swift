@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import XCTest
 
 /// "Add Video" and "Manage Library" open the companion app itself, found
@@ -34,6 +34,19 @@ final class CompanionLaunchTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: calculator.path))
         let requirement = try XCTUnwrap(CompanionLaunch.requirement(identifier: "com.apple.calculator", teamID: "ABCDE12345"))
         XCTAssertFalse(CompanionLaunch.isSigned(calculator, satisfying: requirement))
+    }
+
+    func testAnAppMeetingItsRequirementPasses() throws {
+        // A known-good signature, so a check that always fails can't pass CI.
+        let calculator = URL(fileURLWithPath: "/System/Applications/Calculator.app")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: calculator.path))
+        XCTAssertTrue(CompanionLaunch.isSigned(calculator, satisfying: #"identifier "com.apple.calculator" and anchor apple"#))
+    }
+
+    func testTheLaunchNeverSubstitutesAnotherRunningCopy() {
+        // Launch Services could otherwise activate a copy running from
+        // another path instead of the one just verified.
+        XCTAssertFalse(CompanionLaunch.openConfiguration().allowsRunningApplicationSubstitution)
     }
 
     func testAMissingAppIsRefused() throws {
