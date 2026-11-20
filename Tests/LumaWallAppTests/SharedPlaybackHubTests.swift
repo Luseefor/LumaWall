@@ -10,7 +10,7 @@ final class SharedPlaybackHubTests: XCTestCase {
     func testSharedVideoRendersChangingFramesOnBothDisplays() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
         defer { try? FileManager.default.removeItem(at: url) }
-        try await writeVideo(to: url)
+        try await Self.writeVideo(to: url)
         let hub = SharedPlaybackHub.acquire(url: url)
         let layers = [CALayer(), CALayer()]
         for layer in layers {
@@ -53,7 +53,7 @@ final class SharedPlaybackHubTests: XCTestCase {
     func testPumpStopsWhenLastLayerPausesAndRestartsOnResume() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
         defer { try? FileManager.default.removeItem(at: url) }
-        try await writeVideo(to: url)
+        try await Self.writeVideo(to: url)
         let hub = SharedPlaybackHub.acquire(url: url)
         let layers = [CALayer(), CALayer()]
         for layer in layers { hub.attach(layer) }
@@ -77,7 +77,7 @@ final class SharedPlaybackHubTests: XCTestCase {
     func testSwitchingFromPrivateToSharedPlaybackKeepsVideoVisible() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
         defer { try? FileManager.default.removeItem(at: url) }
-        try await writeVideo(to: url)
+        try await Self.writeVideo(to: url)
         let screen = try XCTUnwrap(NSScreen.screens.first)
         let display = try XCTUnwrap(DisplayCoordinator().displays.first)
         let asset = WallpaperAsset(name: "Motion fixture", mediaURL: url, duration: 3,
@@ -104,8 +104,8 @@ final class SharedPlaybackHubTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let oldURL = directory.appendingPathComponent("old.mov")
         let newURL = directory.appendingPathComponent("new.mov")
-        try await writeVideo(to: oldURL)
-        try await writeVideo(to: newURL, blue: true)
+        try await Self.writeVideo(to: oldURL)
+        try await Self.writeVideo(to: newURL, blue: true)
         let oldAsset = fixtureAsset(url: oldURL)
         let newAsset = fixtureAsset(url: newURL)
         let baseline = SharedPlaybackHub.activeDecoderCount
@@ -148,7 +148,7 @@ final class SharedPlaybackHubTests: XCTestCase {
     func testMemoryCleanupThenResumeRestoresMovingVideo() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
         defer { try? FileManager.default.removeItem(at: url) }
-        try await writeVideo(to: url)
+        try await Self.writeVideo(to: url)
         let fixture = try makeSession(asset: fixtureAsset(url: url))
         defer { fixture.session.tearDown() }
         let oldHub = SharedPlaybackHub.acquire(url: url)
@@ -206,8 +206,9 @@ final class SharedPlaybackHubTests: XCTestCase {
         return Array(UnsafeBufferPointer(start: bytes, count: 4))
     }
 
-    @MainActor
-    private func writeVideo(to url: URL, blue: Bool = false) async throws {
+    // Off the main actor: setting up the encoder makes Security calls that
+    // XCTest flags as a runtime issue when they run on the main thread.
+    nonisolated private static func writeVideo(to url: URL, blue: Bool = false) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 32, AVVideoHeightKey: 32
