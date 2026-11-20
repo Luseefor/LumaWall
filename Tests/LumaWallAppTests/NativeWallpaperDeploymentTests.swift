@@ -883,15 +883,22 @@ final class VariantPublicationTests: XCTestCase {
             NativeWallpaperDeployment.transcodeSourcesFolderURL.standardizedFileURL.deletingLastPathComponent())
     }
 
-    func testLaunchDeletesTheCopyStagingFolderOlderVersionsLeftInTheContainer() throws {
+    func testLaunchDeletesExportsOlderVersionsLeftInTheContainer() throws {
+        // An older LumaWall still running may be writing a fresh one, so
+        // only exports untouched for an hour go.
         let fm = FileManager.default
         let docs = root.appendingPathComponent("Documents", isDirectory: true)
         let legacy = docs.appendingPathComponent("copy-staging", isDirectory: true)
         try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
-        try Data("x".utf8).write(to: legacy.appendingPathComponent("\(id).aaa.Wallpaper.minimal.mov"))
-        NativeWallpaperDeployment.removeLegacyCopyStaging(documentsURL: docs, trustedAncestor: root)
-        XCTAssertFalse(fm.fileExists(atPath: legacy.path))
-        XCTAssertTrue(fm.fileExists(atPath: docs.path))
+        let old = legacy.appendingPathComponent("\(id).aaa.Wallpaper.minimal.mov")
+        let fresh = legacy.appendingPathComponent("\(id).\(UUID().uuidString).partial.mov")
+        for url in [old, fresh] { try Data("x".utf8).write(to: url) }
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-3_601)], ofItemAtPath: old.path)
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-60)], ofItemAtPath: fresh.path)
+        NativeWallpaperDeployment.removeLegacyCopyStaging(documentsURL: docs, trustedAncestor: root, now: now)
+        XCTAssertFalse(fm.fileExists(atPath: old.path))
+        XCTAssertTrue(fm.fileExists(atPath: fresh.path))
     }
 
     func testLegacyStagingCleanupLeavesSymlinkTargetsAlone() throws {
@@ -903,16 +910,19 @@ final class VariantPublicationTests: XCTestCase {
         let docs = root.appendingPathComponent("Documents", isDirectory: true)
         try fm.createDirectory(at: docs, withIntermediateDirectories: true)
         try fm.createSymbolicLink(at: docs.appendingPathComponent("copy-staging"), withDestinationURL: victim)
-        NativeWallpaperDeployment.removeLegacyCopyStaging(documentsURL: docs, trustedAncestor: root)
+        let later = Date().addingTimeInterval(86_400)
+        NativeWallpaperDeployment.removeLegacyCopyStaging(documentsURL: docs, trustedAncestor: root, now: later)
         XCTAssertTrue(fm.fileExists(atPath: precious.path))
 
         // Documents itself swapped for a link: nothing below it is entered.
         try fm.removeItem(at: docs)
         let elsewhere = root.appendingPathComponent("elsewhere", isDirectory: true)
-        try fm.createDirectory(at: elsewhere.appendingPathComponent("copy-staging"), withIntermediateDirectories: true)
+        let foreign = elsewhere.appendingPathComponent("copy-staging/\(id).aaa.Wallpaper.minimal.mov")
+        try fm.createDirectory(at: foreign.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: foreign)
         try fm.createSymbolicLink(at: docs, withDestinationURL: elsewhere)
-        NativeWallpaperDeployment.removeLegacyCopyStaging(documentsURL: docs, trustedAncestor: root)
-        XCTAssertTrue(fm.fileExists(atPath: elsewhere.appendingPathComponent("copy-staging").path))
+        NativeWallpaperDeployment.removeLegacyCopyStaging(documentsURL: docs, trustedAncestor: root, now: later)
+        XCTAssertTrue(fm.fileExists(atPath: foreign.path))
     }
 
     func testOnlyARegularFileCountsAsAFinishedExport() throws {

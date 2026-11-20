@@ -251,4 +251,21 @@ struct TrustedDirectoryTests {
         #expect(throws: POSIXError.self) { try TrustedDirectory(url: root).makeSubdirectory(named: "copy-staging") }
         #expect(try fm.contentsOfDirectory(atPath: victim.path) == ["precious.txt"])
     }
+
+    @Test func readsAModificationDateWithoutFollowingASymlink() throws {
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        let file = root.appendingPathComponent("old.mov")
+        try Data("x".utf8).write(to: file)
+        let then = Date(timeIntervalSince1970: 1_000_000)
+        try fm.setAttributes([.modificationDate: then], ofItemAtPath: file.path)
+        try fm.setAttributes([.modificationDate: then], ofItemAtPath: victim.appendingPathComponent("precious.txt").path)
+        try fm.createSymbolicLink(
+            at: root.appendingPathComponent("link"), withDestinationURL: victim.appendingPathComponent("precious.txt"))
+        let folder = try TrustedDirectory(url: root)
+
+        #expect(try folder.modificationDate(ofItemNamed: "old.mov") == then)
+        #expect(try folder.modificationDate(ofItemNamed: "link") != then)
+        #expect(throws: (any Error).self) { try folder.modificationDate(ofItemNamed: "missing") }
+    }
 }

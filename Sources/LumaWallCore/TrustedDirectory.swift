@@ -163,6 +163,15 @@ public final class TrustedDirectory {
         return Self.kind(of: info.st_mode)
     }
 
+    /// When `name` was last modified, without following a symlink.
+    public func modificationDate(ofItemNamed name: String) throws -> Date {
+        try Self.checkName(name)
+        var info = stat()
+        guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { throw POSIXError.current }
+        let time = info.st_mtimespec
+        return Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_nsec) / 1_000_000_000)
+    }
+
     /// Renames `name` to `newName` in this folder. Fails rather than
     /// replace anything already at `newName`.
     public func renameItem(named name: String, to newName: String) throws {

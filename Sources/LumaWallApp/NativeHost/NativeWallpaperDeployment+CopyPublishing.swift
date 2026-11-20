@@ -51,14 +51,24 @@ extension NativeWallpaperDeployment {
         return try TrustedDirectory(url: url)
     }
 
-    /// Deletes the copy-staging folder versions before this one kept in the
-    /// extension's Documents folder, without following a symlink there or
-    /// at `copy-staging`. Its exports are encoded again if still wanted.
+    /// Deletes what versions before this one left in copy-staging in the
+    /// extension's Documents folder, without following a symlink on the way.
+    /// An older LumaWall may still be running and writing there, so only
+    /// items untouched for an hour go. Their copies are encoded again if
+    /// still wanted.
     static func removeLegacyCopyStaging(
-        documentsURL: URL = WallpaperHostCapabilities.extensionDocumentsURL, trustedAncestor: URL = containerURL
+        documentsURL: URL = WallpaperHostCapabilities.extensionDocumentsURL, trustedAncestor: URL = containerURL,
+        now: Date = Date()
     ) {
-        guard let documents = try? TrustedDirectory(url: documentsURL, below: trustedAncestor) else { return }
-        try? documents.removeItem(named: "copy-staging")
+        guard let documents = try? TrustedDirectory(url: documentsURL, below: trustedAncestor),
+            let staging = try? documents.subdirectory("copy-staging")
+        else { return }
+        for item in (try? staging.entries()) ?? [] {
+            guard let modified = try? staging.modificationDate(ofItemNamed: item.name),
+                now.timeIntervalSince(modified) > 60 * 60
+            else { continue }
+            try? staging.removeItem(named: item.name)
+        }
     }
 
     /// The extension's container. The extension can write anything inside
