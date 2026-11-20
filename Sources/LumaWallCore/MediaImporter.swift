@@ -35,6 +35,17 @@ public actor MediaImporter {
         case invalidDuration
         case unsupportedMedia
         case posterGenerationFailed
+        case mediaReaderStopped
+
+        init(_ error: MediaProbeError) {
+            switch error {
+            case .noVideoTrack: self = .noVideoTrack
+            case .invalidDuration: self = .invalidDuration
+            case .unsupportedMedia: self = .unsupportedMedia
+            case .posterUnavailable: self = .posterGenerationFailed
+            case .serviceUnavailable: self = .mediaReaderStopped
+            }
+        }
 
         public var errorDescription: String? {
             switch self {
@@ -42,13 +53,21 @@ public actor MediaImporter {
             case .invalidDuration: "The video has an invalid duration."
             case .unsupportedMedia: "This video cannot be prepared for wallpaper playback."
             case .posterGenerationFailed: "LumaWall could not create a poster frame."
+            case .mediaReaderStopped: "LumaWall's media reader stopped before it finished reading this video."
             }
         }
     }
 
     private let store: LibraryStore
 
-    public init(store: LibraryStore) { self.store = store }
+    /// Parses media for the importer. The app passes its sandboxed media
+    /// service; LumaWallCore's tests pass `LocalMediaProbe`.
+    private let probe: any MediaProbing
+
+    public init(store: LibraryStore, probe: any MediaProbing) {
+        self.store = store
+        self.probe = probe
+    }
 
     /// The URLs a drop or file panel handed over that name local files.
     /// Anything else (a dragged web link) is dropped before AVFoundation can
@@ -64,41 +83,15 @@ public actor MediaImporter {
         let fileSize = Int64(try sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
         return try await ImportInspection(
             duration: media.duration, framesPerSecond: media.framesPerSecond, pixelSize: media.pixelSize,
-            fileSize: fileSize, contentHash: Self.sha256(of: sourceURL), containsAudio: media.containsAudio)
-    }
-
-    private struct MediaInfo {
-        let duration: TimeInterval
-        let framesPerSecond: Double
-        let pixelSize: CGSize
-        let containsAudio: Bool
+            fileSize: fileSize, contentHash: Self.sha256(of: sourceURL), containsAudio: media.hasAudio)
     }
 
     private func inspectMedia(_ url: URL) async throws -> MediaInfo {
-        let asset = AVURLAsset(url: url)
-        let videoTracks: [AVAssetTrack]
         do {
-            videoTracks = try await asset.loadTracks(withMediaType: .video)
-        } catch {
-            // AVFoundation surfaces unreadable media as a raw AVError ("Cannot
-            // Open"); prefer the friendly message when the file itself exists.
-            if FileManager.default.fileExists(atPath: url.path) {
-                throw ImportError.unsupportedMedia
-            }
-            throw error
+            return try await probe.inspect(fileAt: url)
+        } catch let error as MediaProbeError {
+            throw ImportError(error)
         }
-        guard let track = videoTracks.first else {
-            throw ImportError.noVideoTrack
-        }
-        let duration = CMTimeGetSeconds(try await asset.load(.duration))
-        guard duration.isFinite, duration > 0 else { throw ImportError.invalidDuration }
-        let size = try await track.load(.naturalSize).applying(track.load(.preferredTransform))
-        return try await MediaInfo(
-            duration: duration,
-            framesPerSecond: Double(track.load(.nominalFrameRate)),
-            pixelSize: CGSize(width: abs(size.width), height: abs(size.height)),
-            containsAudio: !asset.loadTracks(withMediaType: .audio).isEmpty
-        )
     }
 
     /// Copies the source into a staging folder once, then
@@ -120,7 +113,7 @@ public actor MediaImporter {
         let media = try await inspectMedia(staged)
         let inspection = ImportInspection(
             duration: media.duration, framesPerSecond: media.framesPerSecond, pixelSize: media.pixelSize,
-            fileSize: copy.size, contentHash: copy.sha256, containsAudio: media.containsAudio)
+            fileSize: copy.size, contentHash: copy.sha256, containsAudio: media.hasAudio)
         if let duplicate = await store.asset(contentHash: inspection.contentHash) {
             throw LibraryStore.StoreError.duplicate(duplicate)
         }
@@ -182,11 +175,16 @@ public actor MediaImporter {
         try await exporter.export(to: outputURL, as: .mov)
     }
 
+    /// The first frame, read by the media probe and encoded here from the
+    /// plain pixels it returns.
     private func generatePoster(for mediaURL: URL, outputURL: URL) async throws {
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: mediaURL))
-        generator.appliesPreferredTrackTransform = true
-        let image = try await generator.image(at: .zero).image
-        guard
+        let frame: PosterFrame
+        do {
+            frame = try await probe.posterFrame(fileAt: mediaURL)
+        } catch let error as MediaProbeError {
+            throw ImportError(error)
+        }
+        guard let image = frame.makeImage(),
             let destination = CGImageDestinationCreateWithURL(
                 outputURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil
             )

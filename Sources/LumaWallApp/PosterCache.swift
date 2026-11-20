@@ -266,17 +266,13 @@ actor PosterCache {
         return (longEdge * scale).rounded()
     }
 
-    /// A frame from near the start of `url`, at most `maxPixelWidth` wide.
+    /// A frame from near the start of `url`, at most `maxPixelWidth` wide,
+    /// read by the sandboxed media service.
     nonisolated static func videoFrame(_ url: URL, maxPixelWidth: CGFloat) async -> CGImage? {
-        let asset = AVURLAsset(url: url)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
         // Fits inside the box, so a portrait video still gets its width.
-        generator.maximumSize = CGSize(width: maxPixelWidth, height: maxPixelWidth * 4)
-        let duration = (try? await asset.load(.duration).seconds) ?? 0
-        let seconds = duration.isFinite && duration > 0 ? min(1, duration / 2) : 0
-        let time = CMTime(seconds: seconds, preferredTimescale: 600)
-        return try? await generator.image(at: time).image
+        let box = CGSize(width: maxPixelWidth, height: maxPixelWidth * 4)
+        let frame = try? await MediaServiceClient.shared.posterFrame(fileAt: url, maxPixelSize: box, nearStart: true)
+        return frame?.makeImage()
     }
 
     nonisolated private static func decode(_ url: URL, maxPixelWidth: CGFloat) -> CGImage? {

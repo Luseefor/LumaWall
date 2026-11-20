@@ -75,6 +75,19 @@ closures in `XCTestCase` methods. Watch CI after pushing.
   bundle, so this target compiles selected extension sources directly.
   They're listed in `project.yml`; add a source there to test it.
 
+## Media service
+
+Media inspection and still frames (import, deploy, posters) run in
+`LumaWallMediaService` (`Sources/LumaWallMediaService`, embedded in the
+app's `XPCServices`), in App Sandbox with no file entitlements; the app
+sends it an open read-only file handle through `MediaServiceClient`.
+Route new inspection or frame extraction through `MediaProbing`, not
+`AVURLAsset(url:)` in the app. Still in the app: transcoding
+(`MediaImporter.exportVideoOnly`, the copy encodes, `BatteryMediaVariant`)
+and `AVPlayer` playback. Testing builds gain Xcode's read-only `/`
+sandbox exception, so check real entitlements on the Release build:
+`codesign -d --entitlements - <Release app>/Contents/XPCServices/LumaWallMediaService.xpc`.
+
 ## Extension log
 
 `~/Library/Containers/app.lumawall.personal.wallpaper/Data/Documents/extension.log`

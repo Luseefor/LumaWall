@@ -380,19 +380,20 @@ enum NativeWallpaperDeployment {
         let resolution: CGSize
     }
 
+    /// Parses deployed videos: the sandboxed media service, so a decoder
+    /// exploit in a deployed file can't reach the user's files.
+    static let mediaProbe: any MediaProbing = MediaServiceClient.shared
+
     private static func probe(url: URL) async throws -> Probe {
-        let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+        let info: MediaInfo
+        do {
+            info = try await mediaProbe.inspect(fileAt: url)
+        } catch MediaProbeError.noVideoTrack {
             throw DeploymentError.noVideoTrack
+        } catch MediaProbeError.invalidDuration {
+            throw DeploymentError.invalidDuration
         }
-        let naturalSize = try await track.load(.naturalSize)
-        let transform = try await track.load(.preferredTransform)
-        let transformed = naturalSize.applying(transform)
-        let resolution = CGSize(width: abs(transformed.width), height: abs(transformed.height))
-        let fps = Double(try await track.load(.nominalFrameRate))
-        let duration = CMTimeGetSeconds(try await asset.load(.duration))
-        guard duration.isFinite, duration > 0 else { throw DeploymentError.invalidDuration }
-        return Probe(duration: duration, fps: fps, resolution: resolution)
+        return Probe(duration: info.duration, fps: info.framesPerSecond, resolution: info.pixelSize)
     }
 
     private static func contentHash(for url: URL) async throws -> String {
@@ -403,11 +404,9 @@ enum NativeWallpaperDeployment {
 
     @MainActor
     private static func generateThumbnail(for videoURL: URL, in directory: URL) async {
-        let asset = AVURLAsset(url: videoURL)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 640, height: 360)
-        guard let cgImage = try? await generator.image(at: .zero).image else { return }
+        guard let frame = try? await mediaProbe.posterFrame(fileAt: videoURL, maxPixelSize: CGSize(width: 640, height: 360)),
+            let cgImage = frame.makeImage()
+        else { return }
         let rep = NSBitmapImageRep(cgImage: cgImage)
         guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]),
             NativeModeSetting.isEnabledNow

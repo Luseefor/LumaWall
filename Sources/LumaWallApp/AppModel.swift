@@ -264,7 +264,7 @@ final class AppModel {
             let crashes = try CrashReportStore()
             let displays = DisplayCoordinator()
             self.store = store
-            self.importer = MediaImporter(store: store)
+            self.importer = MediaImporter(store: store, probe: MediaServiceClient.shared)
             self.assignmentStore = assignments
             self.playlistStore = playlists
             self.playlistPlaybackStore = playlistPlayback
