@@ -107,4 +107,19 @@ final class LibraryEntryScanTests: XCTestCase {
         try write("Wallpaper.mp4")
         XCTAssertEqual(LibraryEntryScan.read(directory: entryDir), .skipped("metadata id or filename mismatch or unsafe"))
     }
+
+    func testAFileIsPlayableOnlyInARealEntryDirectory() throws {
+        try write("Wallpaper.mp4")
+        let file = entryDir.appendingPathComponent("Wallpaper.mp4")
+        XCTAssertTrue(LibraryEntryScan.isPlayable(file))
+
+        // After a scan, the entry directory is swapped for a symlink to a
+        // directory holding a file of the same name.
+        let elsewhere = videos.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: elsewhere.appendingPathComponent("Wallpaper.mp4"))
+        try FileManager.default.removeItem(at: entryDir)
+        try FileManager.default.createSymbolicLink(at: entryDir, withDestinationURL: elsewhere)
+        XCTAssertFalse(LibraryEntryScan.isPlayable(file))
+    }
 }

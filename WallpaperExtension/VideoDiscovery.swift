@@ -13,7 +13,7 @@ import ImageIO
 func findVideoURL(forChoice videoID: String?) -> URL? {
     guard let videoID,
         let url = VideoLibrary.shared.videoURL(for: videoID),
-        FileManager.default.fileExists(atPath: url.path)
+        LibraryEntryScan.isPlayable(url)
     else {
         if videoID != nil {
             extensionLog("  [VideoDiscovery] no file for choice \(videoID ?? "nil"), returning nil (no wrong-video fallback)")

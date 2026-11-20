@@ -20,6 +20,8 @@ final class VideoLibrary: Sendable {
         self.videosDir = docs.appendingPathComponent("videos")
         self.indexURL = docs.appendingPathComponent("library.json")
         try? FileManager.default.createDirectory(at: videosDir, withIntermediateDirectories: true)
+        // Once per process, before the first scan, so scans stay read-only.
+        migrateLegacyVideo()
     }
 
     // MARK: - Public API
@@ -70,7 +72,7 @@ final class VideoLibrary: Sendable {
                 // renderer retrying a dead URL; choose among files that exist,
                 // and never a symlink out of the entry.
                 variants: (entry.variants ?? []).filter {
-                    LibraryEntryScan.isRegularFile(variantURL(for: id, variant: $0))
+                    LibraryEntryScan.isPlayable(variantURL(for: id, variant: $0))
                 },
                 displayPixels: displayPixels,
             )
@@ -80,11 +82,9 @@ final class VideoLibrary: Sendable {
         return variantURL(for: id, variant: chosen)
     }
 
-    /// Scan the videos directory and rebuild the in-memory index.
-    /// Also migrates any legacy `wallpaper.{mp4,mov,m4v}` from Documents root.
+    /// Scan the videos directory and rebuild the in-memory index. Reads the
+    /// entry directories without changing them.
     func scan() {
-        migrateLegacyVideo()
-
         let token = scanLock.withLock { scanRecord.begin() }
         var discovered = [VideoEntry]()
         let fm = FileManager.default

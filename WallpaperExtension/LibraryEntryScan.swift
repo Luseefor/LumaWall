@@ -63,6 +63,13 @@ enum LibraryEntryScan {
             ))
     }
 
+    /// True when `file` is a regular file and the entry directory holding
+    /// it is still a real directory. Checked again at playback time, since
+    /// either can change after a scan.
+    static func isPlayable(_ file: URL) -> Bool {
+        fileType(file.deletingLastPathComponent()) == .typeDirectory && isRegularFile(file)
+    }
+
     /// True when `url` itself (not a symlink's target) is a regular file.
     static func isRegularFile(_ url: URL) -> Bool {
         fileType(url) == .typeRegular

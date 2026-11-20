@@ -206,6 +206,9 @@ final class StillCacheTests: XCTestCase {
     func testPixelSizeRejectsNegativeAndImplausibleSizes() {
         XCTAssertNil(StillSize(points: CGSize(width: -1512, height: 982), scale: 2))
         XCTAssertNil(StillSize(points: CGSize(width: 40_000, height: 982), scale: 1))
+        // Two negatives make a positive product; the inputs are still wrong.
+        XCTAssertNil(StillSize(points: CGSize(width: -1280, height: -720), scale: -1))
+        XCTAssertNil(StillSize(points: CGSize(width: 1280, height: 720), scale: 0))
     }
 
     // MARK: Coalescing

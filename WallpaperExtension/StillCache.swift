@@ -65,10 +65,12 @@ extension StillSize {
     /// past it is malformed.
     static let maxDimension = 16_384
 
-    /// The pixel size of `points` at `scale`, or nil when either side is
-    /// negative, past `maxDimension` or not a number. `Int(_:)` traps on NaN,
-    /// infinity and values past Int.max.
+    /// The pixel size of `points` at `scale`, or nil when a point size is
+    /// negative, the scale isn't positive, a side passes `maxDimension`, or
+    /// any of them isn't a number. `Int(_:)` traps on NaN, infinity and
+    /// values past Int.max.
     init?(points: CGSize, scale: CGFloat) {
+        guard points.width >= 0, points.height >= 0, scale.isFinite, scale > 0 else { return nil }
         let width = points.width * scale, height = points.height * scale
         let limit = CGFloat(Self.maxDimension)
         guard width.isFinite, height.isFinite, (0...limit).contains(width), (0...limit).contains(height) else { return nil }
