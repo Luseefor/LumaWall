@@ -731,7 +731,7 @@ final class VariantPublicationTests: XCTestCase {
     /// test says otherwise; the test host leaves it off.
     private func publish(
         _ staged: URL, job: NativeWallpaperDeployment.VariantEncodeQueue.Job, resolution: CGSize, videosFolderURL: URL,
-        writeMetadata: ((NativeWallpaperDeployment.EntryInfo, TrustedDirectory) throws -> Void)? = nil,
+        writeMetadata: ((Data, TrustedDirectory) throws -> Void)? = nil,
         isNativeModeOn: () -> Bool = { true }
     ) -> NativeWallpaperDeployment.PublishResult {
         if let writeMetadata {

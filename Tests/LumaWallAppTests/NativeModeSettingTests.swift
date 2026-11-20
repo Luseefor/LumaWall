@@ -98,7 +98,7 @@ final class NativeModeSettingTests: XCTestCase {
         let finished = expectation(description: "disabled")
         let early = expectation(description: "disabled while a publish held the lock")
         early.isInverted = true
-        NativeWallpaperDeployment.entryLock.lock()
+        NativeWallpaperDeployment.nativeWriteLock.lock()
         Thread.detachNewThread {
             setting.disable()
             early.fulfill()
@@ -106,7 +106,7 @@ final class NativeModeSettingTests: XCTestCase {
         }
         wait(for: [early], timeout: 0.2)
         XCTAssertTrue(setting.isEnabled)
-        NativeWallpaperDeployment.entryLock.unlock()
+        NativeWallpaperDeployment.nativeWriteLock.unlock()
         wait(for: [finished], timeout: 5)
         XCTAssertFalse(setting.isEnabled)
     }

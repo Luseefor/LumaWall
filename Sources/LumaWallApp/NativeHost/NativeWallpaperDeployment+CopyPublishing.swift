@@ -240,6 +240,12 @@ extension NativeWallpaperDeployment {
     /// copy of the old source can't land in the redeployed entry.
     static let entryLock = NSLock()
 
+    /// Held by a copy publish from its native-mode check through its
+    /// writes, and by `NativeModeSetting.disable()`. Never held while
+    /// reading anything the extension controls, so turning native mode off
+    /// on the main thread waits only for a rename and a small write.
+    static let nativeWriteLock = NSLock()
+
     enum PublishResult: Equatable {
         case published, stale, failed
         /// Native mode was off once the entry lock was held; the export
@@ -258,21 +264,21 @@ extension NativeWallpaperDeployment {
     /// a folder swapped for a symlink fails the publish instead of steering
     /// it elsewhere.
     ///
-    /// Native mode is checked after the entry lock is taken: a publish can
-    /// wait there while native mode is turned off, and nothing may be
-    /// written into the extension's container after that.
+    /// Native mode is checked under `nativeWriteLock`, held until the
+    /// writes are done: a publish can wait on the entry lock while native
+    /// mode is turned off, and nothing may be written into the extension's
+    /// container after that.
     static func publish(
         _ staged: URL,
         job: VariantEncodeQueue.Job,
         resolution: CGSize,
         videosFolderURL: URL = videosFolderURL,
-        writeMetadata: (EntryInfo, TrustedDirectory) throws -> Void = { entry, folder in
-            try folder.writeFile(named: "metadata.json", contents: JSONEncoder().encode(entry))
+        writeMetadata: (Data, TrustedDirectory) throws -> Void = { data, folder in
+            try folder.writeFile(named: "metadata.json", contents: data)
         },
         isNativeModeOn: () -> Bool = { NativeModeSetting.isEnabledNow }
     ) -> PublishResult {
         entryLock.withLock {
-            guard isNativeModeOn() else { return .nativeModeOff }
             let stagedName = staged.lastPathComponent
             guard let staging = try? trustedFolder(staged.deletingLastPathComponent()) else { return .failed }
             // Stale only when the entry is known gone or holds another
@@ -299,21 +305,38 @@ extension NativeWallpaperDeployment {
                 return .failed
             }
             let name = job.spec.filename
-            do { try staging.publishItem(named: stagedName, into: folder, as: name) } catch { return .failed }
             var updated = current
             let listed = (current.variants ?? []).filter { (try? folder.kind(ofItemNamed: $0.filename)) == .file }
             let variant = NativeVideoVariant(filename: name, fps: job.spec.recordedFPS, resolution: resolution)
             updated.variants = merging(listed, with: [variant])
-            do {
-                try writeMetadata(updated, folder)
-            } catch {
-                // Not moved back to staging: in the entry the extension can
-                // have swapped it, and staging only holds bytes the app
-                // encoded. The retry encodes again.
-                try? folder.removeFile(named: name)
-                return .failed
+            guard let metadata = try? JSONEncoder().encode(updated) else { return .failed }
+            return nativeWriteLock.withLock {
+                guard isNativeModeOn() else { return .nativeModeOff }
+                // Moved from a name of its own: replacing an existing copy
+                // swaps the old file into staging for a moment, and under the
+                // staged name another LumaWall could take it for a finished
+                // export. A `.partial.mov` is never read, and cleanup deletes
+                // one left behind.
+                let moving = "\(UUID().uuidString).publishing.partial.mov"
+                do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
+                do {
+                    try staging.publishItem(named: moving, into: folder, as: name)
+                } catch {
+                    // Nothing moved: `moving` still holds the export.
+                    try? staging.renameItem(named: moving, to: stagedName)
+                    return .failed
+                }
+                do {
+                    try writeMetadata(metadata, folder)
+                } catch {
+                    // Not moved back to staging: in the entry the extension
+                    // can have swapped it, and staging only holds bytes the
+                    // app encoded. The retry encodes again.
+                    try? folder.removeFile(named: name)
+                    return .failed
+                }
+                return .published
             }
-            return .published
         }
     }
 
