@@ -232,6 +232,9 @@ extension NativeWallpaperDeployment {
     /// below `trustedAncestor`: a staging or entry folder, or any folder
     /// above them, swapped for a symlink can't steer the delete elsewhere.
     static func cleanUpAbandonedExports(videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL) {
+        // Without a trustworthy videos folder, no staged export can be shown
+        // stale, so everything is kept.
+        guard let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) else { return }
         if let staging = try? TrustedDirectory(url: stagingFolderURL, below: trustedAncestor) {
             for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasSuffix(".mov") {
                 let parts = file.name.split(separator: ".", maxSplits: 2).map(String.init)
@@ -239,7 +242,7 @@ extension NativeWallpaperDeployment {
                     !file.name.hasSuffix(".partial.mov")
                     && parts.count == 3
                     && PathSafety.isValidEntryID(parts[0])
-                    && (try? entry(id: parts[0], videosFolderURL: videosFolderURL))??.contentHash == parts[1]
+                    && entry(id: parts[0], in: videos)?.contentHash == parts[1]
                 if !keep { try? staging.removeFile(named: file.name) }
             }
         }
@@ -249,20 +252,31 @@ extension NativeWallpaperDeployment {
         // as the primary, and deleting it makes the extension prune the entry.
         // The metadata is read through the descriptor the delete uses, under
         // the entry lock deploy holds while it replaces an entry.
-        guard let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) else { return }
         for dir in (try? videos.entries()) ?? [] where dir.kind == .directory && PathSafety.isValidEntryID(dir.name) {
             entryLock.withLock {
-                guard let folder = try? videos.subdirectory(dir.name),
-                    let data = try? folder.readFile(named: "metadata.json"),
-                    let entry = try? JSONDecoder().decode(EntryInfo.self, from: data),
-                    entry.id == dir.name
-                else { return }
+                guard let folder = try? videos.subdirectory(dir.name), let entry = entry(id: dir.name, inEntry: folder) else {
+                    return
+                }
                 for file in (try? folder.entries()) ?? []
                 where file.kind == .file && file.name != entry.filename && isLegacyExport(file.name) {
                     try? folder.removeFile(named: file.name)
                 }
             }
         }
+    }
+
+    /// metadata.json of entry `id`, read inside `videos` without following
+    /// symlinks; nil when unreadable or listing another ID.
+    private static func entry(id: String, in videos: TrustedDirectory) -> EntryInfo? {
+        guard let folder = try? videos.subdirectory(id) else { return nil }
+        return entry(id: id, inEntry: folder)
+    }
+
+    private static func entry(id: String, inEntry folder: TrustedDirectory) -> EntryInfo? {
+        guard let data = try? folder.readFile(named: "metadata.json"),
+            let entry = try? JSONDecoder().decode(EntryInfo.self, from: data), entry.id == id
+        else { return nil }
+        return entry
     }
 
     private static func isLegacyExport(_ name: String) -> Bool {
