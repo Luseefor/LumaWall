@@ -277,8 +277,8 @@ enum NativeWallpaperDeployment {
         let stagingFolder = try makeStagingFolder(appropriateFor: videosFolderURL)
         beginStaging(stagingFolder)
         defer {
-            try? FileManager.default.removeItem(at: stagingFolder)
-            endStaging(stagingFolder)
+            let deleted = (try? FileManager.default.removeItem(at: stagingFolder)) != nil
+            endStaging(stagingFolder, deleted: deleted)
         }
         let staged = try await Task.detached(priority: .utility) {
             try stageDeployment(source: asset.mediaURL, entryID: entryID, filename: filename, stagingFolderURL: stagingFolder)

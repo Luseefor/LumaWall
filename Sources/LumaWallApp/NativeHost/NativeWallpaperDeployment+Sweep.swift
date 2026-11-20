@@ -27,8 +27,10 @@ extension NativeWallpaperDeployment {
 
     /// Deletes, from `videosFolderURL`, each entry folder (named by a UUID)
     /// that is not in `referenced`, holds no valid published entry
-    /// (metadata.json for its own ID naming a regular file beside it) and
-    /// hasn't changed for `sweepMinimumAge`. Then deletes the deploy staging
+    /// (metadata.json for its own ID naming a regular file beside it), holds
+    /// no video file at all, and hasn't changed for `sweepMinimumAge`. A
+    /// bare video is kept: the extension lists it, and the legacy migration
+    /// moves a user's only copy into a folder before writing its metadata. Then deletes the deploy staging
     /// folders listed in the journal at `stagingJournalURL` that aren't in
     /// `activeStaging`, haven't changed for that long and hold only staged
     /// entries.
@@ -46,13 +48,15 @@ extension NativeWallpaperDeployment {
         now: Date = Date()
     ) -> SweepResult {
         var result = SweepResult()
+        // Folder names may be any case; the library's IDs are uppercase.
+        let referenced = Set(referenced.compactMap(UUID.init(uuidString:)))
         if let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) {
-            for item in (try? videos.entries()) ?? []
-            where item.kind == .directory && PathSafety.isValidEntryID(item.name) && !referenced.contains(item.name) {
+            for item in (try? videos.entries()) ?? [] where item.kind == .directory {
+                guard let id = UUID(uuidString: item.name), !referenced.contains(id) else { continue }
                 let removed = entryLock.withLock { () -> Bool in
                     guard isOld(videosFolderURL.appendingPathComponent(item.name), now: now),
                         let folder = try? videos.subdirectory(item.name),
-                        !hasPublishedEntry(id: item.name, in: folder)
+                        !hasPublishedEntry(id: item.name, in: folder), !holdsVideo(folder)
                     else { return false }
                     return (try? videos.removeItem(named: item.name)) != nil
                 }
@@ -64,8 +68,8 @@ extension NativeWallpaperDeployment {
             let active = Set(activeStaging.map(\.standardizedFileURL.path))
             // Deleting runs outside the journal's lock, which deploys take on
             // the main actor.
-            for folder in journal.folders where !active.contains(folder.standardizedFileURL.path) {
-                switch removeStagingFolder(folder, now: now) {
+            for (folder, identity) in journal.records where !active.contains(folder.standardizedFileURL.path) {
+                switch removeStagingFolder(folder, identity: identity, now: now) {
                 case .removed:
                     result.stagingFolders.append(folder.lastPathComponent)
                     journal.remove(folder)
@@ -85,20 +89,40 @@ extension NativeWallpaperDeployment {
         return (try? folder.kind(ofItemNamed: entry.filename)) == .file
     }
 
+    /// True when a regular file with a video extension the extension
+    /// recovers (`LibraryEntryScan.videoExtensions`) is directly in `folder`.
+    private static func holdsVideo(_ folder: TrustedDirectory) -> Bool {
+        let videoExtensions: Set = ["mp4", "mov", "m4v"]
+        return ((try? folder.entries()) ?? []).contains {
+            $0.kind == .file && videoExtensions.contains(($0.name as NSString).pathExtension.lowercased())
+        }
+    }
+
     private enum StagingOutcome { case removed, gone, kept }
 
-    /// Deletes a staging folder `makeStagingFolder` made, when it is old
-    /// and holds nothing but staged entries. The folder above it (the
-    /// system's TemporaryItems) can't be opened from the app, so the folder
-    /// is emptied through its own descriptor and then removed with rmdir(2),
-    /// which never follows a symlink. A missing folder, or a symlink in its
-    /// place, is `.gone`: there is nothing of LumaWall's left to sweep.
-    private static func removeStagingFolder(_ folder: URL, now: Date) -> StagingOutcome {
+    /// Deletes a staging folder `makeStagingFolder` made, when it is still
+    /// the folder deploy recorded (`identity`), is old and holds nothing but
+    /// staged entries. The folder above it (the system's TemporaryItems)
+    /// can't be opened from the app, so the folder is emptied through its
+    /// own descriptor and then removed with rmdir(2), which never follows a
+    /// symlink and never removes a folder with anything in it.
+    ///
+    /// `.gone` means nothing of LumaWall's is left there: the folder is
+    /// missing, a symlink, or another folder. Other errors keep the record
+    /// for the next sweep.
+    private static func removeStagingFolder(_ folder: URL, identity: TrustedDirectory.Identity?, now: Date) -> StagingOutcome {
         // Only what `makeStagingFolder` names: "NSIRD_<process>_<random>".
-        guard folder.lastPathComponent.hasPrefix("NSIRD_"),
-            (try? FileManager.default.attributesOfItem(atPath: folder.path))?[.type] as? FileAttributeType == .typeDirectory,
-            let handle = try? TrustedDirectory(url: folder)
-        else { return .gone }
+        guard folder.lastPathComponent.hasPrefix("NSIRD_"), let identity else { return .gone }
+        let handle: TrustedDirectory
+        do {
+            handle = try TrustedDirectory(url: folder)
+        } catch POSIXError.ENOENT, POSIXError.ELOOP, POSIXError.ENOTDIR {
+            return .gone
+        } catch {
+            return .kept
+        }
+        guard let current = try? handle.identity() else { return .kept }
+        guard current == identity else { return .gone }
         guard let staged = try? handle.entries(),
             staged.allSatisfy({ $0.kind == .directory && isStagedEntryName($0.name) }),
             isOld(folder, now: now), staged.allSatisfy({ isOld(folder.appendingPathComponent($0.name), now: now) })
@@ -141,10 +165,11 @@ extension NativeWallpaperDeployment {
         if let journalURL { StagingJournal(fileURL: journalURL).add(folder) }
     }
 
-    /// The deploy is done with `folder` and has deleted it.
-    static func endStaging(_ folder: URL, journalURL: URL? = stagingJournalURL) {
+    /// The deploy is done with `folder`. Its record stays in the journal
+    /// unless the deploy deleted the folder, so the sweep can retry.
+    static func endStaging(_ folder: URL, deleted: Bool, journalURL: URL? = stagingJournalURL) {
         _ = activeStaging.withLock { $0.remove(folder) }
-        if let journalURL { StagingJournal(fileURL: journalURL).remove(folder) }
+        if deleted, let journalURL { StagingJournal(fileURL: journalURL).remove(folder) }
     }
 
     // MARK: Scheduling
@@ -180,48 +205,61 @@ extension NativeWallpaperDeployment {
                         "sweep: removed \(result.entries.count, privacy: .public) entries, \(result.stagingFolders.count, privacy: .public) staging folders"
                     )
                 }
-                // The extension may list an entry recovered from a bare video.
-                if !result.entries.isEmpty { notifyLibraryChanged() }
             }
         }
     }
 }
 
-/// A JSON list of staging folder paths in app support. Every change is a
-/// read, edit and atomic write under one lock, so deploys and the sweep in
-/// this process never lose each other's edits.
+/// A JSON list of staging folders in app support, each with the identity
+/// it had when deploy made it, so a path that later names another folder
+/// isn't swept. Every change is a read, edit and atomic write under one
+/// lock, so deploys and the sweep in this process never lose each other's
+/// edits.
 struct StagingJournal {
+    private struct Record: Codable, Equatable {
+        var path: String
+        var identity: TrustedDirectory.Identity?
+    }
+
     let fileURL: URL
 
     private static let lock = OSAllocatedUnfairLock()
 
+    /// Records `folder` as it is now. One that can't be opened is recorded
+    /// without an identity, and the sweep only drops it.
     func add(_ folder: URL) {
-        edit { paths in if !paths.contains(folder.path) { paths.append(folder.path) } }
+        let identity = try? TrustedDirectory(url: folder).identity()
+        edit { records in
+            records.removeAll { $0.path == folder.path }
+            records.append(Record(path: folder.path, identity: identity))
+        }
     }
 
     func remove(_ folder: URL) {
-        edit { paths in paths.removeAll { $0 == folder.path } }
+        edit { records in records.removeAll { $0.path == folder.path } }
     }
 
-    var folders: [URL] {
-        Self.lock.withLockUnchecked { read().map { URL(fileURLWithPath: $0, isDirectory: true) } }
+    var records: [(folder: URL, identity: TrustedDirectory.Identity?)] {
+        Self.lock.withLockUnchecked { read().map { (URL(fileURLWithPath: $0.path, isDirectory: true), $0.identity) } }
     }
 
-    private func edit(_ change: (inout [String]) -> Void) {
+    var folders: [URL] { records.map(\.folder) }
+
+    private func edit(_ change: (inout [Record]) -> Void) {
         Self.lock.withLockUnchecked {
-            var paths = read()
-            let before = paths
-            change(&paths)
-            guard paths != before else { return }
-            if paths.isEmpty {
+            var records = read()
+            let before = records
+            change(&records)
+            guard records != before else { return }
+            if records.isEmpty {
                 try? FileManager.default.removeItem(at: fileURL)
-            } else if let data = try? JSONEncoder().encode(paths) {
+            } else if let data = try? JSONEncoder().encode(records) {
                 try? data.write(to: fileURL, options: .atomic)
             }
         }
     }
 
-    private func read() -> [String] {
-        (try? Data(contentsOf: fileURL)).flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+    private func read() -> [Record] {
+        (try? Data(contentsOf: fileURL)).flatMap { try? JSONDecoder().decode([Record].self, from: $0) } ?? []
     }
 }

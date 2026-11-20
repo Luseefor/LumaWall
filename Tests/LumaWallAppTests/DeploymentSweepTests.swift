@@ -74,14 +74,13 @@ final class DeploymentSweepTests: XCTestCase {
     func testAnAbandonedEntryIsRemoved() throws {
         let empty = try entry(UUID().uuidString, files: [])
         let thumbnailOnly = try entry(UUID().uuidString, files: ["thumbnail.jpg"])
-        let videoWithoutMetadata = try entry(UUID().uuidString, files: ["Wallpaper.mov"])
-        let metadataWithoutVideo = try entry(UUID().uuidString, files: ["metadata.json"])
+        let metadataWithoutVideo = try entry(UUID().uuidString, files: ["metadata.json", "thumbnail.jpg"])
 
         let result = sweep()
-        for dir in [empty, thumbnailOnly, videoWithoutMetadata, metadataWithoutVideo] {
+        for dir in [empty, thumbnailOnly, metadataWithoutVideo] {
             XCTAssertFalse(exists(dir), dir.lastPathComponent)
         }
-        XCTAssertEqual(result.entries.count, 4)
+        XCTAssertEqual(result.entries.count, 3)
     }
 
     func testAValidPublishedEntryIsKept() throws {
@@ -90,15 +89,26 @@ final class DeploymentSweepTests: XCTestCase {
         XCTAssertTrue(exists(dir.appendingPathComponent("Wallpaper.mov")))
     }
 
-    func testMetadataForAnotherIDIsNotAValidEntry() throws {
+    func testAFolderHoldingAVideoIsKept() throws {
+        // The extension lists a bare video, and its legacy migration moves
+        // a user's only copy into the folder before writing metadata.
+        let bare = try entry(UUID().uuidString, files: ["wallpaper.MP4"])
         let other = UUID().uuidString
-        let dir = try entry(UUID().uuidString, files: ["Wallpaper.mov"])
+        let mismatched = try entry(UUID().uuidString, files: ["Wallpaper.mov"])
         try FileManager.default.copyItem(
             at: try entry(other, files: ["metadata.json", "Wallpaper.mov"]).appendingPathComponent("metadata.json"),
-            to: dir.appendingPathComponent("metadata.json"))
-        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: dir.path)
-        _ = sweep(referenced: [other])
-        XCTAssertFalse(exists(dir))
+            to: mismatched.appendingPathComponent("metadata.json"))
+        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: mismatched.path)
+        XCTAssertEqual(sweep().entries, [])
+        XCTAssertTrue(exists(bare.appendingPathComponent("wallpaper.MP4")))
+        XCTAssertTrue(exists(mismatched.appendingPathComponent("Wallpaper.mov")))
+    }
+
+    func testAReferenceMatchesAFolderInAnyCase() throws {
+        let id = UUID().uuidString
+        let dir = try entry(id.lowercased(), files: ["thumbnail.jpg"])
+        XCTAssertEqual(sweep(referenced: [id]).entries, [])
+        XCTAssertTrue(exists(dir))
     }
 
     func testAVideoThatIsASymlinkIsNotAValidEntry() throws {
@@ -115,14 +125,14 @@ final class DeploymentSweepTests: XCTestCase {
 
     func testAReferencedEntryIsKept() throws {
         let id = UUID().uuidString
-        let dir = try entry(id, files: ["Wallpaper.mov"])
+        let dir = try entry(id, files: ["thumbnail.jpg"])
         XCTAssertEqual(sweep(referenced: [id]).entries, [])
-        XCTAssertTrue(exists(dir.appendingPathComponent("Wallpaper.mov")))
+        XCTAssertTrue(exists(dir.appendingPathComponent("thumbnail.jpg")))
     }
 
     func testARecentEntryIsKept() throws {
         // The extension's legacy migration builds an entry in place.
-        let dir = try entry(UUID().uuidString, files: ["Wallpaper.mov"], modified: now.addingTimeInterval(-60))
+        let dir = try entry(UUID().uuidString, files: ["metadata.json"], modified: now.addingTimeInterval(-60))
         XCTAssertEqual(sweep().entries, [])
         XCTAssertTrue(exists(dir))
     }
@@ -132,12 +142,18 @@ final class DeploymentSweepTests: XCTestCase {
         let victim = root.appendingPathComponent("Documents", isDirectory: true)
         try fm.createDirectory(at: victim, withIntermediateDirectories: true)
         try Data("keep".utf8).write(to: victim.appendingPathComponent("thesis.pages"))
+        try fm.setAttributes([.modificationDate: old], ofItemAtPath: victim.path)
         let link = videos.appendingPathComponent(UUID().uuidString)
         try fm.createSymbolicLink(at: link, withDestinationURL: victim)
+        // Old enough to sweep, so only the symlink check keeps it.
+        var times = [
+            timespec(tv_sec: Int(old.timeIntervalSince1970), tv_nsec: 0), timespec(tv_sec: Int(old.timeIntervalSince1970), tv_nsec: 0),
+        ]
+        XCTAssertEqual(utimensat(AT_FDCWD, link.path, &times, AT_SYMLINK_NOFOLLOW), 0)
 
-        _ = sweep()
+        XCTAssertEqual(sweep().entries, [])
         XCTAssertTrue(exists(victim.appendingPathComponent("thesis.pages")))
-        XCTAssertTrue(exists(victim))
+        XCTAssertNotNil(try? fm.destinationOfSymbolicLink(atPath: link.path))
     }
 
     func testOnlyEntryFoldersAreTouched() throws {
@@ -224,8 +240,26 @@ final class DeploymentSweepTests: XCTestCase {
         NativeWallpaperDeployment.beginStaging(folder, journalURL: journal)
         XCTAssertTrue(NativeWallpaperDeployment.activeStagingFolders.contains(folder))
         XCTAssertEqual(journaled, ["NSIRD_LumaWall_live"])
-        NativeWallpaperDeployment.endStaging(folder, journalURL: journal)
+        NativeWallpaperDeployment.endStaging(folder, deleted: true, journalURL: journal)
         XCTAssertFalse(NativeWallpaperDeployment.activeStagingFolders.contains(folder))
+        XCTAssertEqual(journaled, [])
+    }
+
+    func testStagingADeployCouldNotDeleteStaysJournaled() throws {
+        let folder = try stagingFolder("NSIRD_LumaWall_stuck", modified: old, journaled: false)
+        NativeWallpaperDeployment.beginStaging(folder, journalURL: journal)
+        NativeWallpaperDeployment.endStaging(folder, deleted: false, journalURL: journal)
+        XCTAssertFalse(NativeWallpaperDeployment.activeStagingFolders.contains(folder))
+        XCTAssertEqual(sweep().stagingFolders, ["NSIRD_LumaWall_stuck"])
+    }
+
+    func testAJournaledPathNowNamingAnotherFolderIsNotSwept() throws {
+        let fm = FileManager.default
+        let folder = try stagingFolder("NSIRD_LumaWall_reused", modified: old)
+        try fm.removeItem(at: folder)
+        try stagingFolder("NSIRD_LumaWall_reused", modified: old, journaled: false)
+        XCTAssertEqual(sweep().stagingFolders, [])
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: folder.path).count, 1)
         XCTAssertEqual(journaled, [])
     }
 
