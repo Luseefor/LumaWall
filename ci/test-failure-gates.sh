@@ -6,15 +6,22 @@ fixture_dir="$(mktemp -d)"
 trap 'rm -rf "$fixture_dir"' EXIT
 mkdir -p "$fixture_dir/ci" "$fixture_dir/Packaging" "$fixture_dir/bin" "$fixture_dir/dist"
 cp "$project_root/ci/check.sh" "$fixture_dir/ci/check.sh"
+cp "$project_root/ci/unregister-builds.sh" "$fixture_dir/ci/unregister-builds.sh"
 cp "$project_root/Packaging/release.sh" "$fixture_dir/Packaging/release.sh"
 # Avoid recursively running this fixture test inside the copied validator.
 printf '#!/bin/bash\nexit 0\n' > "$fixture_dir/ci/test-failure-gates.sh"
 export PATH="$fixture_dir/bin:$PATH"
 export LUMAWALL_CHECK_OUTPUT_DIR="$fixture_dir/results"
 export LUMAWALL_GATE_MARKERS="$fixture_dir"
+export LUMAWALL_LSREGISTER="$fixture_dir/bin/lsregister"
+# A previous build's app, which check.sh must unregister however it exits.
+built_app="$fixture_dir/.derived/Build/Products/Testing/LumaWall.app"
+mkdir -p "$built_app/Contents/Extensions/LumaWallWallpaper.appex"
 
 cat > "$fixture_dir/bin/swift" <<'SH'
 #!/bin/bash
+# Interrupt the whole check, as Ctrl-C in a terminal would.
+[[ "${LUMAWALL_FAKE_SWIFT_EXIT:-}" == interrupt ]] && { kill -INT "$PPID"; kill -INT $$; }
 exit "${LUMAWALL_FAKE_SWIFT_EXIT:-0}"
 SH
 cat > "$fixture_dir/bin/xcodegen" <<'SH'
@@ -32,7 +39,21 @@ cat > "$fixture_dir/bin/security" <<'SH'
 #!/bin/bash
 printf 'Developer ID Application: Release Gate Fixture\n'
 SH
+cat > "$fixture_dir/bin/pluginkit" <<'SH'
+#!/bin/bash
+printf 'pluginkit %s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/unregistered"
+SH
+cat > "$fixture_dir/bin/lsregister" <<'SH'
+#!/bin/bash
+printf 'lsregister %s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/unregistered"
+SH
 chmod +x "$fixture_dir/bin/"* "$fixture_dir/ci/"*.sh
+
+expect_unregistered() {
+    grep -Fqx "pluginkit -r $built_app/Contents/Extensions/LumaWallWallpaper.appex" "$fixture_dir/unregistered"
+    grep -Fqx "lsregister -u $built_app" "$fixture_dir/unregistered"
+    rm "$fixture_dir/unregistered"
+}
 
 expect_exit() {
     local expected="$1"
@@ -49,10 +70,16 @@ expect_exit() {
 # A core-test failure must stop before building the app.
 LUMAWALL_FAKE_SWIFT_EXIT=43 expect_exit 43 bash "$fixture_dir/ci/check.sh"
 [[ ! -e "$fixture_dir/generated" ]]
+expect_unregistered
 
 # A playback failure must stop before compiling a release.
 expect_exit 44 bash "$fixture_dir/ci/check.sh"
 [[ -e "$fixture_dir/generated" && ! -e "$fixture_dir/packaged" ]]
+expect_unregistered
+
+# An interrupted run must still unregister the built app.
+LUMAWALL_FAKE_SWIFT_EXIT=interrupt expect_exit 130 bash "$fixture_dir/ci/check.sh"
+expect_unregistered
 
 # A failed validation must preserve an existing DMG and never start packaging.
 printf '#!/bin/bash\nexit 42\n' > "$fixture_dir/ci/check.sh"
@@ -64,4 +91,4 @@ expect_exit 42 zsh "$fixture_dir/Packaging/release.sh"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]]
 [[ ! -e "$fixture_dir/packaged" ]]
 
-printf 'Core, playback, and release failure gates passed.\n'
+printf 'Core, playback, release, and cleanup failure gates passed.\n'
