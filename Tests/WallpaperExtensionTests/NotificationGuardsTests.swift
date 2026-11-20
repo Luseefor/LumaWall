@@ -183,8 +183,9 @@ final class NotificationGuardsTests: XCTestCase {
         let sources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("WallpaperExtension", isDirectory: true)
-        let files = try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "swift" }
+        // The target takes the whole folder, subfolders included.
+        let files = (FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?.allObjects ?? [])
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
         XCTAssertFalse(files.isEmpty, "no extension sources at \(sources.path)")
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
