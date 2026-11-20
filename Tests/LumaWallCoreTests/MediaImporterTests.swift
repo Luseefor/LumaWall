@@ -3,6 +3,7 @@ import AVFAudio
 import CoreGraphics
 import CoreMedia
 import CoreVideo
+import CryptoKit
 import Foundation
 import Testing
 @testable import LumaWallCore
@@ -82,6 +83,56 @@ struct MediaImporterTests {
         await #expect(throws: LibraryStore.StoreError.self) {
             try await importer.importVideo(source)
         }
+    }
+
+    @Test func webURLsAreRejectedBeforeAnyMediaWork() async throws {
+        // A dropped HTTPS link went straight to AVURLAsset, which contacted
+        // the server while probing it.
+        let dir = isolatedDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let importer = try MediaImporter(store: store(at: dir))
+        let web = try #require(URL(string: "https://example.com/clip.mov"))
+
+        await #expect(throws: VerifiedFileCopy.CopyError.notALocalFile) { try await importer.inspect(web) }
+        await #expect(throws: VerifiedFileCopy.CopyError.notALocalFile) { try await importer.importVideo(web) }
+        #expect(MediaImporter.localFiles(in: [web, dir]) == [dir])
+    }
+
+    @Test func importStoresTheBytesItHashed() async throws {
+        let dir = isolatedDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = try await makeVideo(withAudio: false, in: dir, name: "clip.mov")
+        let importer = try MediaImporter(store: store(at: dir))
+
+        let outcome = try await importer.importVideo(source)
+        let stored = try Data(contentsOf: outcome.asset.mediaURL)
+        #expect(stored == (try Data(contentsOf: source)))
+        #expect(outcome.asset.contentHash == SHA256.hash(data: stored).map { String(format: "%02x", $0) }.joined())
+        let scratch = dir.appendingPathComponent("Library/Scratch")
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: scratch.path)) ?? []).isEmpty)
+    }
+
+    @Test func importRefusesAFolderNamedLikeAVideo() async throws {
+        let dir = isolatedDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = dir.appendingPathComponent("bundle.mov", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let importer = try MediaImporter(store: store(at: dir))
+
+        await #expect(throws: VerifiedFileCopy.CopyError.notARegularFile) { try await importer.importVideo(folder) }
+        #expect(try await store(at: dir).assets().isEmpty)
+    }
+
+    @Test func aFailedImportLeavesNoStagedCopy() async throws {
+        let dir = isolatedDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = try await makeVideo(withAudio: false, in: dir, name: "clip.mov")
+        let importer = try MediaImporter(store: store(at: dir))
+        _ = try await importer.importVideo(source)
+
+        await #expect(throws: LibraryStore.StoreError.self) { try await importer.importVideo(source) }
+        let scratch = dir.appendingPathComponent("Library/Scratch")
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: scratch.path)) ?? []).isEmpty)
     }
 
     @Test func inspectRejectsNonVideo() async throws {
