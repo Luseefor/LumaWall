@@ -76,6 +76,32 @@ targets:
         embed: true
       - target: LumaWallWallpaper
         embed: true
+      - target: LumaWallMediaService
+        embed: true
+
+  # Parses imported media in App Sandbox with no file entitlements; the app
+  # sends it open read-only file handles. See Sources/LumaWallCore/MediaProbe.swift.
+  LumaWallMediaService:
+    type: xpc-service
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Sources/LumaWallMediaService
+      # Only the probe and its XPC contract, not all of LumaWallCore.
+      - path: Sources/LumaWallCore/MediaProbe.swift
+      - path: Sources/LumaWallCore/LocalMediaProbe.swift
+      - path: Sources/LumaWallCore/MediaServiceProtocol.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.media
+        PRODUCT_NAME: LumaWallMediaService
+        INFOPLIST_FILE: Packaging/LumaWallMediaService-Info.plist
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: "LumaWall Media Service"
+        MARKETING_VERSION: "0.4.1"
+        CURRENT_PROJECT_VERSION: "13"
+        CODE_SIGN_ENTITLEMENTS: Packaging/LumaWallMediaService.entitlements
+        SKIP_INSTALL: YES
 
   LumaWallWallpaper:
     type: extensionkit-extension

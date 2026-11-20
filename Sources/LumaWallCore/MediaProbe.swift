@@ -11,9 +11,12 @@ import UniformTypeIdentifiers
 /// This file is compiled into LumaWallCore and into the media service.
 public protocol MediaProbing: Sendable {
     func inspect(_ file: FileHandle, typeIdentifier: String) async throws -> MediaInfo
-    /// A frame at time zero, scaled to fit `maxPixelSize` when given, with
-    /// the track's orientation applied.
-    func posterFrame(_ file: FileHandle, typeIdentifier: String, maxPixelSize: CGSize?) async throws -> PosterFrame
+    /// A frame scaled to fit `maxPixelSize` when given, with the track's
+    /// orientation applied: the first frame, or with `nearStart` the frame
+    /// at one second (or mid-way through a shorter video), which skips
+    /// black fade-ins.
+    func posterFrame(_ file: FileHandle, typeIdentifier: String, maxPixelSize: CGSize?, nearStart: Bool) async throws
+        -> PosterFrame
 }
 
 extension MediaProbing {
@@ -22,8 +25,10 @@ extension MediaProbing {
         try await inspect(MediaFile.open(url), typeIdentifier: MediaFile.typeIdentifier(for: url))
     }
 
-    public func posterFrame(fileAt url: URL, maxPixelSize: CGSize? = nil) async throws -> PosterFrame {
-        try await posterFrame(MediaFile.open(url), typeIdentifier: MediaFile.typeIdentifier(for: url), maxPixelSize: maxPixelSize)
+    public func posterFrame(fileAt url: URL, maxPixelSize: CGSize? = nil, nearStart: Bool = false) async throws -> PosterFrame {
+        try await posterFrame(
+            MediaFile.open(url), typeIdentifier: MediaFile.typeIdentifier(for: url), maxPixelSize: maxPixelSize,
+            nearStart: nearStart)
     }
 }
 
@@ -85,7 +90,8 @@ public struct MediaInfo: Codable, Equatable, Sendable {
 /// pixels, not JPEG or PNG, so the app never runs an image decoder on bytes
 /// the service produced.
 public struct PosterFrame: Codable, Sendable {
-    public static let maxSide = 8_192
+    /// Largest side the service returns: 64 MB of pixels at most per reply.
+    public static let maxSide = 4_096
 
     public var width: Int
     public var height: Int

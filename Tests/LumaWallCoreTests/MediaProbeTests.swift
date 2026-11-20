@@ -32,11 +32,13 @@ struct MediaProbeTests {
         let video = try await TestVideos.makeVideo(withAudio: false, in: dir)
         let probe = LocalMediaProbe()
 
-        let full = try await probe.posterFrame(open(video), typeIdentifier: "com.apple.quicktime-movie", maxPixelSize: nil)
+        let full = try await probe.posterFrame(
+            open(video), typeIdentifier: "com.apple.quicktime-movie", maxPixelSize: nil, nearStart: false)
         #expect(full.width == 1280 && full.height == 720)
         #expect(full.makeImage()?.width == 1280)
         let small = try await probe.posterFrame(
-            open(video), typeIdentifier: "com.apple.quicktime-movie", maxPixelSize: CGSize(width: 640, height: 360))
+            open(video), typeIdentifier: "com.apple.quicktime-movie", maxPixelSize: CGSize(width: 640, height: 360),
+            nearStart: true)
         #expect(small.width <= 640 && small.height <= 360)
         #expect(small.pixels.count == small.bytesPerRow * small.height)
     }

@@ -34,15 +34,24 @@ public struct LocalMediaProbe: MediaProbing {
         )
     }
 
-    public func posterFrame(_ file: FileHandle, typeIdentifier: String, maxPixelSize: CGSize?) async throws -> PosterFrame {
+    public func posterFrame(_ file: FileHandle, typeIdentifier: String, maxPixelSize: CGSize?, nearStart: Bool) async throws
+        -> PosterFrame
+    {
         let source = try HandleBackedAsset(file: file, typeIdentifier: typeIdentifier)
         let generator = AVAssetImageGenerator(asset: source.asset)
         generator.appliesPreferredTrackTransform = true
         let side = CGFloat(PosterFrame.maxSide)
-        generator.maximumSize = maxPixelSize ?? CGSize(width: side, height: side)
+        let requested = maxPixelSize ?? CGSize(width: side, height: side)
+        generator.maximumSize = CGSize(width: min(requested.width, side), height: min(requested.height, side))
+        var time = CMTime.zero
+        if nearStart {
+            let duration = (try? await source.asset.load(.duration).seconds) ?? 0
+            let seconds = duration.isFinite && duration > 0 ? min(1, duration / 2) : 0
+            time = CMTime(seconds: seconds, preferredTimescale: 600)
+        }
         let image: CGImage
         do {
-            image = try await generator.image(at: .zero).image
+            image = try await generator.image(at: time).image
         } catch {
             throw MediaProbeError.posterUnavailable
         }
