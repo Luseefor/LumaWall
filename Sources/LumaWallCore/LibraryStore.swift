@@ -26,7 +26,12 @@ public actor LibraryStore {
         let base = try StorePaths.appSupportBase(rootURL: rootURL)
         self.rootURL = base
         self.indexURL = base.appendingPathComponent("Library.json")
-        if let decoded: [WallpaperAsset] = StoreIO.readJSON(from: indexURL, as: [WallpaperAsset].self) {
+        // A repeated ID means the index was edited or damaged; building the
+        // dictionary from it would trap.
+        if let decoded = StoreIO.readJSON(
+            from: indexURL, as: [WallpaperAsset].self,
+            isValid: { Set($0.map(\.id)).count == $0.count })
+        {
             assetsByID = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
         }
     }
@@ -96,21 +101,39 @@ public actor LibraryStore {
         try persist()
     }
 
+    /// Deletes the entry's folder, then drops it from the index, so a failed
+    /// delete leaves an entry the user can remove again.
+    ///
+    /// The media folder must be exactly this entry's own folder. A corrupt or
+    /// hand-edited Library.json could otherwise point mediaURL at an arbitrary
+    /// directory or a sibling entry's folder. Such an entry is dropped from
+    /// the index without touching disk, and the call throws `invalidLocation`.
+    /// The delete itself goes through `TrustedDirectory`, so an entry folder
+    /// swapped for a symlink loses the link, not what it points at.
     public func remove(id: WallpaperID) throws {
-        guard let asset = assetsByID.removeValue(forKey: id) else { throw StoreError.missingAsset }
-        try persist()
-        // The media folder must be exactly this entry's own folder. A corrupt
-        // or hand-edited Library.json could otherwise point mediaURL at an
-        // arbitrary directory (or a sibling entry's folder) and this delete
-        // would wipe it. The index entry is already gone; refuse the disk
-        // delete loudly instead of silently honoring a bad path.
-        let folder = asset.mediaURL.deletingLastPathComponent().resolvingSymlinksInPath()
-        let expected = self.folder(for: id).resolvingSymlinksInPath()
-        guard folder == expected else {
+        guard let asset = assetsByID[id] else { throw StoreError.missingAsset }
+        guard isEntryFolder(asset.mediaURL.deletingLastPathComponent(), of: id) else {
+            assetsByID[id] = nil
+            try persist()
             throw StoreError.invalidLocation
         }
-        try? FileManager.default.removeItem(at: folder)
-        cachedDiskUsage = nil
+        do {
+            try TrustedDirectory(url: rootURL).removeItem(named: id.rawValue.uuidString)
+        } catch POSIXError.ENOENT {
+            // Already gone; nothing left to delete.
+        }
+        assetsByID[id] = nil
+        try persist()
+    }
+
+    /// Compares without resolving the entry folder itself: resolving it is
+    /// what let a symlinked folder match. Only the root is resolved, so
+    /// `/var` and `/private/var` spellings of the same root still match.
+    private func isEntryFolder(_ folder: URL, of id: WallpaperID) -> Bool {
+        let folder = folder.standardizedFileURL
+        guard folder.lastPathComponent == id.rawValue.uuidString else { return false }
+        let parent = folder.deletingLastPathComponent()
+        return parent.resolvingSymlinksInPath().path == rootURL.standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     public func folder(for id: WallpaperID) -> URL {

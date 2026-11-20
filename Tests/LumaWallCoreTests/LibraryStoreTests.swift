@@ -241,6 +241,68 @@ struct LibraryStoreTests {
                 .contains("outside the library") == true)
     }
 
+    @Test func removeThroughASymlinkedEntryFolderKeepsTheTarget() async throws {
+        // An entry folder swapped for a symlink resolved to the same path as
+        // the media URL, so remove deleted whatever the link pointed at.
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: base) }
+        let root = base.appendingPathComponent("lib", isDirectory: true)
+        let victim = base.appendingPathComponent("Documents", isDirectory: true)
+        try fm.createDirectory(at: victim, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: victim.appendingPathComponent("thesis.pages"))
+        let store = try LibraryStore(rootURL: root)
+        let id = WallpaperID()
+        let folder = await store.folder(for: id)
+        try await store.install(LibraryStore.entryAsset(id: id, folder: folder, hash: "linked"))
+        try fm.createSymbolicLink(at: folder, withDestinationURL: victim)
+
+        try await store.remove(id: id)
+        #expect(await store.asset(id: id) == nil)
+        #expect(fm.fileExists(atPath: victim.appendingPathComponent("thesis.pages").path))
+        #expect((try? fm.destinationOfSymbolicLink(atPath: folder.path)) == nil)
+    }
+
+    @Test func removeKeepsTheIndexEntryWhenTheFolderCannotBeDeleted() async throws {
+        // The index entry went first, so a failed delete left the files with
+        // nothing pointing at them.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            try? fm.removeItem(at: root)
+        }
+        let store = try LibraryStore(rootURL: root)
+        let id = WallpaperID()
+        let folder = await store.folder(for: id)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: folder.appendingPathComponent("wallpaper.mov"))
+        try await store.install(LibraryStore.entryAsset(id: id, folder: folder, hash: "stuck"))
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+
+        await #expect(throws: (any Error).self) { try await store.remove(id: id) }
+        #expect(await store.asset(id: id) != nil)
+        #expect(await LibraryStore.reopenedHasAsset(root: root, id: id))
+    }
+
+    @Test func duplicateIDsInTheIndexAreTreatedAsCorrupt() async throws {
+        // Dictionary(uniqueKeysWithValues:) trapped on a repeated ID.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let entry = """
+            {"id":{"rawValue":"AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"},"name":"Twin","mediaURL":"file:///tmp/a.mov","duration":10,"framesPerSecond":30,"pixelSize":[1920,1080],"contentHash":"twin","containsAudio":false}
+            """
+        try Data("[\(entry),\(entry)]".utf8).write(to: root.appendingPathComponent("Library.json"))
+
+        let store = try LibraryStore(rootURL: root)
+        #expect(await store.assets().isEmpty)
+        let leftovers = try fm.contentsOfDirectory(atPath: root.path)
+        #expect(leftovers.contains { $0.hasPrefix("Library.json.corrupt-") })
+    }
+
     @Test func corruptLibraryIsQuarantinedNotSilentlyReset() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -285,6 +347,19 @@ struct LibraryStoreTests {
             containsAudio: false,
             category: category
         )
+    }
+}
+
+extension LibraryStore {
+    fileprivate static func entryAsset(id: WallpaperID, folder: URL, hash: String) -> WallpaperAsset {
+        WallpaperAsset(
+            id: id, name: "Entry", mediaURL: folder.appendingPathComponent("wallpaper.mov"), duration: 5,
+            framesPerSecond: 30, pixelSize: CGSize(width: 1920, height: 1080), contentHash: hash, containsAudio: false)
+    }
+
+    fileprivate static func reopenedHasAsset(root: URL, id: WallpaperID) async -> Bool {
+        guard let store = try? LibraryStore(rootURL: root) else { return false }
+        return await store.asset(id: id) != nil
     }
 }
 
