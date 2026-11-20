@@ -46,9 +46,10 @@ Install the pinned XcodeGen once, then run the checks:
 The Xcode project is generated from `project.yml`; regenerate it with
 `./ci/xcodegen.sh generate`. Builds land in `.derived`. Building registers
 the built wallpaper extension with macOS, which can replace a live
-wallpaper from `/Applications/LumaWall.app`. The scripts unregister their
-builds when they exit; after a raw `xcodebuild`, run
-`./ci/unregister-builds.sh`. See [AGENTS.md](AGENTS.md) for more.
+wallpaper from `/Applications/LumaWall.app`. `ci/check.sh` and `ci/test.sh`
+unregister the apps they build when they exit. After a raw `xcodebuild`, run
+`./ci/unregister-builds.sh`, adding the derived data path if it isn't
+`.derived`. See [AGENTS.md](AGENTS.md) for more.
 
 To use a build as your wallpaper, install it to `/Applications/LumaWall.app`.
 
