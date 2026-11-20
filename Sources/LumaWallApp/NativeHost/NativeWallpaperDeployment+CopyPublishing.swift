@@ -282,9 +282,7 @@ extension NativeWallpaperDeployment {
         return entry(id: id, inEntry: folder)
     }
 
-    /// metadata.json of the entry open at `folder`, read without following
-    /// symlinks; nil when unreadable or listing another ID.
-    static func entry(id: String, inEntry folder: TrustedDirectory) -> EntryInfo? {
+    private static func entry(id: String, inEntry folder: TrustedDirectory) -> EntryInfo? {
         guard let data = try? folder.readFile(named: "metadata.json"),
             let entry = try? JSONDecoder().decode(EntryInfo.self, from: data)
         else { return nil }

@@ -81,6 +81,7 @@ final class DeploymentSweepTests: XCTestCase {
             XCTAssertFalse(exists(dir), dir.lastPathComponent)
         }
         XCTAssertEqual(result.entries.count, 3)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: videos.path), [])
     }
 
     func testAValidPublishedEntryIsKept() throws {
@@ -93,6 +94,8 @@ final class DeploymentSweepTests: XCTestCase {
         // The extension lists a bare video, and its legacy migration moves
         // a user's only copy into the folder before writing metadata.
         let bare = try entry(UUID().uuidString, files: ["wallpaper.MP4"])
+        let quickTime = try entry(UUID().uuidString, files: ["metadata.json", "Wallpaper.qt"])
+        let unknown = try entry(UUID().uuidString, files: ["thumbnail.jpg", "notes"])
         let other = UUID().uuidString
         let mismatched = try entry(UUID().uuidString, files: ["Wallpaper.mov"])
         try FileManager.default.copyItem(
@@ -102,6 +105,8 @@ final class DeploymentSweepTests: XCTestCase {
         XCTAssertEqual(sweep().entries, [])
         XCTAssertTrue(exists(bare.appendingPathComponent("wallpaper.MP4")))
         XCTAssertTrue(exists(mismatched.appendingPathComponent("Wallpaper.mov")))
+        XCTAssertTrue(exists(quickTime.appendingPathComponent("Wallpaper.qt")))
+        XCTAssertTrue(exists(unknown.appendingPathComponent("notes")))
     }
 
     func testAReferenceMatchesAFolderInAnyCase() throws {
@@ -111,16 +116,43 @@ final class DeploymentSweepTests: XCTestCase {
         XCTAssertTrue(exists(dir))
     }
 
-    func testAVideoThatIsASymlinkIsNotAValidEntry() throws {
+    func testAFolderHoldingASymlinkIsKeptAndItsTargetUntouched() throws {
         let fm = FileManager.default
         let victim = root.appendingPathComponent("movie.mov")
         try Data("keep".utf8).write(to: victim)
         let dir = try entry(UUID().uuidString, files: ["metadata.json"])
         try fm.createSymbolicLink(at: dir.appendingPathComponent("Wallpaper.mov"), withDestinationURL: victim)
         try fm.setAttributes([.modificationDate: old], ofItemAtPath: dir.path)
-        _ = sweep()
-        XCTAssertFalse(exists(dir))
+        XCTAssertEqual(sweep().entries, [])
+        XCTAssertTrue(exists(dir.appendingPathComponent("Wallpaper.mov")))
         XCTAssertTrue(exists(victim))
+    }
+
+    func testAFolderThatCannotBeListedIsKept() throws {
+        let fm = FileManager.default
+        let dir = try entry(UUID().uuidString, files: ["thumbnail.jpg"])
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: dir.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
+        XCTAssertEqual(sweep().entries, [])
+        XCTAssertTrue(exists(dir))
+    }
+
+    func testAFolderLeftAsideByAStoppedSweepIsFinished() throws {
+        let fm = FileManager.default
+        func aside(_ files: [String]) throws -> (id: String, url: URL) {
+            let id = UUID().uuidString.lowercased()
+            let url = videos.appendingPathComponent(".sweep-" + id)
+            try fm.moveItem(at: try entry(id, files: files), to: url)
+            return (id, url)
+        }
+        let gainedVideo = try aside(["thumbnail.jpg", "wallpaper.mov"])
+        let bookkeeping = try aside(["thumbnail.jpg"])
+        let referenced = try aside(["metadata.json"])
+
+        XCTAssertEqual(sweep(referenced: [referenced.id.uppercased()]).entries, [bookkeeping.id])
+        XCTAssertTrue(exists(videos.appendingPathComponent(gainedVideo.id).appendingPathComponent("wallpaper.mov")))
+        XCTAssertTrue(exists(videos.appendingPathComponent(referenced.id).appendingPathComponent("metadata.json")))
+        for leftover in [gainedVideo, bookkeeping, referenced] { XCTAssertFalse(exists(leftover.url)) }
     }
 
     func testAReferencedEntryIsKept() throws {
@@ -225,11 +257,12 @@ final class DeploymentSweepTests: XCTestCase {
 
     func testStagingThatIsASymlinkIsNotFollowed() throws {
         let fm = FileManager.default
+        // Journaled as a real folder, then replaced by a symlink to another.
+        let link = try stagingFolder("NSIRD_LumaWall_link", modified: old)
+        try fm.moveItem(at: link, to: temporaryItems.appendingPathComponent("moved"))
         let victim = try stagingFolder("victim", modified: old, journaled: false)
-        let link = temporaryItems.appendingPathComponent("NSIRD_LumaWall_link")
         try fm.createSymbolicLink(at: link, withDestinationURL: victim)
-        StagingJournal(fileURL: journal).add(link)
-        _ = sweep()
+        XCTAssertEqual(sweep().stagingFolders, [])
         XCTAssertEqual(try fm.contentsOfDirectory(atPath: victim.path).count, 1)
         XCTAssertTrue(exists(link))
         XCTAssertEqual(journaled, [])
@@ -256,7 +289,8 @@ final class DeploymentSweepTests: XCTestCase {
     func testAJournaledPathNowNamingAnotherFolderIsNotSwept() throws {
         let fm = FileManager.default
         let folder = try stagingFolder("NSIRD_LumaWall_reused", modified: old)
-        try fm.removeItem(at: folder)
+        // Kept alive, so the new folder can't reuse its inode.
+        try fm.moveItem(at: folder, to: temporaryItems.appendingPathComponent("original"))
         try stagingFolder("NSIRD_LumaWall_reused", modified: old, journaled: false)
         XCTAssertEqual(sweep().stagingFolders, [])
         XCTAssertEqual(try fm.contentsOfDirectory(atPath: folder.path).count, 1)

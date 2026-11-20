@@ -26,11 +26,18 @@ extension NativeWallpaperDeployment {
     static let sweepMinimumAge: TimeInterval = 3600
 
     /// Deletes, from `videosFolderURL`, each entry folder (named by a UUID)
-    /// that is not in `referenced`, holds no valid published entry
-    /// (metadata.json for its own ID naming a regular file beside it), holds
-    /// no video file at all, and hasn't changed for `sweepMinimumAge`. A
-    /// bare video is kept: the extension lists it, and the legacy migration
-    /// moves a user's only copy into a folder before writing its metadata. Then deletes the deploy staging
+    /// that is not in `referenced`, hasn't changed for `sweepMinimumAge`
+    /// and holds nothing but the bookkeeping an entry carries
+    /// (`isBookkeepingOnly`). Anything else, a video in particular, keeps
+    /// the folder: the extension lists a bare video, and its legacy
+    /// migration moves the user's only copy into a new folder before it
+    /// writes metadata. A folder holding only bookkeeping has no published
+    /// entry, so the extension doesn't list it either.
+    ///
+    /// The folder is moved aside to `.sweep-<ID>` before the delete and
+    /// checked again there. A writer that adds a file by path after the
+    /// first check, such as that migration, then fails instead of adding it
+    /// to a folder about to go; a folder that gained anything goes back. Then deletes the deploy staging
     /// folders listed in the journal at `stagingJournalURL` that aren't in
     /// `activeStaging`, haven't changed for that long and hold only staged
     /// entries.
@@ -51,14 +58,23 @@ extension NativeWallpaperDeployment {
         // Folder names may be any case; the library's IDs are uppercase.
         let referenced = Set(referenced.compactMap(UUID.init(uuidString:)))
         if let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) {
-            for item in (try? videos.entries()) ?? [] where item.kind == .directory {
+            let items = (try? videos.entries()) ?? []
+            // A sweep stopped between moving a folder aside and deciding.
+            for item in items where item.kind == .directory && item.name.hasPrefix(asidePrefix) {
+                let name = String(item.name.dropFirst(asidePrefix.count))
+                guard let id = UUID(uuidString: name) else { continue }
+                if entryLock.withLock({ finishSweep(of: name, in: videos, keep: referenced.contains(id)) }) {
+                    result.entries.append(name)
+                }
+            }
+            for item in items where item.kind == .directory {
                 guard let id = UUID(uuidString: item.name), !referenced.contains(id) else { continue }
                 let removed = entryLock.withLock { () -> Bool in
                     guard isOld(videosFolderURL.appendingPathComponent(item.name), now: now),
-                        let folder = try? videos.subdirectory(item.name),
-                        !hasPublishedEntry(id: item.name, in: folder), !holdsVideo(folder)
+                        let folder = try? videos.subdirectory(item.name), isBookkeepingOnly(folder),
+                        (try? videos.renameItem(named: item.name, to: asidePrefix + item.name)) != nil
                     else { return false }
-                    return (try? videos.removeItem(named: item.name)) != nil
+                    return finishSweep(of: item.name, in: videos, keep: false)
                 }
                 if removed { result.entries.append(item.name) }
             }
@@ -81,21 +97,32 @@ extension NativeWallpaperDeployment {
         return result
     }
 
-    /// True when the entry in `folder` is one the extension lists from its
-    /// metadata: metadata.json reads, names this ID and a safe filename,
-    /// and that file is a regular file directly in the folder.
-    private static func hasPublishedEntry(id: String, in folder: TrustedDirectory) -> Bool {
-        guard let entry = entry(id: id, inEntry: folder) else { return false }
-        return (try? folder.kind(ofItemNamed: entry.filename)) == .file
+    /// Where a folder waits while the sweep decides: hidden, and not a
+    /// UUID, so the extension's scan skips it.
+    private static let asidePrefix = ".sweep-"
+
+    /// Deletes `.sweep-<name>` if it still holds only bookkeeping and
+    /// `keep` is false; otherwise moves it back to `name`. True when
+    /// deleted. A folder that can't go back (the name was taken meanwhile)
+    /// stays aside for the next sweep.
+    private static func finishSweep(of name: String, in videos: TrustedDirectory, keep: Bool) -> Bool {
+        let aside = asidePrefix + name
+        if !keep, let folder = try? videos.subdirectory(aside), isBookkeepingOnly(folder),
+            (try? videos.removeItem(named: aside)) != nil
+        {
+            return true
+        }
+        try? videos.renameItem(named: aside, to: name)
+        return false
     }
 
-    /// True when a regular file with a video extension the extension
-    /// recovers (`LibraryEntryScan.videoExtensions`) is directly in `folder`.
-    private static func holdsVideo(_ folder: TrustedDirectory) -> Bool {
-        let videoExtensions: Set = ["mp4", "mov", "m4v"]
-        return ((try? folder.entries()) ?? []).contains {
-            $0.kind == .file && videoExtensions.contains(($0.name as NSString).pathExtension.lowercased())
-        }
+    /// True when `folder` lists cleanly and holds nothing but regular files
+    /// named `metadata.json` or `thumbnail.jpg`, or nothing at all. A
+    /// listing that fails, or an item whose type can't be read, counts as
+    /// something to keep.
+    private static func isBookkeepingOnly(_ folder: TrustedDirectory) -> Bool {
+        guard let items = try? folder.entries() else { return false }
+        return items.allSatisfy { $0.kind == .file && ["metadata.json", "thumbnail.jpg"].contains($0.name) }
     }
 
     private enum StagingOutcome { case removed, gone, kept }
