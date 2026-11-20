@@ -118,30 +118,19 @@ enum NativeWallpaperAssignmentStore {
 // MARK: Backup and restore
 
 extension NativeWallpaperAssignmentStore {
-    /// True when every `surfaceKey` surface (Desktop or Idle) of the given
-    /// displays, or of all displays when nil, shows `choiceID`, and each
-    /// given display has at least one. Checks per-display and per-Space
-    /// entries.
-    static func shows(choiceID: String, on surfaceKey: String, of displayUUIDs: Set<String>?, in root: NSDictionary) -> Bool {
-        let expected = Data(choiceID.utf8)
-        var found = Set<String>()
-        var allMatch = true
-        func walk(_ displays: NSDictionary?) {
-            for case let (uuid as String, display as NSDictionary) in displays ?? [:] {
-                guard displayUUIDs?.contains(uuid) ?? true,
-                    let content = (display[surfaceKey] as? NSDictionary)?["Content"] as? NSDictionary
-                else { continue }
-                let first = (content["Choices"] as? [NSDictionary])?.first
-                if first?["Configuration"] as? Data != expected { allMatch = false }
-                found.insert(uuid)
-            }
+    /// Paths of the surfaces that differ between `original` and `root`.
+    static func changedSurfacePaths(from original: NSDictionary, to root: NSDictionary) -> [[String]] {
+        surfacePaths(in: root).filter { path in
+            !((value(at: path, in: root) as? NSDictionary)?.isEqual(value(at: path, in: original)) ?? false)
         }
-        walk(root["Displays"] as? NSDictionary)
-        for case let space as NSDictionary in (root["Spaces"] as? NSDictionary)?.allValues ?? [] {
-            walk(space["Displays"] as? NSDictionary)
+    }
+
+    /// True when every surface at `paths` in `check` equals the one in `expected`.
+    static func surfaces(at paths: [[String]], in check: NSDictionary, match expected: NSDictionary) -> Bool {
+        paths.allSatisfy { path in
+            guard let wanted = value(at: path, in: expected) as? NSDictionary else { return true }
+            return wanted.isEqual(value(at: path, in: check))
         }
-        guard allMatch else { return false }
-        return displayUUIDs.map { found.isSuperset(of: $0) } ?? !found.isEmpty
     }
 
     /// Key paths to every surface in the store: any dictionary whose
@@ -222,7 +211,7 @@ extension NativeWallpaperAssignmentStore {
         return result
     }
 
-    private static func value(at path: [String], in root: NSDictionary) -> Any? {
+    static func value(at path: [String], in root: NSDictionary) -> Any? {
         var node: Any? = root
         for key in path { node = (node as? NSDictionary)?[key] }
         return node
