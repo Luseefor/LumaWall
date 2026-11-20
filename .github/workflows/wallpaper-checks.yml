@@ -20,11 +20,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-26]
+        # The job names are required checks; keep the runner labels.
+        # Each runner pins its own Xcode. 26.3 is the oldest toolchain the
+        # app supports. macos-26 has no Xcode 27 yet (that lives only on the
+        # xcode-27 preview image), so both stay on 26.3 for now.
+        include:
+          - runner: macos-15
+            xcode: /Applications/Xcode_26.3.app
+          - runner: macos-26
+            xcode: /Applications/Xcode_26.3.app
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVELOPER_DIR: ${{ matrix.xcode }}/Contents/Developer
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,6 +53,7 @@ jobs:
           "$RUNNER_TEMP/xcodegen/bin/xcodegen" --version
       - name: Show selected toolchain
         run: |
+          test -d "$DEVELOPER_DIR" || { echo "::error::$DEVELOPER_DIR is not on this image"; exit 1; }
           xcodebuild -version
           swift --version
       - name: Check wallpaper playback and release build
