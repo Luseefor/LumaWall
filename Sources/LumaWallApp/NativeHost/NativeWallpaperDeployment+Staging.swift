@@ -83,14 +83,19 @@ extension NativeWallpaperDeployment {
     }
 
     /// True when `name` is a regular file directly inside the entry folder,
-    /// with no symlink on the way. Folders outside the extension's container
-    /// (tests) are opened from `videosFolderURL` itself.
+    /// with no symlink on the way.
     static func isRegularFile(_ name: String, inEntry id: String, videosFolderURL: URL = videosFolderURL) -> Bool {
         guard PathSafety.isValidEntryID(id), PathSafety.isSafeComponent(name) else { return false }
-        let container = containerURL.standardizedFileURL.pathComponents
-        let ancestor =
-            videosFolderURL.standardizedFileURL.pathComponents.starts(with: container) ? containerURL : videosFolderURL
-        let videos = try? TrustedDirectory(url: videosFolderURL, below: ancestor)
+        let videos = try? trustedFolder(videosFolderURL)
         return (try? videos?.subdirectory(id).kind(ofItemNamed: name)) == .file
+    }
+
+    /// `url` opened with no symlink followed below the extension's
+    /// container. A folder outside the container (tests) is opened from
+    /// itself, refusing only a symlink as its last component.
+    static func trustedFolder(_ url: URL) throws -> TrustedDirectory {
+        let container = containerURL.standardizedFileURL.pathComponents
+        let ancestor = url.standardizedFileURL.pathComponents.starts(with: container) ? containerURL : url
+        return try TrustedDirectory(url: url, below: ancestor)
     }
 }

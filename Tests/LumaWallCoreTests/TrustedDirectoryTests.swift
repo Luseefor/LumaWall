@@ -202,4 +202,53 @@ struct TrustedDirectoryTests {
         #expect(fm.fileExists(atPath: root.appendingPathComponent(".a/clip.mov").path))
         #expect(throws: POSIXError.self) { try dir.renameItem(named: ".a", to: "../out") }
     }
+
+    @Test func writeReplacesAFileInOneStep() throws {
+        let (root, _, cleanup) = try makeTree()
+        defer { cleanup() }
+        let dir = try TrustedDirectory(url: root)
+        try dir.writeFile(named: "metadata.json", contents: Data("one".utf8))
+        try dir.writeFile(named: "metadata.json", contents: Data("two".utf8))
+        #expect(try Data(contentsOf: root.appendingPathComponent("metadata.json")) == Data("two".utf8))
+        #expect(try fm.contentsOfDirectory(atPath: root.path) == ["metadata.json"])
+    }
+
+    @Test func writeOverASymlinkReplacesTheLinkNotItsTarget() throws {
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        let link = root.appendingPathComponent("metadata.json")
+        try fm.createSymbolicLink(at: link, withDestinationURL: victim.appendingPathComponent("precious.txt"))
+
+        try TrustedDirectory(url: root).writeFile(named: "metadata.json", contents: Data("new".utf8))
+        #expect(try Data(contentsOf: victim.appendingPathComponent("precious.txt")) == Data("keep".utf8))
+        #expect(try TrustedDirectory(url: root).kind(ofItemNamed: "metadata.json") == .file)
+        #expect(try Data(contentsOf: link) == Data("new".utf8))
+    }
+
+    @Test func aFailedWriteLeavesNothingBehind() throws {
+        let (root, _, cleanup) = try makeTree()
+        defer { cleanup() }
+        try fm.createDirectory(at: root.appendingPathComponent("metadata.json"), withIntermediateDirectories: false)
+        let dir = try TrustedDirectory(url: root)
+        #expect(throws: POSIXError.self) { try dir.writeFile(named: "metadata.json", contents: Data("x".utf8)) }
+        #expect(try fm.contentsOfDirectory(atPath: root.path) == ["metadata.json"])
+        #expect(throws: POSIXError.self) { try dir.writeFile(named: "../out.json", contents: Data("x".utf8)) }
+    }
+
+    @Test func makesASubfolderOrOpensTheOneThere() throws {
+        let (root, _, cleanup) = try makeTree()
+        defer { cleanup() }
+        let dir = try TrustedDirectory(url: root)
+        try dir.makeSubdirectory(named: "copy-staging").writeFile(named: "a", contents: Data("x".utf8))
+        // A second call opens the same folder.
+        #expect(try dir.makeSubdirectory(named: "copy-staging").kind(ofItemNamed: "a") == .file)
+    }
+
+    @Test func makingASubfolderRefusesASymlinkInItsPlace() throws {
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        try fm.createSymbolicLink(at: root.appendingPathComponent("copy-staging"), withDestinationURL: victim)
+        #expect(throws: POSIXError.self) { try TrustedDirectory(url: root).makeSubdirectory(named: "copy-staging") }
+        #expect(try fm.contentsOfDirectory(atPath: victim.path) == ["precious.txt"])
+    }
 }

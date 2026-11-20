@@ -141,11 +141,15 @@ extension NativeWallpaperDeployment {
     private static let encodeQueue = VariantEncodeQueue(
         readiness: { readiness(of: $0) },
         encode: { job in
-            let fm = FileManager.default
             let staged = stagedURL(for: job)
+            // Made through the container's descriptors, so a symlinked
+            // Documents folder can't put copy-staging somewhere else.
+            guard
+                let staging = try? trustedFolder(stagingFolderURL.deletingLastPathComponent())
+                    .makeSubdirectory(named: stagingFolderURL.lastPathComponent)
+            else { return .failed }
             // A finished export whose publication failed is reused, not redone.
-            if !fm.fileExists(atPath: staged.path) {
-                try? fm.createDirectory(at: stagingFolderURL, withIntermediateDirectories: true)
+            if !reusableExport(named: staged.lastPathComponent, in: staging) {
                 let result = await transcode(sourceURL: job.sourceURL, to: staged, spec: job.spec) {
                     if case .ready = readiness(of: job) { return true }
                     return false
@@ -157,7 +161,11 @@ extension NativeWallpaperDeployment {
                 }
             }
             guard let resolution = await videoSize(of: staged) else {
-                try? fm.removeItem(at: staged)
+                // The probe went by path; delete only if that path still
+                // names the folder checked above.
+                if let current = try? trustedFolder(stagingFolderURL).identity(), current == (try? staging.identity()) {
+                    try? staging.removeFile(named: staged.lastPathComponent)
+                }
                 return .failed
             }
             // Publishing writes into the extension's container.
@@ -176,6 +184,20 @@ extension NativeWallpaperDeployment {
         }
     )
 
+    /// True when a regular file sits at `name` in `staging`, ready to
+    /// publish. Anything else there (a folder, a symlink) would fail every
+    /// publish and survive cleanup, so it's deleted, without following
+    /// symlinks, and the copy is encoded again.
+    static func reusableExport(named name: String, in staging: TrustedDirectory) -> Bool {
+        switch try? staging.kind(ofItemNamed: name) {
+        case .file: return true
+        case nil: return false
+        default:
+            try? staging.removeItem(named: name)
+            return false
+        }
+    }
+
     private static func isRecorded(_ spec: VariantSpec, in entry: EntryInfo) -> Bool {
         guard (entry.variants ?? []).contains(where: { $0.filename == spec.filename && $0.fps == spec.recordedFPS }) else { return false }
         return isRegularFile(spec.filename, inEntry: entry.id)
@@ -192,41 +214,56 @@ extension NativeWallpaperDeployment {
     /// the export when the entry no longer holds the source it was made from.
     /// When metadata.json can't be written the export goes back to staging,
     /// so a retry publishes it without encoding again.
+    ///
+    /// The staging and entry folders are opened through `TrustedDirectory`
+    /// and every read, move and delete goes through their descriptors, so
+    /// a folder swapped for a symlink fails the publish instead of steering
+    /// it elsewhere.
     static func publish(
         _ staged: URL,
         job: VariantEncodeQueue.Job,
         resolution: CGSize,
         videosFolderURL: URL = videosFolderURL,
-        writeMetadata: (EntryInfo, URL) throws -> Void = { entry, url in
-            try JSONEncoder().encode(entry).write(to: url, options: .atomic)
+        writeMetadata: (EntryInfo, TrustedDirectory) throws -> Void = { entry, folder in
+            try folder.writeFile(named: "metadata.json", contents: JSONEncoder().encode(entry))
         }
     ) -> PublishResult {
         entryLock.withLock {
-            let fm = FileManager.default
+            let stagedName = staged.lastPathComponent
+            guard let staging = try? trustedFolder(staged.deletingLastPathComponent()) else { return .failed }
+            // Stale only when the entry is known gone or holds another
+            // source. A folder that can't be opened safely (a symlink in
+            // place of videos or the entry) keeps the export for a retry.
+            guard let videos = try? trustedFolder(videosFolderURL) else { return .failed }
+            let folder: TrustedDirectory
+            do {
+                folder = try videos.subdirectory(job.entryID)
+            } catch POSIXError.ENOENT {
+                try? staging.removeFile(named: stagedName)
+                return .stale
+            } catch {
+                return .failed
+            }
             let current: EntryInfo
             do {
-                guard let entry = try entry(id: job.entryID, videosFolderURL: videosFolderURL),
-                    entry.contentHash == job.contentHash
-                else {
-                    try? fm.removeItem(at: staged)
+                guard let entry = try entry(id: job.entryID, readingFrom: folder), entry.contentHash == job.contentHash else {
+                    try? staging.removeFile(named: stagedName)
                     return .stale
                 }
                 current = entry
             } catch {
                 return .failed
             }
-            let dir = entryDirectory(job.entryID, videosFolderURL: videosFolderURL)
-            let dest = dir.appendingPathComponent(job.spec.filename)
-            try? fm.removeItem(at: dest)
-            do { try fm.moveItem(at: staged, to: dest) } catch { return .failed }
+            let name = job.spec.filename
+            do { try staging.publishItem(named: stagedName, into: folder, as: name) } catch { return .failed }
             var updated = current
-            let listed = (current.variants ?? []).filter { fm.fileExists(atPath: dir.appendingPathComponent($0.filename).path) }
-            let variant = NativeVideoVariant(filename: job.spec.filename, fps: job.spec.recordedFPS, resolution: resolution)
+            let listed = (current.variants ?? []).filter { (try? folder.kind(ofItemNamed: $0.filename)) == .file }
+            let variant = NativeVideoVariant(filename: name, fps: job.spec.recordedFPS, resolution: resolution)
             updated.variants = merging(listed, with: [variant])
             do {
-                try writeMetadata(updated, dir.appendingPathComponent("metadata.json"))
+                try writeMetadata(updated, folder)
             } catch {
-                try? fm.moveItem(at: dest, to: staged)
+                try? folder.publishItem(named: name, into: staging, as: stagedName)
                 return .failed
             }
             return .published
@@ -252,7 +289,7 @@ extension NativeWallpaperDeployment {
                     !file.name.hasSuffix(".partial.mov")
                     && parts.count == 3
                     && PathSafety.isValidEntryID(parts[0])
-                    && entry(id: parts[0], in: videos)?.contentHash == parts[1]
+                    && holdsSource(parts[1], entryID: parts[0], in: videos) != false
                 if !keep { try? staging.removeFile(named: file.name) }
             }
         }
@@ -275,18 +312,28 @@ extension NativeWallpaperDeployment {
         }
     }
 
-    /// metadata.json of entry `id`, read inside `videos` without following
-    /// symlinks; nil when unreadable or listing another ID.
-    private static func entry(id: String, in videos: TrustedDirectory) -> EntryInfo? {
-        guard let folder = try? videos.subdirectory(id) else { return nil }
-        return entry(id: id, inEntry: folder)
+    /// Whether entry `id` still holds the source hashed `hash`: false when
+    /// the entry is gone, holds another source or has no usable metadata;
+    /// nil when its folder or metadata can't be opened safely, which says
+    /// neither.
+    private static func holdsSource(_ hash: String, entryID id: String, in videos: TrustedDirectory) -> Bool? {
+        let folder: TrustedDirectory
+        do {
+            folder = try videos.subdirectory(id)
+        } catch POSIXError.ENOENT {
+            return false
+        } catch {
+            return nil
+        }
+        do {
+            return try entry(id: id, readingFrom: folder)?.contentHash == hash
+        } catch {
+            return nil
+        }
     }
 
     private static func entry(id: String, inEntry folder: TrustedDirectory) -> EntryInfo? {
-        guard let data = try? folder.readFile(named: "metadata.json"),
-            let entry = try? JSONDecoder().decode(EntryInfo.self, from: data)
-        else { return nil }
-        return validated(entry, id: id)
+        (try? entry(id: id, readingFrom: folder)) ?? nil
     }
 
     private static func isLegacyExport(_ name: String) -> Bool {
