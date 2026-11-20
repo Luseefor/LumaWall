@@ -47,6 +47,14 @@ targets:
           - Resources
       - path: Sources/LumaWallApp/Resources
         buildPhase: resources
+      - path: LICENSE
+        buildPhase: resources
+      - path: NOTICE
+        buildPhase: resources
+      - path: THIRD_PARTY_NOTICES.md
+        buildPhase: resources
+      - path: Packaging/PrivacyInfo.xcprivacy
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal
@@ -79,8 +87,15 @@ targets:
           - Info.plist
           - NOTICE
           - LICENSE-Phosphene
+          - PrivacyInfo.xcprivacy
           - WallpaperExtension-Bridging-Header.h
           - LumaWallWallpaper.entitlements
+      - path: WallpaperExtension/NOTICE
+        buildPhase: resources
+      - path: WallpaperExtension/LICENSE-Phosphene
+        buildPhase: resources
+      - path: WallpaperExtension/PrivacyInfo.xcprivacy
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.lumawall.personal.wallpaper

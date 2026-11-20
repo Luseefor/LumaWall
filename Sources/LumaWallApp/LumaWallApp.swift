@@ -15,6 +15,7 @@ import SwiftUI
     @main
     struct LumaWallApp: App {
         @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+        @Environment(\.openWindow) private var openWindow
         @State private var model = AppModel()
 
         var body: some Scene {
@@ -25,6 +26,26 @@ import SwiftUI
             .defaultSize(width: 1_280, height: 840)
             .windowStyle(.hiddenTitleBar)
             .windowToolbarStyle(.unifiedCompact)
+            .commands {
+                CommandGroup(replacing: .appInfo) {
+                    Button("About LumaWall") {
+                        NSApp.setActivationPolicy(.regular)
+                        NSApp.activate(ignoringOtherApps: true)
+                        openWindow(id: AboutWindow.id)
+                    }
+                    Divider()
+                    Button("Check for Updates…") {
+                        NSWorkspace.shared.open(AboutLinks.releases)
+                    }
+                }
+            }
+
+            Window("About LumaWall", id: AboutWindow.id) {
+                AboutView()
+            }
+            .windowResizability(.contentSize)
+            .windowStyle(.hiddenTitleBar)
+            .windowBackgroundDragBehavior(.enabled)
 
             MenuBarExtra {
                 MenuBarPopover(model: model)

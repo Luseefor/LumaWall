@@ -77,6 +77,10 @@ public struct WallpaperAutomations: Codable, Equatable, Sendable {
         self.lockScreenWallpaperID = lockScreenWallpaperID
     }
 
+    public var isSolarScheduleActive: Bool {
+        dayNightEnabled && useSunriseSunset
+    }
+
     public func isDayPeriod(
         at date: Date = .now,
         calendar: Calendar = .current,

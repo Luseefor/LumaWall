@@ -13,6 +13,7 @@ extension AppModel {
         playlists = await playlistStore.all()
         await restorePlaylistPlaybackState()
         automations = await automationStore.current()
+        syncSolarLocation()
         displays = displayCoordinator.refresh()
         await engine.restoreOverlay(using: assets)
         refreshActive()
@@ -25,9 +26,6 @@ extension AppModel {
         evaluateAutomations(force: false)
         notePlaylistLoginIfNeeded()
         await refreshEnergyReport()
-        if automations.useSunriseSunset {
-            LocationDaylightProvider.shared.requestIfNeeded()
-        }
         if let lockID = automations.lockScreenWallpaperID,
             let asset = assets.first(where: { $0.id == lockID })
         {

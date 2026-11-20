@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 @MainActor
@@ -12,8 +13,8 @@ enum WallpaperStoreProbe {
 
     private struct Stamp: Equatable {
         var url: URL
-        var modified: Date
         var size: Int
+        var digest: Data
     }
 
     private static var cached: (stamp: Stamp, isOurs: Bool)?
@@ -21,25 +22,20 @@ enum WallpaperStoreProbe {
     /// True when any Idle/screensaver choice is owned by the LumaWall wallpaper extension.
     ///
     /// The store lists every Space and runs to hundreds of KB. Playback policy
-    /// asks on every power and workspace event, so the answer is reused until
-    /// the file's modification date or size changes.
+    /// asks on every power and workspace event, so the parsed answer is reused
+    /// while the file's size and SHA-256 digest match (avoiding file-timestamp
+    /// reads outside the app container).
     static func screenSaverIsOurs(storeURL: URL? = nil) -> Bool {
         let url = storeURL ?? defaultStoreURL
-        // attributesOfItem reads fresh; URL.resourceValues caches per URL value.
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-            let modified = attributes[.modificationDate] as? Date,
-            let size = (attributes[.size] as? NSNumber)?.intValue
-        else {
+        guard let data = try? Data(contentsOf: url) else {
             cached = nil
             return false
         }
-        let stamp = Stamp(url: url, modified: modified, size: size)
+        let stamp = Stamp(url: url, size: data.count, digest: Data(SHA256.hash(data: data)))
         if let cached, cached.stamp == stamp { return cached.isOurs }
         parseCount += 1
-        // Cache only a successful read: a transient failure (permissions, a
-        // half-written file) keeps the same stamp and must be retried.
-        guard let data = try? Data(contentsOf: url),
-            let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        // Cache only a successful parse: a half-written plist must be retried.
+        guard let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
         else {
             cached = nil
             return false

@@ -281,7 +281,6 @@ final class AppModel {
             startEnergyLogging()
             observeAppearanceChanges()
             observeAutomationClockChanges()
-            observeFirstLocationFix()
             observeReduceMotion()
             observeScreenChanges()
             observeDesktopCoverage()
