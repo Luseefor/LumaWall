@@ -172,7 +172,7 @@ extension NativeWallpaperDeployment {
 
     private static func isRecorded(_ spec: VariantSpec, in entry: EntryInfo) -> Bool {
         guard (entry.variants ?? []).contains(where: { $0.filename == spec.filename && $0.fps == spec.recordedFPS }) else { return false }
-        return FileManager.default.fileExists(atPath: entryDirectory(entry.id).appendingPathComponent(spec.filename).path)
+        return isRegularFile(spec.filename, inEntry: entry.id)
     }
 
     /// Held while a copy is published and while deploy clears an entry, so a
@@ -278,9 +278,9 @@ extension NativeWallpaperDeployment {
 
     private static func entry(id: String, inEntry folder: TrustedDirectory) -> EntryInfo? {
         guard let data = try? folder.readFile(named: "metadata.json"),
-            let entry = try? JSONDecoder().decode(EntryInfo.self, from: data), entry.id == id
+            let entry = try? JSONDecoder().decode(EntryInfo.self, from: data)
         else { return nil }
-        return entry
+        return validated(entry, id: id)
     }
 
     private static func isLegacyExport(_ name: String) -> Bool {

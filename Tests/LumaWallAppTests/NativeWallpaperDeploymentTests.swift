@@ -1,4 +1,5 @@
 import AVFoundation
+import CryptoKit
 import Foundation
 import LumaWallCore
 import XCTest
@@ -122,6 +123,59 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         let unknown = NativeWallpaperDeployment.previewURL(
             entryID: UUID().uuidString, minPixelWidth: 640, fallback: original, videosFolderURL: videos)
         XCTAssertEqual(unknown, original)
+    }
+
+    func testDecodedEntryMustMatchItsFolderAndUseSafeNames() throws {
+        // IDs and filenames from metadata.json were trusted as written, and
+        // the extension's container is writable by the extension.
+        let fm = FileManager.default
+        let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: videos) }
+        func write(_ entry: NativeWallpaperDeployment.EntryInfo, in id: String) throws {
+            let dir = videos.appendingPathComponent(id)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try JSONEncoder().encode(entry).write(to: dir.appendingPathComponent("metadata.json"))
+        }
+        func entry(id: String, filename: String, variants: [NativeWallpaperDeployment.NativeVideoVariant]? = nil)
+            -> NativeWallpaperDeployment.EntryInfo
+        {
+            .init(
+                id: id, name: "x", filename: filename, duration: 5, fps: 30,
+                resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants)
+        }
+        let borrowed = UUID().uuidString
+        try write(entry(id: UUID().uuidString, filename: "Wallpaper.mov"), in: borrowed)
+        XCTAssertNil(try NativeWallpaperDeployment.entry(id: borrowed, videosFolderURL: videos))
+
+        let escaping = UUID().uuidString
+        try write(entry(id: escaping, filename: "../../Documents/thesis.pages"), in: escaping)
+        XCTAssertNil(try NativeWallpaperDeployment.entry(id: escaping, videosFolderURL: videos))
+
+        let mixed = UUID().uuidString
+        let bad = NativeWallpaperDeployment.NativeVideoVariant(
+            filename: "../other/Wallpaper.minimal.mov", fps: 30, resolution: CGSize(width: 640, height: 360))
+        try write(entry(id: mixed, filename: "Wallpaper.mov", variants: [bad, variants[1]]), in: mixed)
+        XCTAssertEqual(try NativeWallpaperDeployment.entry(id: mixed, videosFolderURL: videos)?.variants, [variants[1]])
+    }
+
+    @MainActor
+    func testPreviewIgnoresACopyThatIsASymlink() throws {
+        let fm = FileManager.default
+        let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: videos) }
+        let id = UUID().uuidString
+        let dir = videos.appendingPathComponent(id)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: "Wallpaper.mp4", duration: 5, fps: 30,
+            resolution: CGSize(width: 3840, height: 2160), dateAdded: Date(), variants: variants
+        )
+        try JSONEncoder().encode(entry).write(to: dir.appendingPathComponent("metadata.json"))
+        let outside = videos.appendingPathComponent("outside.mov")
+        try Data().write(to: outside)
+        try fm.createSymbolicLink(at: dir.appendingPathComponent("Wallpaper.minimal.mov"), withDestinationURL: outside)
+
+        XCTAssertNil(NativeWallpaperDeployment.thumbnailPreviewURL(entryID: id, minPixelWidth: 640, videosFolderURL: videos))
     }
 
     func testSmallPreviewShowsPosterWhenNoCopyIsWideEnough() {
@@ -359,6 +413,85 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         // Irregular sources (29.75 nominal, 204 frames in 6.79 s) round to the
         // nearest whole rate; the shortest frame gap gave one extra frame.
         XCTAssertEqual(duration(29.75), CMTime(value: 1, timescale: 30))
+    }
+}
+
+/// Deploy copies the library file into a staging folder outside the
+/// `videos` folder the extension scans, then moves the finished entry in
+/// with one rename.
+final class DeploymentStagingTests: XCTestCase {
+    private var root: URL!
+    private let id = UUID().uuidString
+    private var videos: URL { root.appendingPathComponent("videos") }
+    private var staging: URL { root.appendingPathComponent("deploy-staging") }
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func source(_ text: String) throws -> URL {
+        let url = root.appendingPathComponent("library-\(UUID().uuidString).mov")
+        try Data(text.utf8).write(to: url)
+        return url
+    }
+
+    private func stage(_ source: URL) throws -> NativeWallpaperDeployment.StagedDeployment {
+        try NativeWallpaperDeployment.stageDeployment(
+            source: source, entryID: id, filename: "Wallpaper.mov", stagingFolderURL: staging,
+            videosFolderURL: videos, trustedAncestor: root)
+    }
+
+    private func publish(_ staged: NativeWallpaperDeployment.StagedDeployment) throws {
+        try NativeWallpaperDeployment.publishDeployment(
+            staged, stagingFolderURL: staging, videosFolderURL: videos, trustedAncestor: root)
+    }
+
+    func testStagingHappensOutsideTheScannedFolder() throws {
+        // The entry folder was created in videos/ before the copy, so a scan
+        // could see it empty or half-written.
+        let staged = try stage(try source("v1"))
+        XCTAssertEqual(staged.hash, SHA256.hash(data: Data("v1".utf8)).map { String(format: "%02x", $0) }.joined())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: videos.appendingPathComponent(id).path))
+        XCTAssertEqual(try Data(contentsOf: staged.videoURL), Data("v1".utf8))
+
+        try publish(staged)
+        let published = videos.appendingPathComponent(id).appendingPathComponent("Wallpaper.mov")
+        XCTAssertEqual(try Data(contentsOf: published), Data("v1".utf8))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staging.path), [])
+    }
+
+    func testRedeployReplacesTheWholeEntry() throws {
+        try publish(try stage(try source("v1")))
+        try Data("old copy".utf8).write(to: videos.appendingPathComponent(id).appendingPathComponent("Wallpaper.minimal.mov"))
+        try publish(try stage(try source("v2")))
+        let dir = videos.appendingPathComponent(id)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["Wallpaper.mov"])
+        XCTAssertEqual(try Data(contentsOf: dir.appendingPathComponent("Wallpaper.mov")), Data("v2".utf8))
+    }
+
+    func testPublishOverASymlinkedEntryLeavesItsTarget() throws {
+        let fm = FileManager.default
+        let victim = root.appendingPathComponent("Documents", isDirectory: true)
+        try fm.createDirectory(at: victim, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: victim.appendingPathComponent("thesis.pages"))
+        try fm.createDirectory(at: videos, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: videos.appendingPathComponent(id), withDestinationURL: victim)
+
+        try publish(try stage(try source("v1")))
+        XCTAssertTrue(fm.fileExists(atPath: victim.appendingPathComponent("thesis.pages").path))
+        XCTAssertNil(try? fm.destinationOfSymbolicLink(atPath: videos.appendingPathComponent(id).path))
+    }
+
+    func testAnInterruptedStageIsClearedOnTheNextDeploy() throws {
+        let first = try stage(try source("v1"))
+        let second = try stage(try source("v2"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.directoryURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.directoryURL.path))
     }
 }
 
