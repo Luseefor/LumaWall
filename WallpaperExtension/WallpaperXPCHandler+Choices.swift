@@ -171,16 +171,20 @@ extension WallpaperXPCHandler {
         let identifier = (menuItemID as? String) ?? String(describing: menuItemID ?? "nil")
         extensionLog("=== CONTEXT MENU ACTION === identifier: \(identifier)")
 
-        let urlByAction = [
-            "add-video": "lumawall://add-video",
-            "manage-library": "lumawall://library",
-        ]
-        if let urlString = urlByAction[identifier], let url = URL(string: urlString) {
-            extensionLog("  Launching companion app via NSWorkspace: \(urlString)")
-            let opened = NSWorkspace.shared.open(url)
-            traceLog("  NSWorkspace.open = \(opened)")
+        guard CompanionLaunch.launchesCompanion(identifier) else {
+            reply(nil)
+            return
         }
-
-        reply(nil)
+        switch CompanionLaunch.verifiedCompanion() {
+        case let .success(app):
+            extensionLog("  Opening the companion app")
+            NSWorkspace.shared.openApplication(at: app, configuration: CompanionLaunch.openConfiguration()) { _, error in
+                if let error { extensionLog("  [Companion] Open failed: \(LogRedaction.describe(error))") }
+                reply(error)
+            }
+        case let .failure(reason):
+            extensionLog("  [Companion] Not opening the companion app: \(reason)")
+            reply(reason)
+        }
     }
 }
