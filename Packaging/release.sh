@@ -71,16 +71,33 @@ app_path="${archive_path}/Products/Applications/LumaWall.app"
 
 cleanup() {
     local lsregister="${LUMAWALL_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
-    if [[ -d "${derived_data_path}" ]]; then
+    if [[ -n "${derived_data_path:-}" && -d "${derived_data_path}" ]]; then
         "${project_root}/ci/unregister-builds.sh" "${derived_data_path}" || true
     fi
-    if [[ -d "${app_path}" ]]; then
+    if [[ -n "${app_path:-}" && -d "${app_path}" ]]; then
         pluginkit -r "${app_path}/Contents/Extensions/LumaWallWallpaper.appex" 2>/dev/null || true
         "${lsregister}" -u "${app_path}" 2>/dev/null || true
     fi
-    rm -rf "${staging_dir}"
+    if [[ -n "${staging_dir:-}" ]]; then
+        rm -rf "${staging_dir}"
+    fi
 }
+
+on_int() {
+    trap - EXIT INT TERM
+    cleanup
+    exit 130
+}
+
+on_term() {
+    trap - EXIT INT TERM
+    cleanup
+    exit 143
+}
+
 trap cleanup EXIT
+trap on_int INT
+trap on_term TERM
 
 "${project_root}/ci/xcodegen.sh" generate
 xcodebuild \

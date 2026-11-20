@@ -188,14 +188,23 @@ case " $* " in
   *" test "*) exit 44 ;;
   *" archive "*)
     archive_path=""
+    derived_path=""
     prev=""
     for arg in "$@"; do
       if [[ "$prev" == "-archivePath" ]]; then
         archive_path="$arg"
-        break
+      elif [[ "$prev" == "-derivedDataPath" ]]; then
+        derived_path="$arg"
       fi
       prev="$arg"
     done
+    if [[ -n "${LUMAWALL_FAKE_ARCHIVE_SIGNAL:-}" ]]; then
+      mkdir -p "$derived_path/Build/Products/Release/LumaWall.app/Contents/Extensions/LumaWallWallpaper.appex"
+      printf '%s\n' "$(dirname "$derived_path")" > "$LUMAWALL_GATE_MARKERS/staging-dir.txt"
+      kill "-${LUMAWALL_FAKE_ARCHIVE_SIGNAL}" "$PPID"
+      sleep 5
+      exit 0
+    fi
     mkdir -p "$archive_path/Products/Applications/LumaWall.app/Contents/MacOS"
     cat > "$archive_path/Products/Applications/LumaWall.app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -254,6 +263,13 @@ LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_SPCTL_EXIT=1 expect_exit 1 z
 [[ -e "$fixture_dir/pinned" ]] || fail "line $LINENO"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
 [[ ! -e "$fixture_dir/dist/SHA256SUMS" ]] || fail "line $LINENO"
+
+# SIGTERM during archive must still unregister builds, remove staging, and exit non-zero.
+rm -f "$fixture_dir/unregistered" "$fixture_dir/staging-dir.txt"
+LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_ARCHIVE_SIGNAL=TERM expect_exit 143 zsh "$fixture_dir/Packaging/release.sh"
+grep -Fq "pluginkit -r " "$fixture_dir/unregistered" || fail "line $LINENO"
+grep -Fq "lsregister -u " "$fixture_dir/unregistered" || fail "line $LINENO"
+[[ ! -e "$(cat "$fixture_dir/staging-dir.txt")" ]] || fail "line $LINENO"
 
 # Successful staging notarizes and staples the app before building the DMG, then writes SHA256SUMS.
 rm -f "$fixture_dir/release-steps.log"
