@@ -262,11 +262,14 @@ cat > "$fixture_dir/bin/codesign" <<'SH'
 #!/bin/bash
 case "$1" in
   -dvv)
+    # The path says "flags=runtime" too, which must not count.
     if [[ -n "${LUMAWALL_FAKE_XPC_WITHOUT_RUNTIME:-}" && "$2" == *.xpc ]]; then
-      printf 'flags=0x0(none)\nTimestamp=2026-11-19\n' >&2
+      printf 'Executable=/fixture/flags=runtime/LumaWallMediaService\n' >&2
+      printf 'CodeDirectory v=20500 size=1 flags=0x0(none) hashes=1+1 location=embedded\n' >&2
     else
-      printf 'flags=0x10000(runtime)\nTimestamp=2026-11-19\n' >&2
+      printf 'CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1+1 location=embedded\n' >&2
     fi
+    printf 'Timestamp=2026-11-19\n' >&2
     ;;
   -d)
     exit "${LUMAWALL_FAKE_CODESIGN_ENTITLEMENTS_EXIT:-0}"

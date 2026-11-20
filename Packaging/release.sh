@@ -144,14 +144,13 @@ xcodebuild \
 
 codesign --verify --deep --strict --verbose=2 "${app_path}"
 # Every nested bundle: helper apps, extensions, XPC services, frameworks.
-if ! nested_items="$(find "${app_path}/Contents" -type d \( -name '*.app' -o -name '*.appex' -o -name '*.xpc' -o -name '*.framework' \))"; then
+if ! nested_items="$(find "${app_path}/Contents" -type d \( -name '*.app' -o -name '*.appex' -o -name '*.xpc' -o -name '*.framework' \) -print0)"; then
     print -u2 "Refusing release: failed to enumerate nested code inside ${app_path}."
     exit 3
 fi
-signed_items=()
-while IFS= read -r item; do
-    [[ -n "${item}" ]] && signed_items+=("${item}")
-done <<< "${nested_items}"
+# Split on NUL, so a bundle name holding a newline stays one path.
+signed_items=("${(@0)nested_items}")
+signed_items=(${signed_items:#})
 signed_items+=("${app_path}")
 
 for signed_item in "${signed_items[@]}"; do
@@ -160,7 +159,8 @@ for signed_item in "${signed_items[@]}"; do
         print -u2 "${signature_details}"
         exit 3
     fi
-    if ! grep -q 'flags=.*runtime' <<<"${signature_details}"; then
+    # The CodeDirectory line's flags, not a path that happens to say runtime.
+    if ! grep -Eq '^CodeDirectory .*[[:space:]]flags=0x[0-9a-fA-F]+\([^)]*runtime' <<<"${signature_details}"; then
         print -u2 "Refusing release: Hardened Runtime is missing from ${signed_item}."
         exit 3
     fi
