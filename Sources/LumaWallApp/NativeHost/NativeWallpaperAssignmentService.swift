@@ -50,10 +50,17 @@ struct NativeWallpaperAssignmentService {
     }
 
     let files: any SystemWallpaperFiles
+    /// Folders whose files mark a surface as LumaWall's (see
+    /// `NativeWallpaperAssignmentStore.isOurs`).
+    let ownedFolders: [URL]
     let nativeModeEnabled: () -> Bool
 
     static var live: NativeWallpaperAssignmentService {
-        NativeWallpaperAssignmentService(files: LiveSystemWallpaperFiles()) { NativeModeSetting.standard.isEnabled }
+        NativeWallpaperAssignmentService(
+            files: LiveSystemWallpaperFiles(),
+            ownedFolders: NativeWallpaperAssignmentStore.lumaWallFolders,
+            nativeModeEnabled: { NativeModeSetting.standard.isEnabled }
+        )
     }
 
     /// True once LumaWall has written the wallpaper store, which saves a
@@ -69,15 +76,23 @@ struct NativeWallpaperAssignmentService {
         return (text as String).uppercased()
     }
 
+    @discardableResult
     static func apply(
         entry: NativeWallpaperDeployment.EntryInfo,
         to displayIDs: Set<UInt32>
-    ) throws {
+    ) throws -> Set<UInt32> {
         try apply(assignments: Dictionary(uniqueKeysWithValues: displayIDs.map { ($0, entry) }))
     }
 
-    static func apply(assignments: [UInt32: NativeWallpaperDeployment.EntryInfo]) throws {
+    /// Returns the displays the store has no Desktop entry for. Throws
+    /// `unknownDisplay` when that is all of them.
+    @discardableResult
+    static func apply(assignments: [UInt32: NativeWallpaperDeployment.EntryInfo]) throws -> Set<UInt32> {
         guard #available(macOS 26, *) else { throw AssignmentError.unsupportedSystem }
+        var uuids: [String: UInt32] = [:]
+        for displayID in assignments.keys {
+            if let uuid = stableUUID(for: displayID) { uuids[uuid] = displayID }
+        }
         let stableAssignments = assignments.reduce(into: [String: NativeWallpaperDeployment.EntryInfo]()) {
             if let uuid = stableUUID(for: $1.key) { $0[uuid] = $1.value }
         }
@@ -85,7 +100,9 @@ struct NativeWallpaperAssignmentService {
             nativeHostLog.error("assignment: CoreGraphics returned no stable display UUID")
             throw AssignmentError.unknownDisplay
         }
-        try live.apply(assignments: stableAssignments)
+        let missing = try live.apply(assignments: stableAssignments)
+        let unresolved = Set(assignments.keys).subtracting(uuids.values)
+        return unresolved.union(missing.compactMap { uuids[$0] })
     }
 
     static func applyLockScreen(entry: NativeWallpaperDeployment.EntryInfo) throws {
@@ -97,8 +114,11 @@ struct NativeWallpaperAssignmentService {
         try live.restoreOriginalWallpaper()
     }
 
-    /// Points each display (keyed by stable display UUID) at its entry.
-    func apply(assignments: [String: NativeWallpaperDeployment.EntryInfo]) throws {
+    /// Points each display (keyed by stable display UUID) at its entry, and
+    /// returns the displays the store has no Desktop entry for. Throws
+    /// `unknownDisplay`, writing nothing, when that is all of them.
+    @discardableResult
+    func apply(assignments: [String: NativeWallpaperDeployment.EntryInfo]) throws -> Set<String> {
         guard nativeModeEnabled() else { throw AssignmentError.nativeModeOff }
         nativeHostLog.info("assignment: begin for \(assignments.count) display(s)")
         let (original, root) = try readStore()
@@ -112,15 +132,17 @@ struct NativeWallpaperAssignmentService {
                     displayUUIDs: [uuid]
                 ))
         }
-        guard changed == Set(assignments.keys) else {
-            let missing = Set(assignments.keys).subtracting(changed).sorted().joined(separator: ", ")
+        let missing = Set(assignments.keys).subtracting(changed)
+        if !missing.isEmpty {
+            let names = missing.sorted().joined(separator: ", ")
             let known = ((root["Displays"] as? NSDictionary)?.allKeys as? [String] ?? []).sorted().joined(separator: ", ")
             nativeHostLog.error(
-                "assign: no Desktop surface for display(s) [\(missing, privacy: .public)]; store has [\(known, privacy: .public)]")
-            throw AssignmentError.unknownDisplay
+                "assign: no Desktop surface for display(s) [\(names, privacy: .public)]; store has [\(known, privacy: .public)]")
         }
+        guard !changed.isEmpty else { throw AssignmentError.unknownDisplay }
         try replaceStore(original: original, with: root)
         nativeHostLog.info("assignment: verified; restarted WallpaperAgent")
+        return missing
     }
 
     func applyLockScreen(entry: NativeWallpaperDeployment.EntryInfo) throws {
@@ -142,7 +164,8 @@ struct NativeWallpaperAssignmentService {
         let backup = try files.readBackup().flatMap {
             try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary
         }
-        let result = NativeWallpaperAssignmentStore.restoreOriginal(root: root, backup: backup ?? [:])
+        let result = NativeWallpaperAssignmentStore.restoreOriginal(
+            root: root, backup: backup ?? [:], ownedFolders: ownedFolders)
         guard result.restored > 0 else { return result }
         try replaceStore(original: original, with: root, savingBackup: false)
         nativeHostLog.info("restore original: \(result.restored) surface(s) restored, \(result.missing) without a backup")
@@ -153,6 +176,8 @@ struct NativeWallpaperAssignmentService {
         let original: Data
         do { original = try files.readStore() } catch {
             logFailure("read", error)
+            // Callers switch every display to the overlay on a permission error.
+            if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             throw AssignmentError.unreadableStore
         }
         let source = try PropertyListSerialization.propertyList(
@@ -176,6 +201,7 @@ struct NativeWallpaperAssignmentService {
             logFailure("write", error)
             try? files.writeStore(original)
             if let assignmentError = error as? AssignmentError { throw assignmentError }
+            if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             throw AssignmentError.writeFailed(error.localizedDescription)
         }
         files.restartWallpaperAgent()
@@ -190,7 +216,8 @@ struct NativeWallpaperAssignmentService {
             let existing = try files.readBackup().flatMap {
                 try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary
             }
-            let merged = NativeWallpaperAssignmentStore.mergeBackup(existing: existing, current: current)
+            let merged = NativeWallpaperAssignmentStore.mergeBackup(
+                existing: existing, current: current, ownedFolders: ownedFolders)
             try files.writeBackup(PropertyListSerialization.data(fromPropertyList: merged, format: .binary, options: 0))
         } catch {
             logFailure("backup", error)

@@ -11,12 +11,14 @@ final class FakeSystemWallpaperFiles: SystemWallpaperFiles {
     var storeWrites = 0
     var backupWrites = 0
     var agentRestarts = 0
+    var readError: (any Error)?
 
     init(store: [String: Any]) {
         self.store = try? PropertyListSerialization.data(fromPropertyList: store, format: .binary, options: 0)
     }
 
     func readStore() throws -> Data {
+        if let readError { throw readError }
         guard let store else { throw CocoaError(.fileReadNoSuchFile) }
         return store
     }
@@ -76,8 +78,22 @@ final class NativeWallpaperAssignmentServiceTests: XCTestCase {
         return (choices?.first?["Configuration"] as? Data).map { String(decoding: $0, as: UTF8.self) }
     }
 
+    private let library = URL(fileURLWithPath: "/Users/someone/Library/Application Support/LumaWall", isDirectory: true)
+
     private func service(_ files: FakeSystemWallpaperFiles, nativeModeEnabled: Bool) -> NativeWallpaperAssignmentService {
-        NativeWallpaperAssignmentService(files: files, nativeModeEnabled: { nativeModeEnabled })
+        NativeWallpaperAssignmentService(files: files, ownedFolders: [library], nativeModeEnabled: { nativeModeEnabled })
+    }
+
+    /// What the overlay's `setDesktopImageURL` leaves in the store: an Apple
+    /// image choice pointing at a LumaWall poster.
+    private func posterSurface() -> [String: Any] {
+        let poster = library.appendingPathComponent("WALLPAPER-1/poster.jpg").absoluteString
+        return [
+            "Content": [
+                "Choices": [["Provider": "com.apple.wallpaper.choice.image", "Files": [["relative": poster]]]],
+                "Shuffle": "$null",
+            ]
+        ]
     }
 
     // MARK: Native mode off
@@ -114,6 +130,23 @@ final class NativeWallpaperAssignmentServiceTests: XCTestCase {
         XCTAssertEqual(config(root, "DISPLAY-B"), "forest")
         XCTAssertEqual(files.backupWrites, 1)
         XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testAssignsTheKnownDisplaysAndReportsTheMissingOnes() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        let missing = try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry, "DISPLAY-Z": entry])
+        XCTAssertEqual(missing, ["DISPLAY-Z"])
+        XCTAssertEqual(provider(try files.storeRoot(), "DISPLAY-A"), ours)
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testPermissionErrorsReachTheCaller() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.store = nil
+        files.readError = CocoaError(.fileReadNoPermission)
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])) {
+            XCTAssertTrue(WallpaperHostCapabilities.isPermissionError($0), "\($0)")
+        }
     }
 
     func testUnknownDisplayIsRejectedWithoutWriting() throws {
@@ -164,6 +197,40 @@ final class NativeWallpaperAssignmentServiceTests: XCTestCase {
 
         XCTAssertEqual(result, .init(restored: 0, missing: 1))
         XCTAssertEqual(provider(try files.storeRoot(), "DISPLAY-A"), ours)
+    }
+
+    func testRestoreReplacesTheOverlayPosterToo() throws {
+        // Turning native mode off hands the desktop to the overlay, which sets
+        // a LumaWall poster as the macOS desktop picture.
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        let service = service(files, nativeModeEnabled: true)
+        try service.apply(assignments: ["DISPLAY-A": entry])
+        var root = try files.storeRoot()
+        var displays = try XCTUnwrap(root["Displays"] as? [String: Any])
+        displays["DISPLAY-A"] = ["Desktop": posterSurface()]
+        root["Displays"] = displays
+        files.store = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+
+        let result = try service.restoreOriginalWallpaper()
+
+        XCTAssertEqual(result, .init(restored: 1, missing: 0))
+        XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-A"), "beach")
+    }
+
+    func testBackupNeverRecordsAnOverlayPosterAsTheUsersWallpaper() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        let service = service(files, nativeModeEnabled: true)
+        try service.apply(assignments: ["DISPLAY-A": entry])
+        var root = try files.storeRoot()
+        var displays = try XCTUnwrap(root["Displays"] as? [String: Any])
+        displays["DISPLAY-A"] = ["Desktop": posterSurface()]
+        root["Displays"] = displays
+        files.store = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+        try service.apply(assignments: ["DISPLAY-A": entry])
+
+        _ = try service.restoreOriginalWallpaper()
+
+        XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-A"), "beach")
     }
 
     func testRestoreWithNothingOfOursDoesNotWriteOrRestart() throws {

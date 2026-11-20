@@ -129,19 +129,43 @@ extension NativeWallpaperAssignmentStore {
         return paths
     }
 
-    /// True when the surface shows a LumaWall choice.
-    static func isOurs(_ surface: NSDictionary) -> Bool {
+    /// LumaWall's library, whose posters the overlay sets as the desktop
+    /// picture, and the wallpaper extension's container.
+    static var lumaWallFolders: [URL] {
+        [
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("LumaWall", isDirectory: true),
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Containers/\(WallpaperHostCapabilities.extensionBundleID)", isDirectory: true),
+        ]
+    }
+
+    /// True when the surface shows a LumaWall choice: the extension's, or an
+    /// image from one of `ownedFolders` (the overlay's poster).
+    static func isOurs(_ surface: NSDictionary, ownedFolders: [URL] = []) -> Bool {
         let choices = (surface["Content"] as? NSDictionary)?["Choices"] as? [NSDictionary] ?? []
-        return choices.contains { $0["Provider"] as? String == WallpaperHostCapabilities.extensionBundleID }
+        let prefixes = ownedFolders.map { $0.standardizedFileURL.path + "/" }
+        return choices.contains { choice in
+            if choice["Provider"] as? String == WallpaperHostCapabilities.extensionBundleID { return true }
+            let files = choice["Files"] as? [NSDictionary] ?? []
+            return files.contains { file in
+                guard let relative = file["relative"] as? String, let url = URL(string: relative), url.isFileURL else {
+                    return false
+                }
+                let path = url.standardizedFileURL.path
+                return prefixes.contains { path.hasPrefix($0) }
+            }
+        }
     }
 
     /// The backup to save before writing `current`: the previous backup
     /// with every surface that isn't LumaWall's updated from `current`.
-    static func mergeBackup(existing: NSDictionary?, current: NSDictionary) -> NSMutableDictionary {
+    static func mergeBackup(existing: NSDictionary?, current: NSDictionary, ownedFolders: [URL]) -> NSMutableDictionary {
         guard let existing else { return deepMutableCopy(current) }
         let merged = deepMutableCopy(existing)
         for path in surfacePaths(in: current) {
-            guard let surface = value(at: path, in: current) as? NSDictionary, !isOurs(surface) else { continue }
+            guard let surface = value(at: path, in: current) as? NSDictionary, !isOurs(surface, ownedFolders: ownedFolders)
+            else { continue }
             set(deepMutableCopy(surface), at: path, in: merged)
         }
         return merged
@@ -150,12 +174,13 @@ extension NativeWallpaperAssignmentStore {
     /// Replaces each LumaWall surface in `root` with the backup's surface at
     /// the same path, when the backup has one that isn't LumaWall's.
     static func restoreOriginal(
-        root: NSMutableDictionary, backup: NSDictionary
+        root: NSMutableDictionary, backup: NSDictionary, ownedFolders: [URL]
     ) -> NativeWallpaperAssignmentService.RestoreResult {
         var result = NativeWallpaperAssignmentService.RestoreResult(restored: 0, missing: 0)
         for path in surfacePaths(in: root) {
-            guard let surface = value(at: path, in: root) as? NSDictionary, isOurs(surface) else { continue }
-            if let saved = value(at: path, in: backup) as? NSDictionary, !isOurs(saved) {
+            guard let surface = value(at: path, in: root) as? NSDictionary, isOurs(surface, ownedFolders: ownedFolders)
+            else { continue }
+            if let saved = value(at: path, in: backup) as? NSDictionary, !isOurs(saved, ownedFolders: ownedFolders) {
                 set(deepMutableCopy(saved), at: path, in: root)
                 result.restored += 1
             } else {
