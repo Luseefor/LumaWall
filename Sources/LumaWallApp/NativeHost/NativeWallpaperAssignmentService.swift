@@ -320,9 +320,10 @@ struct NativeWallpaperAssignmentService {
     }
 
     private func logFailure(_ stage: String, _ error: any Error) {
-        let cocoa = error as NSError
+        // The description can name files and folders, so only the domain
+        // and code are public.
         nativeHostLog.error(
-            "assignment: \(stage, privacy: .public) failed domain=\(cocoa.domain, privacy: .public) code=\(cocoa.code) description=\(cocoa.localizedDescription, privacy: .public)"
+            "assignment: \(stage, privacy: .public) failed \(LogRedaction.code(of: error), privacy: .public) description=\(error.localizedDescription, privacy: .private)"
         )
     }
 }

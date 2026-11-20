@@ -53,6 +53,11 @@ enum NativeWallpaperDeployment {
             filename = try container.decode(String.self, forKey: .filename)
             duration = try container.decode(Double.self, forKey: .duration)
             fps = try container.decode(Double.self, forKey: .fps)
+            // The extension can write metadata.json; a rate the probe would
+            // never report reads as broken, so the next deploy replaces it.
+            guard NativeWallpaperDeployment.isPlausibleFPS(fps) else {
+                throw DecodingError.dataCorruptedError(forKey: .fps, in: container, debugDescription: "Frame rate out of range")
+            }
             resolution = try container.decode(CGSize.self, forKey: .resolution)
             dateAdded = try container.decode(Date.self, forKey: .dateAdded)
             contentHash = try container.decodeIfPresent(String.self, forKey: .contentHash)

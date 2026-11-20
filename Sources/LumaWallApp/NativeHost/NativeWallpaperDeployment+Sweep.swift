@@ -18,6 +18,13 @@ extension NativeWallpaperDeployment {
         var entries: [String] = []
         /// Deploy staging folders deleted.
         var stagingFolders: [String] = []
+        /// Seconds until the youngest folder skipped only for its age is
+        /// old enough to sweep; nil when none was.
+        var retryAfter: TimeInterval?
+
+        mutating func retry(after wait: TimeInterval) {
+            retryAfter = min(retryAfter ?? wait, wait)
+        }
     }
 
     /// How long a folder must go unchanged before the sweep counts it as
@@ -26,7 +33,7 @@ extension NativeWallpaperDeployment {
     static let sweepMinimumAge: TimeInterval = 3600
 
     /// Deletes, from `videosFolderURL`, each entry folder (named by a UUID)
-    /// that is not in `referenced`, hasn't changed for `sweepMinimumAge`
+    /// that is not in `referenced` (nil skips entry folders), hasn't changed for `sweepMinimumAge`
     /// and holds nothing but the bookkeeping an entry carries
     /// (`isBookkeepingOnly`). Anything else, a video in particular, keeps
     /// the folder: the extension lists a bare video, and its legacy
@@ -40,14 +47,14 @@ extension NativeWallpaperDeployment {
     /// to a folder about to go; a folder that gained anything goes back. Then deletes the deploy staging
     /// folders listed in the journal at `stagingJournalURL` that aren't in
     /// `activeStaging`, haven't changed for that long and hold only staged
-    /// entries.
+    /// entries. A folder kept only because it is too new sets `retryAfter`.
     ///
     /// Everything goes through `TrustedDirectory`, so a symlink is never
     /// followed: a symlinked entry or staging folder is skipped, and a
     /// symlink inside a deleted folder is unlinked, not entered. Each entry
     /// is checked and deleted under `entryLock`, so it can't race a publish.
     static func sweepAbandonedEntries(
-        referenced: Set<String>,
+        referenced: Set<String>?,
         videosFolderURL: URL = videosFolderURL,
         trustedAncestor: URL = containerURL,
         stagingJournalURL: URL? = stagingJournalURL,
@@ -56,8 +63,9 @@ extension NativeWallpaperDeployment {
     ) -> SweepResult {
         var result = SweepResult()
         // Folder names may be any case; the library's IDs are uppercase.
-        let referenced = Set(referenced.compactMap(UUID.init(uuidString:)))
-        if let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) {
+        if let referenced = referenced.map({ Set($0.compactMap(UUID.init(uuidString:))) }),
+            let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor)
+        {
             let items = (try? videos.entries()) ?? []
             // A sweep stopped between moving a folder aside and deciding.
             for item in items where item.kind == .directory && item.name.hasPrefix(asidePrefix) {
@@ -69,14 +77,18 @@ extension NativeWallpaperDeployment {
             }
             for item in items where item.kind == .directory {
                 guard let id = UUID(uuidString: item.name), !referenced.contains(id) else { continue }
-                let removed = entryLock.withLock { () -> Bool in
-                    guard isOld(videosFolderURL.appendingPathComponent(item.name), now: now),
-                        let folder = try? videos.subdirectory(item.name), isBookkeepingOnly(folder),
-                        (try? videos.renameItem(named: item.name, to: asidePrefix + item.name)) != nil
-                    else { return false }
-                    return finishSweep(of: item.name, in: videos, keep: false)
+                let outcome = entryLock.withLock { () -> SweepOutcome in
+                    guard let folder = try? videos.subdirectory(item.name), isBookkeepingOnly(folder) else { return .kept }
+                    let wait = timeUntilOld(videosFolderURL.appendingPathComponent(item.name), now: now)
+                    guard wait == 0 else { return wait.map(SweepOutcome.tooNew) ?? .kept }
+                    guard (try? videos.renameItem(named: item.name, to: asidePrefix + item.name)) != nil else { return .kept }
+                    return finishSweep(of: item.name, in: videos, keep: false) ? .removed : .kept
                 }
-                if removed { result.entries.append(item.name) }
+                switch outcome {
+                case .removed: result.entries.append(item.name)
+                case .tooNew(let wait): result.retry(after: wait)
+                case .gone, .kept: break
+                }
             }
         }
         if let stagingJournalURL {
@@ -90,6 +102,7 @@ extension NativeWallpaperDeployment {
                     result.stagingFolders.append(folder.lastPathComponent)
                     journal.remove(folder)
                 case .gone: journal.remove(folder)
+                case .tooNew(let wait): result.retry(after: wait)
                 case .kept: break
                 }
             }
@@ -125,7 +138,11 @@ extension NativeWallpaperDeployment {
         return items.allSatisfy { $0.kind == .file && ["metadata.json", "thumbnail.jpg"].contains($0.name) }
     }
 
-    private enum StagingOutcome { case removed, gone, kept }
+    private enum SweepOutcome {
+        case removed, gone, kept
+        /// Kept only for its age; old enough after this many seconds.
+        case tooNew(TimeInterval)
+    }
 
     /// Deletes a staging folder `makeStagingFolder` made, when it is still
     /// the folder deploy recorded (`identity`), is old and holds nothing but
@@ -137,7 +154,7 @@ extension NativeWallpaperDeployment {
     /// `.gone` means nothing of LumaWall's is left there: the folder is
     /// missing, a symlink, or another folder. Other errors keep the record
     /// for the next sweep.
-    private static func removeStagingFolder(_ folder: URL, identity: TrustedDirectory.Identity?, now: Date) -> StagingOutcome {
+    private static func removeStagingFolder(_ folder: URL, identity: TrustedDirectory.Identity?, now: Date) -> SweepOutcome {
         // Only what `makeStagingFolder` names: "NSIRD_<process>_<random>".
         guard folder.lastPathComponent.hasPrefix("NSIRD_"), let identity else { return .gone }
         let handle: TrustedDirectory
@@ -151,9 +168,12 @@ extension NativeWallpaperDeployment {
         guard let current = try? handle.identity() else { return .kept }
         guard current == identity else { return .gone }
         guard let staged = try? handle.entries(),
-            staged.allSatisfy({ $0.kind == .directory && isStagedEntryName($0.name) }),
-            isOld(folder, now: now), staged.allSatisfy({ isOld(folder.appendingPathComponent($0.name), now: now) })
+            staged.allSatisfy({ $0.kind == .directory && isStagedEntryName($0.name) })
         else { return .kept }
+        let waits = ([folder] + staged.map { folder.appendingPathComponent($0.name) }).map { timeUntilOld($0, now: now) }
+        guard !waits.contains(nil) else { return .kept }
+        let wait = waits.compactMap { $0 }.max() ?? 0
+        guard wait == 0 else { return .tooNew(wait) }
         for item in staged { try? handle.removeItem(named: item.name) }
         return rmdir(folder.path) == 0 ? .removed : .kept
     }
@@ -164,12 +184,13 @@ extension NativeWallpaperDeployment {
         return parts.count == 2 && parts.allSatisfy { PathSafety.isValidEntryID(String($0)) }
     }
 
-    /// Whether the item at `url` (not a symlink's target) was last changed
-    /// at least `sweepMinimumAge` before `now`. Unknown counts as not old.
-    private static func isOld(_ url: URL, now: Date) -> Bool {
+    /// Seconds until the item at `url` (not a symlink's target) has gone
+    /// `sweepMinimumAge` unchanged; 0 when it already has, nil when its
+    /// date can't be read (which counts as not old).
+    private static func timeUntilOld(_ url: URL, now: Date) -> TimeInterval? {
         guard let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
-        else { return false }
-        return now.timeIntervalSince(modified) >= sweepMinimumAge
+        else { return nil }
+        return max(sweepMinimumAge - now.timeIntervalSince(modified), 0)
     }
 
     // MARK: Staging folders in use
@@ -203,13 +224,15 @@ extension NativeWallpaperDeployment {
 
     /// The entry IDs the app's library and display assignments use, or nil
     /// when they can't be trusted to be complete (an empty library, which
-    /// is also what a lost or quarantined index looks like). Set by the app
-    /// at launch; without it no sweep runs.
+    /// is also what a lost or quarantined index looks like); then only
+    /// staging is swept. Set by the app at launch; without it no sweep runs.
     @MainActor
     static var referencedEntryIDs: (@MainActor () async -> Set<String>?)?
 
     @MainActor private static var sweepRunning = false
     @MainActor private static var sweepRequested = false
+    @MainActor private static var retry = SweepRetry()
+    @MainActor private static var retryTimer: Task<Void, Never>?
 
     /// Runs a sweep, or one more after the one running now.
     @MainActor
@@ -222,11 +245,11 @@ extension NativeWallpaperDeployment {
             defer { sweepRunning = false }
             while sweepRequested {
                 sweepRequested = false
-                guard let library = await referencedEntryIDs() else { continue }
-                let referenced = library.union(deployingEntryIDs)
+                let referenced = await referencedEntryIDs()?.union(deployingEntryIDs)
                 let result = await Task.detached(priority: .utility) {
                     sweepAbandonedEntries(referenced: referenced)
                 }.value
+                if let wait = result.retryAfter { scheduleRetry(at: Date().addingTimeInterval(wait)) }
                 if !result.entries.isEmpty || !result.stagingFolders.isEmpty {
                     nativeHostLog.info(
                         "sweep: removed \(result.entries.count, privacy: .public) entries, \(result.stagingFolders.count, privacy: .public) staging folders"
@@ -234,6 +257,37 @@ extension NativeWallpaperDeployment {
                 }
             }
         }
+    }
+
+    /// One more sweep once a folder skipped for its age is old enough, so it
+    /// doesn't wait for the next deploy or launch. One timer at a time, for
+    /// the earliest deadline; a sweep it runs that still finds a new folder
+    /// sets the next.
+    @MainActor
+    private static func scheduleRetry(at deadline: Date) {
+        guard retry.replaces(deadline) else { return }
+        retryTimer?.cancel()
+        retryTimer = Task { @MainActor in
+            // A little past the age, so the folder's date has crossed it.
+            try? await Task.sleep(for: .seconds(max(deadline.timeIntervalSinceNow, 0) + 5))
+            guard !Task.isCancelled else { return }
+            retry.deadline = nil
+            retryTimer = nil
+            scheduleSweep()
+        }
+    }
+}
+
+/// The deadline of the one pending retry sweep.
+struct SweepRetry {
+    var deadline: Date?
+
+    /// True, and `candidate` becomes the deadline, when no retry is pending
+    /// or `candidate` comes before the pending one.
+    mutating func replaces(_ candidate: Date) -> Bool {
+        if let deadline, deadline <= candidate { return false }
+        deadline = candidate
+        return true
     }
 }
 

@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import ImageIO
+import LumaWallCore
 import UniformTypeIdentifiers
 import XCTest
 @testable import LumaWall
@@ -188,6 +189,77 @@ final class PosterCacheTests: XCTestCase {
         _ = await cache.image(for: missing, fallbackVideo: video, maxPixelWidth: 640)
         let afterRemove = await counter.count
         XCTAssertEqual(afterRemove, 3)
+    }
+
+    func testBusyServiceIsRetriedAndNotRememberedAsAFailure() async {
+        // The media service refuses requests over its limit; that refusal
+        // left the card blank until the video was removed.
+        let counter = CallCounter()
+        let frame = stillFrame()
+        let cache = PosterCache(
+            frameGenerator: { _, _ in
+                await counter.hit()
+                if await counter.count <= 2 { throw MediaProbeError.serviceUnavailable }
+                return frame
+            }, retryDelays: [.zero, .zero])
+        let video = folder.appendingPathComponent("clip.mov")
+        let image = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        XCTAssertNotNil(image)
+        let calls = await counter.count
+        XCTAssertEqual(calls, 3)
+    }
+
+    func testBusyServicePastTheRetriesIsTriedAgainOnTheNextRequest() async {
+        let counter = CallCounter()
+        let cache = PosterCache(
+            frameGenerator: { _, _ in
+                await counter.hit()
+                throw MediaProbeError.serviceUnavailable
+            }, retryDelays: [.zero])
+        let video = folder.appendingPathComponent("clip.mov")
+        let first = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        XCTAssertNil(first)
+        let afterFirst = await counter.count
+        XCTAssertEqual(afterFirst, 2)
+        _ = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        let afterSecond = await counter.count
+        XCTAssertEqual(afterSecond, 4)
+    }
+
+    func testARetryUsesAFrameAnotherRequestCachedMeanwhile() async throws {
+        // A waiting retry asked the busy service again and could give up
+        // with the frame already in the cache.
+        let counter = CallCounter()
+        let frame = stillFrame()
+        let cache = PosterCache(
+            frameGenerator: { _, _ in
+                await counter.hit()
+                if await counter.count == 2 { return frame }
+                throw MediaProbeError.serviceUnavailable
+            }, retryDelays: [.milliseconds(300)])
+        let video = folder.appendingPathComponent("clip.mov")
+        let first = Task { await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640) }
+        try await Task.sleep(for: .milliseconds(100))
+        let second = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        XCTAssertNotNil(second)
+        let retried = await first.value
+        XCTAssertNotNil(retried)
+        let calls = await counter.count
+        XCTAssertEqual(calls, 2)
+    }
+
+    func testUndecodableVideoIsNotRetried() async {
+        let counter = CallCounter()
+        let cache = PosterCache(
+            frameGenerator: { _, _ in
+                await counter.hit()
+                throw MediaProbeError.posterUnavailable
+            }, retryDelays: [.zero, .zero])
+        let video = folder.appendingPathComponent("broken.mov")
+        _ = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        _ = await cache.image(for: nil, fallbackVideo: video, maxPixelWidth: 640)
+        let calls = await counter.count
+        XCTAssertEqual(calls, 1)
     }
 
     func testConcurrentRequestsForOneStillShareOneGeneration() async {

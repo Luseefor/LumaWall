@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import LumaWallCore
 import SwiftUI
 
 /// In-memory poster cache, limited by decoded bytes as well as count.
@@ -31,7 +32,16 @@ actor PosterCache {
     }
 
     /// Makes a still from a video at a pixel width; nil when it can't.
-    typealias FrameGenerator = @Sendable (URL, CGFloat) async -> CGImage?
+    /// Throwing `MediaProbeError.serviceUnavailable` means the media service
+    /// was busy or went away, not that the video can't be read: the cache
+    /// tries again and doesn't remember it as a failure.
+    typealias FrameGenerator = @Sendable (URL, CGFloat) async throws -> CGImage?
+
+    private enum FrameOutcome {
+        case frame(CGImage)
+        case failed
+        case busy
+    }
 
     /// A poster that failed to decode, with the file's state at the time, so
     /// a poster written or replaced later no longer matches and is tried again.
@@ -59,13 +69,15 @@ actor PosterCache {
 
     private struct InFlight {
         let id: Int
-        let task: Task<CGImage?, Never>
+        let task: Task<FrameOutcome, Never>
     }
 
     private let maxBytes: Int
     private let maxCount: Int
     private let maxFailures = 256
     private let frameGenerator: FrameGenerator
+    /// Waits before each retry of a still the media service was too busy for.
+    private let retryDelays: [Duration]
     private var inFlightFrames: [Key: InFlight] = [:]
     private var nextTaskID = 0
     /// `removeAll` count, and how often `remove` ran for each URL. Work that
@@ -84,11 +96,13 @@ actor PosterCache {
     init(
         maxBytes: Int = 96 * 1_024 * 1_024,
         maxCount: Int = 200,
-        frameGenerator: @escaping FrameGenerator = { await PosterCache.videoFrame($0, maxPixelWidth: $1) }
+        frameGenerator: @escaping FrameGenerator = { try await PosterCache.videoFrame($0, maxPixelWidth: $1) },
+        retryDelays: [Duration] = [.seconds(1), .seconds(3), .seconds(8)]
     ) {
         self.maxBytes = maxBytes
         self.maxCount = maxCount
         self.frameGenerator = frameGenerator
+        self.retryDelays = retryDelays
     }
 
     /// Poster decoded to at most `maxPixelWidth` wide. When the poster is nil,
@@ -125,12 +139,32 @@ actor PosterCache {
         let key = Key(url: fallbackVideo, width: width)
         if failedFrames.contains(key) { return nil }
         let startedAt = epoch(of: fallbackVideo)
-        let frame = await frame(for: fallbackVideo, key: key, maxPixelWidth: maxPixelWidth)
+        var outcome = await frame(for: fallbackVideo, key: key, maxPixelWidth: maxPixelWidth)
+        // A busy service is retried a few times; past that the request
+        // returns nil without a remembered failure, so the next one tries.
+        for delay in retryDelays {
+            guard case .busy = outcome, !Task.isCancelled else { break }
+            try? await Task.sleep(for: delay)
+            // While this waited, another request may have cached the frame or
+            // found it can't be made, or `remove` may have run.
+            if Task.isCancelled || startedAt != epoch(of: fallbackVideo) { break }
+            if let entry = entries[key] {
+                touch(key)
+                return entry.image
+            }
+            if failedFrames.contains(key) { return nil }
+            outcome = await frame(for: fallbackVideo, key: key, maxPixelWidth: maxPixelWidth)
+        }
+        let frame: CGImage?
+        switch outcome {
+        case .frame(let image): frame = image
+        case .failed, .busy: frame = nil
+        }
         // `remove` ran while we waited: the file may be different now, so
         // neither the failure nor the frame describes it.
         guard startedAt == epoch(of: fallbackVideo) else { return frame.map(Self.image) }
         guard let frame else {
-            remember(key)
+            if case .failed = outcome { remember(key) }
             return nil
         }
         // Another caller may have stored this frame while we awaited.
@@ -141,10 +175,18 @@ actor PosterCache {
     /// One generation per video and width: concurrent requests await the same
     /// task. The entry is cleared only by the task that owns it, so a task that
     /// `remove` already replaced can't clear its successor.
-    private func frame(for video: URL, key: Key, maxPixelWidth: CGFloat) async -> CGImage? {
+    private func frame(for video: URL, key: Key, maxPixelWidth: CGFloat) async -> FrameOutcome {
         if let running = inFlightFrames[key] { return await running.task.value }
         let generate = frameGenerator
-        let task = Task.detached { await generate(video, maxPixelWidth) }
+        let task = Task.detached { () -> FrameOutcome in
+            do {
+                return try await generate(video, maxPixelWidth).map(FrameOutcome.frame) ?? .failed
+            } catch MediaProbeError.serviceUnavailable {
+                return .busy
+            } catch {
+                return .failed
+            }
+        }
         nextTaskID += 1
         let id = nextTaskID
         inFlightFrames[key] = InFlight(id: id, task: task)
@@ -267,12 +309,19 @@ actor PosterCache {
     }
 
     /// A frame from near the start of `url`, at most `maxPixelWidth` wide,
-    /// read by the sandboxed media service.
-    nonisolated static func videoFrame(_ url: URL, maxPixelWidth: CGFloat) async -> CGImage? {
+    /// read by the sandboxed media service. Throws only
+    /// `MediaProbeError.serviceUnavailable`: the service refused the request
+    /// as over its limit, timed out, or its connection dropped.
+    nonisolated static func videoFrame(_ url: URL, maxPixelWidth: CGFloat) async throws -> CGImage? {
         // Fits inside the box, so a portrait video still gets its width.
         let box = CGSize(width: maxPixelWidth, height: maxPixelWidth * 4)
-        let frame = try? await MediaServiceClient.shared.posterFrame(fileAt: url, maxPixelSize: box, nearStart: true)
-        return frame?.makeImage()
+        do {
+            return try await MediaServiceClient.shared.posterFrame(fileAt: url, maxPixelSize: box, nearStart: true).makeImage()
+        } catch MediaProbeError.serviceUnavailable {
+            throw MediaProbeError.serviceUnavailable
+        } catch {
+            return nil
+        }
     }
 
     nonisolated private static func decode(_ url: URL, maxPixelWidth: CGFloat) -> CGImage? {
@@ -318,7 +367,10 @@ struct PosterImage: View {
         }
         .task(id: PosterRequest(url: url, fallbackVideo: fallbackVideo, width: maxPixelWidth)) {
             if url != nil || fallbackVideo != nil {
-                image = await PosterCache.shared.image(for: url, fallbackVideo: fallbackVideo, maxPixelWidth: maxPixelWidth)
+                let loaded = await PosterCache.shared.image(for: url, fallbackVideo: fallbackVideo, maxPixelWidth: maxPixelWidth)
+                // A cancelled load (the request changed) can finish after the
+                // new one and would blank the poster it showed.
+                if !Task.isCancelled { image = loaded }
             } else {
                 image = nil
             }
