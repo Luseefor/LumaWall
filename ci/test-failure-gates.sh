@@ -7,6 +7,7 @@ trap 'rm -rf "$fixture_dir"' EXIT
 mkdir -p "$fixture_dir/ci" "$fixture_dir/Packaging" "$fixture_dir/bin" "$fixture_dir/dist"
 cp "$project_root/ci/check.sh" "$fixture_dir/ci/check.sh"
 cp "$project_root/ci/unregister-builds.sh" "$fixture_dir/ci/unregister-builds.sh"
+cp "$project_root/ci/test.sh" "$fixture_dir/ci/test.sh"
 cp "$project_root/Packaging/release.sh" "$fixture_dir/Packaging/release.sh"
 # Avoid recursively running this fixture test inside the copied validator.
 printf '#!/bin/bash\nexit 0\n' > "$fixture_dir/ci/test-failure-gates.sh"
@@ -20,6 +21,7 @@ mkdir -p "$built_app/Contents/Extensions/LumaWallWallpaper.appex"
 
 cat > "$fixture_dir/bin/swift" <<'SH'
 #!/bin/bash
+printf '%s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/swift.log"
 # Interrupt the whole check, as Ctrl-C in a terminal would.
 [[ "${LUMAWALL_FAKE_SWIFT_EXIT:-}" == interrupt ]] && { kill -INT "$PPID"; kill -INT $$; }
 exit "${LUMAWALL_FAKE_SWIFT_EXIT:-0}"
@@ -30,6 +32,7 @@ touch "$LUMAWALL_GATE_MARKERS/generated"
 SH
 cat > "$fixture_dir/bin/xcodebuild" <<'SH'
 #!/bin/bash
+printf '%s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/xcodebuild.log"
 case " $* " in
   *" test "*) exit 44 ;;
   *) touch "$LUMAWALL_GATE_MARKERS/packaged"; exit 99 ;;
@@ -88,6 +91,49 @@ expect_unregistered
 LUMAWALL_FAKE_SWIFT_EXIT=interrupt expect_exit 130 bash "$fixture_dir/ci/check.sh"
 expect_unregistered
 
+# ci/test.sh runs a core suite with swift test only.
+mkdir -p "$fixture_dir/Tests/LumaWallCoreTests" "$fixture_dir/Tests/WallpaperExtensionTests" \
+    "$fixture_dir/LumaWall.xcodeproj"
+printf '@Suite struct PowerPolicyTests {}\n' > "$fixture_dir/Tests/LumaWallCoreTests/PowerPolicyTests.swift"
+printf 'final class RendererLifecycleTests: XCTestCase {}\n' \
+    > "$fixture_dir/Tests/WallpaperExtensionTests/RendererLifecycleTests.swift"
+printf 'targets: {}\n' > "$fixture_dir/project.yml"
+printf '/* RendererLifecycleTests.swift */\n' > "$fixture_dir/LumaWall.xcodeproj/project.pbxproj"
+# Fixed times: -nt only compares whole seconds in /bin/bash 3.2.
+touch -t 202001010000 "$fixture_dir/project.yml"
+touch -t 202101010000 "$fixture_dir/LumaWall.xcodeproj/project.pbxproj"
+rm -f "$fixture_dir/swift.log" "$fixture_dir/xcodebuild.log" "$fixture_dir/generated"
+expect_exit 0 bash "$fixture_dir/ci/test.sh" PowerPolicyTests/testBattery
+grep -Fqx 'test --filter LumaWallCoreTests\.PowerPolicyTests/testBattery' "$fixture_dir/swift.log"
+[[ ! -e "$fixture_dir/xcodebuild.log" ]] || fail "line $LINENO"
+
+# ci/test.sh runs an extension test class with -only-testing, keeps the
+# xcodebuild failure, skips xcodegen while the project is current, and
+# unregisters the built app.
+expect_exit 44 bash "$fixture_dir/ci/test.sh" RendererLifecycleTests/testStop
+grep -Fq ' -configuration Testing ' "$fixture_dir/xcodebuild.log"
+grep -Fq ' -only-testing:WallpaperExtensionTests/RendererLifecycleTests/testStop ' "$fixture_dir/xcodebuild.log"
+[[ ! -e "$fixture_dir/generated" ]] || fail "line $LINENO"
+expect_unregistered
+
+# ci/test.sh regenerates the project once project.yml is newer.
+touch -t 202201010000 "$fixture_dir/project.yml"
+expect_exit 44 bash "$fixture_dir/ci/test.sh" WallpaperExtensionTests/RendererLifecycleTests
+[[ -e "$fixture_dir/generated" ]] || fail "line $LINENO"
+expect_unregistered
+
+# ci/test.sh regenerates the project for a test file it doesn't list yet,
+# also when the name starts with its target.
+touch -t 202001010000 "$fixture_dir/project.yml"
+rm "$fixture_dir/generated"
+printf 'final class NewTests: XCTestCase {}\n' > "$fixture_dir/Tests/WallpaperExtensionTests/NewTests.swift"
+expect_exit 44 bash "$fixture_dir/ci/test.sh" WallpaperExtensionTests/NewTests/testNew
+[[ -e "$fixture_dir/generated" ]] || fail "line $LINENO"
+expect_unregistered
+
+# ci/test.sh refuses a name it can't find.
+expect_exit 2 bash "$fixture_dir/ci/test.sh" NoSuchTests
+
 # A failed validation must preserve an existing DMG and never start packaging.
 printf '#!/bin/bash\nexit 42\n' > "$fixture_dir/ci/check.sh"
 printf 'previous release\n' > "$fixture_dir/dist/LumaWall.dmg"
@@ -98,4 +144,4 @@ expect_exit 42 zsh "$fixture_dir/Packaging/release.sh"
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
 [[ ! -e "$fixture_dir/packaged" ]] || fail "line $LINENO"
 
-printf 'Core, playback, release, and cleanup failure gates passed.\n'
+printf 'Core, playback, release, cleanup, and ci/test.sh gates passed.\n'
