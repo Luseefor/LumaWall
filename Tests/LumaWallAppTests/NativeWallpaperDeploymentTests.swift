@@ -21,7 +21,7 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         }
 
         XCTAssertThrowsError(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)) {
-            XCTAssertEqual(($0 as NSError).code, CocoaError.fileReadNoPermission.rawValue)
+            XCTAssertEqual(($0 as? POSIXError)?.code, .EACCES)
         }
         XCTAssertTrue(fm.fileExists(atPath: metadata.path))
     }
@@ -185,6 +185,42 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
             filename: "../other/Wallpaper.minimal.mov", fps: 30, resolution: CGSize(width: 640, height: 360))
         try write(entry(id: mixed, filename: "Wallpaper.mov", variants: [bad, variants[1]]), in: mixed)
         XCTAssertEqual(try NativeWallpaperDeployment.entry(id: mixed, videosFolderURL: videos)?.variants, [variants[1]])
+    }
+
+    func testMetadataIsNotReadThroughASymlink() throws {
+        // The extension can swap metadata.json, or the entry folder, for a
+        // symlink; reading through it let the extension pick what the app
+        // trusts as this entry's metadata.
+        let fm = FileManager.default
+        let videos = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let outside = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            try? fm.removeItem(at: videos)
+            try? fm.removeItem(at: outside)
+        }
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        func planted(_ id: String) throws -> URL {
+            let entry = NativeWallpaperDeployment.EntryInfo(
+                id: id, name: "x", filename: "Wallpaper.mov", duration: 5, fps: 30,
+                resolution: CGSize(width: 1920, height: 1080), dateAdded: Date(), contentHash: "planted")
+            let url = outside.appendingPathComponent("\(id).json")
+            try JSONEncoder().encode(entry).write(to: url)
+            return url
+        }
+
+        let linkedFile = UUID().uuidString
+        try fm.createDirectory(at: videos.appendingPathComponent(linkedFile), withIntermediateDirectories: true)
+        try fm.createSymbolicLink(
+            at: videos.appendingPathComponent(linkedFile).appendingPathComponent("metadata.json"),
+            withDestinationURL: try planted(linkedFile))
+        XCTAssertNil(try NativeWallpaperDeployment.entry(id: linkedFile, videosFolderURL: videos))
+
+        let linkedFolder = UUID().uuidString
+        let folder = outside.appendingPathComponent("folder")
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        try fm.moveItem(at: try planted(linkedFolder), to: folder.appendingPathComponent("metadata.json"))
+        try fm.createSymbolicLink(at: videos.appendingPathComponent(linkedFolder), withDestinationURL: folder)
+        XCTAssertNil(try NativeWallpaperDeployment.entry(id: linkedFolder, videosFolderURL: videos))
     }
 
     @MainActor

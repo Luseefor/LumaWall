@@ -320,15 +320,15 @@ enum NativeWallpaperDeployment {
         return entry
     }
 
+    /// The entry's metadata.json, read without following a symlink: the
+    /// extension can swap the file or its folder for one. A missing entry,
+    /// or one where a symlink or other non-file stands in, reads as nil so
+    /// the next deploy replaces it. Other read errors throw.
     static func entry(id: String, videosFolderURL: URL = videosFolderURL) throws -> EntryInfo? {
-        let metadataURL =
-            videosFolderURL
-            .appendingPathComponent(id, isDirectory: true)
-            .appendingPathComponent("metadata.json")
         let data: Data
         do {
-            data = try Data(contentsOf: metadataURL)
-        } catch CocoaError.fileReadNoSuchFile {
+            data = try trustedFolder(videosFolderURL).subdirectory(id).readFile(named: "metadata.json")
+        } catch let error as POSIXError where [.ENOENT, .ELOOP, .ENOTDIR, .EFTYPE].contains(error.code) {
             return nil
         }
         // Bytes that don't decode (a truncated write, a hand edit) read as
