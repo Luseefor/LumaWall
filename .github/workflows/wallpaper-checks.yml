@@ -34,7 +34,7 @@ jobs:
     env:
       DEVELOPER_DIR: ${{ matrix.xcode }}/Contents/Developer
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Pinned: the committed project is generated with this version, and
@@ -62,11 +62,32 @@ jobs:
         run: ./ci/check.sh
       - name: Check generated project is committed
         run: git diff --exit-code -- LumaWall.xcodeproj
-      - name: Save logs and rendered playback test results
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Scrub local paths from failure logs
+        if: failure()
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          shopt -s nullglob
+          logs=("${{ runner.temp }}"/lumawall-checks/*/*.log)
+          if [ ${#logs[@]} -gt 0 ]; then
+            perl -i -pe '
+              BEGIN {
+                our @pairs = map { [ $ENV{$_}, "<$_>" ] }
+                  sort { length($ENV{$b}) <=> length($ENV{$a}) }
+                  grep { defined $ENV{$_} && length $ENV{$_} }
+                  qw(GITHUB_WORKSPACE RUNNER_WORKSPACE RUNNER_TEMP HOME);
+              }
+              for my $p (@pairs) {
+                my ($val, $tok) = @$p;
+                s/\Q$val\E/$tok/g;
+              }
+            ' "${logs[@]}"
+          fi
+      - name: Save failure logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wallpaper-results-${{ matrix.runner }}
-          path: ${{ runner.temp }}/lumawall-checks
+          path: ${{ runner.temp }}/lumawall-checks/*/*.log
           if-no-files-found: ignore
           retention-days: 14
