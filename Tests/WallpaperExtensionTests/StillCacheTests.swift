@@ -173,6 +173,44 @@ final class StillCacheTests: XCTestCase {
         XCTAssertNil(StillCache.bmpFileSize(header: Data(repeating: 0, count: 54)))
     }
 
+    func testAHeaderWithHugeDimensionsIsRejectedWithoutOverflow() throws {
+        // Width and height of Int32.max: the padded row size times the height
+        // overflows Int before it can be compared with the file size (#68 S8).
+        var header = try XCTUnwrap(StillCache.encodeBMP(stillTestGradient(width: 5, height: 3))).prefix(54)
+        let huge = UInt32(Int32.max)
+        for offset in [18, 22] {
+            header.replaceSubrange(
+                header.startIndex + offset..<header.startIndex + offset + 4, with: withUnsafeBytes(of: huge.littleEndian) { Data($0) })
+        }
+        XCTAssertNil(StillCache.bmpFileSize(header: Data(header)))
+    }
+
+    // MARK: Pixel sizes from acquire geometry
+
+    func testPixelSizeScalesPoints() {
+        XCTAssertEqual(StillSize(points: CGSize(width: 1512, height: 982), scale: 2), StillSize(width: 3024, height: 1964))
+    }
+
+    func testPixelSizeRejectsValuesThatDontFitAnInt() {
+        // Int(_:) traps on each of these (#68 S8).
+        XCTAssertNil(StillSize(points: CGSize(width: CGFloat.nan, height: 982), scale: 2))
+        XCTAssertNil(StillSize(points: CGSize(width: 1512, height: 982), scale: .infinity))
+        XCTAssertNil(StillSize(points: CGSize(width: 1e300, height: 1e300), scale: 2))
+    }
+
+    func testPixelSizeKeepsAnEmptySize() {
+        // Didn't trap before, so it isn't refused now.
+        XCTAssertEqual(StillSize(points: .zero, scale: 2), StillSize(width: 0, height: 0))
+    }
+
+    func testPixelSizeRejectsNegativeAndImplausibleSizes() {
+        XCTAssertNil(StillSize(points: CGSize(width: -1512, height: 982), scale: 2))
+        XCTAssertNil(StillSize(points: CGSize(width: 40_000, height: 982), scale: 1))
+        // Two negatives make a positive product; the inputs are still wrong.
+        XCTAssertNil(StillSize(points: CGSize(width: -1280, height: -720), scale: -1))
+        XCTAssertNil(StillSize(points: CGSize(width: 1280, height: 720), scale: 0))
+    }
+
     // MARK: Coalescing
 
     func testAMissWhileAWriteIsInFlightJoinsIt() {

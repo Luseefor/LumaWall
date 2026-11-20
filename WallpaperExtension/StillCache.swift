@@ -60,6 +60,24 @@ struct StillSize: Hashable, Sendable {
     let height: Int
 }
 
+extension StillSize {
+    /// Larger than any display (and Metal's texture limit), so a request
+    /// past it is malformed.
+    static let maxDimension = 16_384
+
+    /// The pixel size of `points` at `scale`, or nil when a point size is
+    /// negative, the scale isn't positive, a side passes `maxDimension`, or
+    /// any of them isn't a number. `Int(_:)` traps on NaN, infinity and
+    /// values past Int.max.
+    init?(points: CGSize, scale: CGFloat) {
+        guard points.width >= 0, points.height >= 0, scale.isFinite, scale > 0 else { return nil }
+        let width = points.width * scale, height = points.height * scale
+        let limit = CGFloat(Self.maxDimension)
+        guard width.isFinite, height.isFinite, (0...limit).contains(width), (0...limit).contains(height) else { return nil }
+        self.init(width: Int(width), height: Int(height))
+    }
+}
+
 /// Decisions for the still cache. StillCacheStore does the file I/O.
 enum StillCache {
     /// About ten 4K stills (24.9 MB each).
@@ -183,7 +201,12 @@ extension StillCache {
         guard bytes[0] == 0x42, bytes[1] == 0x4D, le32(10) == UInt32(bmpHeaderSize), le32(14) == 40,
             width > 0, height > 0, bytes[28] == 24, le32(30) == 0
         else { return nil }
-        let fileSize = bmpHeaderSize + ((width * 3 + 3) & ~3) * height
+        // A hostile header can claim Int32.max by Int32.max: the row size
+        // times the height overflows Int, so check each step.
+        let rowBytes = (width * 3 + 3) & ~3
+        let (pixelBytes, overflow) = rowBytes.multipliedReportingOverflow(by: height)
+        guard !overflow, pixelBytes <= Int.max - bmpHeaderSize else { return nil }
+        let fileSize = bmpHeaderSize + pixelBytes
         return Int(le32(2)) == fileSize ? fileSize : nil
     }
 

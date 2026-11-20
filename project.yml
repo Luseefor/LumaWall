@@ -132,6 +132,8 @@ targets:
       - path: WallpaperExtension/PowerPolling.swift
       - path: WallpaperExtension/PrefsReload.swift
       - path: WallpaperExtension/LibraryScanRecord.swift
+      - path: WallpaperExtension/LibraryEntryScan.swift
+      - path: WallpaperExtension/PathSafety.swift
       - path: WallpaperExtension/StillCache.swift
       - path: WallpaperExtension/StillCacheStore.swift
       - path: WallpaperExtension/CallerAdmission.swift

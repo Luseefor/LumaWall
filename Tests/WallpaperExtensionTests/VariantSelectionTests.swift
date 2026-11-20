@@ -179,4 +179,17 @@ final class PreloadURLTests: XCTestCase {
             reducedCopy,
         )
     }
+
+    func testSourceFrameRateRoundsToWholeFrames() {
+        XCTAssertEqual(VariantSelection.wholeFPS(29.97), 30)
+        XCTAssertEqual(VariantSelection.wholeFPS(60), 60)
+    }
+
+    func testAMalformedFrameRateReadsAsUnknown() {
+        // Int(_:) traps on NaN, infinity and values past Int.max (#68 S8).
+        XCTAssertEqual(VariantSelection.wholeFPS(.nan), 0)
+        XCTAssertEqual(VariantSelection.wholeFPS(.infinity), 0)
+        XCTAssertEqual(VariantSelection.wholeFPS(1e300), 0)
+        XCTAssertEqual(VariantSelection.wholeFPS(-24), 0)
+    }
 }
