@@ -68,6 +68,6 @@ func generateThumbnail(from videoURL: URL) async -> URL? {
         return nil
     }
 
-    extensionLog("  Thumbnail saved: \(thumbnailURL.path)")
+    extensionLog("  Thumbnail saved: \(thumbnailURL.lastPathComponent)")
     return thumbnailURL
 }

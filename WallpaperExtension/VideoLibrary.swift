@@ -157,7 +157,7 @@ final class VideoLibrary: Sendable {
 
             lock.withLock { $0.append(entry) }
             saveIndex(entries)
-            extensionLog("[VideoLibrary] Added: \(entry.name) (\(id))")
+            extensionLog("[VideoLibrary] Added: \(id)")
             return id
         } catch {
             extensionLog("[VideoLibrary] Failed to add video: \(error)")

@@ -54,6 +54,8 @@ func traceLog(_ message: @autoclosure () -> String) {
     extensionLog(message())
 }
 
+/// Writes one line to extension.log, with account names stripped from any
+/// paths in it (`LogRedaction`).
 func extensionLog(_ message: String) {
-    logFile.append("[\(logDateFormatter.string(from: Date()))] \(message)\n")
+    logFile.append("[\(logDateFormatter.string(from: Date()))] \(LogRedaction.redact(message))\n")
 }

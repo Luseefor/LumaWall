@@ -124,6 +124,7 @@ targets:
       - path: WallpaperExtension/ThermalHold.swift
       - path: WallpaperExtension/RendererLifecycle.swift
       - path: WallpaperExtension/LogFile.swift
+      - path: WallpaperExtension/LogRedaction.swift
       - path: WallpaperExtension/RendererCopy.swift
       - path: WallpaperExtension/DisplaySleep.swift
       - path: WallpaperExtension/SurfaceSlot.swift
