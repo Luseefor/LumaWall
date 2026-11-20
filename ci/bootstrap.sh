@@ -12,7 +12,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tools_dir="$project_root/.tools"
 xcodegen="$tools_dir/xcodegen/bin/xcodegen"
 
-if [[ -x "$xcodegen" ]] && "$xcodegen" --version | grep -Fq "$xcodegen_version"; then
+if [[ -x "$xcodegen" ]] && "$xcodegen" --version | grep -Fqx "Version: $xcodegen_version"; then
     printf 'XcodeGen %s is already in %s\n' "$xcodegen_version" "$tools_dir/xcodegen"
     exit 0
 fi
