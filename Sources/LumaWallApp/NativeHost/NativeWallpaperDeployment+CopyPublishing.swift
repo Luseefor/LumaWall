@@ -36,10 +36,29 @@ extension NativeWallpaperDeployment {
         videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
     }
 
-    /// Exports are written here, outside the library folder the extension
-    /// scans, and moved into the entry once metadata.json can list them.
+    /// Exports are written, probed and kept here until they are moved into
+    /// the entry once metadata.json can list them. It sits next to
+    /// `transcodeSourcesFolderURL`, outside the extension's container: the
+    /// app reads an export by path, and inside the container the extension
+    /// could swap it for other bytes between the check and the read.
     static var stagingFolderURL: URL {
-        WallpaperHostCapabilities.extensionDocumentsURL.appendingPathComponent("copy-staging", isDirectory: true)
+        transcodeSourcesFolderURL.deletingLastPathComponent().appendingPathComponent("copy-staging", isDirectory: true)
+    }
+
+    /// The private staging folder, made owner-only if missing.
+    static func privateStagingFolder(_ url: URL = stagingFolderURL) throws -> TrustedDirectory {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        return try TrustedDirectory(url: url)
+    }
+
+    /// Deletes the copy-staging folder versions before this one kept in the
+    /// extension's Documents folder, without following a symlink there or
+    /// at `copy-staging`. Its exports are encoded again if still wanted.
+    static func removeLegacyCopyStaging(
+        documentsURL: URL = WallpaperHostCapabilities.extensionDocumentsURL, trustedAncestor: URL = containerURL
+    ) {
+        guard let documents = try? TrustedDirectory(url: documentsURL, below: trustedAncestor) else { return }
+        try? documents.removeItem(named: "copy-staging")
     }
 
     /// The extension's container. The extension can write anything inside
@@ -148,12 +167,7 @@ extension NativeWallpaperDeployment {
         readiness: { readiness(of: $0) },
         encode: { job in
             let staged = stagedURL(for: job)
-            // Made through the container's descriptors, so a symlinked
-            // Documents folder can't put copy-staging somewhere else.
-            guard
-                let staging = try? trustedFolder(stagingFolderURL.deletingLastPathComponent())
-                    .makeSubdirectory(named: stagingFolderURL.lastPathComponent)
-            else { return .failed }
+            guard let staging = try? privateStagingFolder() else { return .failed }
             // A finished export whose publication failed is reused, not redone.
             if !reusableExport(named: staged.lastPathComponent, in: staging) {
                 // Encoded from a private copy: AVFoundation reads by path,
@@ -170,12 +184,9 @@ extension NativeWallpaperDeployment {
                 case .skipped: return .notNow
                 }
             }
+            // By path, which is safe here: the extension can't reach staging.
             guard let resolution = await videoSize(of: staged) else {
-                // The probe went by path; delete only if that path still
-                // names the folder checked above.
-                if let current = try? trustedFolder(stagingFolderURL).identity(), current == (try? staging.identity()) {
-                    try? staging.removeFile(named: staged.lastPathComponent)
-                }
+                try? staging.removeFile(named: staged.lastPathComponent)
                 return .failed
             }
             switch publish(staged, job: job, resolution: resolution) {
@@ -189,6 +200,7 @@ extension NativeWallpaperDeployment {
         },
         prepare: {
             transcodeSources.removeLeftovers()
+            removeLegacyCopyStaging()
             cleanUpAbandonedExports(
                 videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL, trustedAncestor: containerURL)
         },
@@ -298,13 +310,17 @@ extension NativeWallpaperDeployment {
     /// pick one as the wallpaper.
     ///
     /// Only `.mov` files are deleted, through `TrustedDirectory` opened
-    /// below `trustedAncestor`: a staging or entry folder, or any folder
-    /// above them, swapped for a symlink can't steer the delete elsewhere.
-    static func cleanUpAbandonedExports(videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL) {
+    /// below `trustedAncestor` (and the staging folder below
+    /// `stagingAncestor`, by default itself): a staging or entry folder, or
+    /// any folder between them and their ancestor, swapped for a symlink
+    /// can't steer the delete elsewhere.
+    static func cleanUpAbandonedExports(
+        videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL, stagingAncestor: URL? = nil
+    ) {
         // Without a trustworthy videos folder, no staged export can be shown
         // stale, so everything is kept.
         guard let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) else { return }
-        if let staging = try? TrustedDirectory(url: stagingFolderURL, below: trustedAncestor) {
+        if let staging = try? TrustedDirectory(url: stagingFolderURL, below: stagingAncestor ?? stagingFolderURL) {
             for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasSuffix(".mov") {
                 let parts = file.name.split(separator: ".", maxSplits: 2).map(String.init)
                 let keep =
