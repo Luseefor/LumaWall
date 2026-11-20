@@ -84,15 +84,20 @@ enum NativeWallpaperAssignmentStore {
         return true
     }
 
+    /// Returns how many Idle surfaces it changed.
+    @discardableResult
     static func updateIdleEverywhere(
         root: NSMutableDictionary,
         choiceID: String,
         videoURL: URL
-    ) {
+    ) -> Int {
+        var count = 0
         func walkDisplays(_ displays: NSMutableDictionary) {
             for value in displays.allValues {
                 guard let display = value as? NSMutableDictionary else { continue }
-                _ = updateSurface(display["Idle"] as? NSMutableDictionary, choiceID: choiceID, videoURL: videoURL)
+                if updateSurface(display["Idle"] as? NSMutableDictionary, choiceID: choiceID, videoURL: videoURL) {
+                    count += 1
+                }
             }
         }
         if let displays = root["Displays"] as? NSMutableDictionary {
@@ -106,12 +111,36 @@ enum NativeWallpaperAssignmentStore {
                 walkDisplays(displays)
             }
         }
+        return count
     }
 }
 
 // MARK: Backup and restore
 
 extension NativeWallpaperAssignmentStore {
+    /// Paths of the surfaces that differ between `original` and `root`,
+    /// including ones only one of them counts as a surface.
+    static func changedSurfacePaths(from original: NSDictionary, to root: NSDictionary) -> [[String]] {
+        var seen = Set<[String]>()
+        return (surfacePaths(in: root) + surfacePaths(in: original)).filter { path in
+            guard seen.insert(path).inserted else { return false }
+            let now = value(at: path, in: root) as? NSDictionary
+            let then = value(at: path, in: original) as? NSDictionary
+            return now.map { !$0.isEqual(then) } ?? (then != nil)
+        }
+    }
+
+    /// True when the `Content` of every surface at `paths` in `check` equals
+    /// the one in `expected`. Timestamps such as `LastUse` aren't compared:
+    /// WallpaperAgent updates them on its own.
+    static func contents(at paths: [[String]], in check: NSDictionary, match expected: NSDictionary) -> Bool {
+        paths.allSatisfy { path in
+            let wanted = (value(at: path, in: expected) as? NSDictionary)?["Content"] as? NSDictionary
+            let found = (value(at: path, in: check) as? NSDictionary)?["Content"] as? NSDictionary
+            return wanted.map { $0.isEqual(found) } ?? (found == nil)
+        }
+    }
+
     /// Key paths to every surface in the store: any dictionary whose
     /// `Content` holds `Choices` (Desktop and Idle, per display and per Space).
     static func surfacePaths(in root: NSDictionary) -> [[String]] {
@@ -190,7 +219,7 @@ extension NativeWallpaperAssignmentStore {
         return result
     }
 
-    private static func value(at path: [String], in root: NSDictionary) -> Any? {
+    static func value(at path: [String], in root: NSDictionary) -> Any? {
         var node: Any? = root
         for key in path { node = (node as? NSDictionary)?[key] }
         return node

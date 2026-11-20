@@ -12,20 +12,67 @@ final class FakeSystemWallpaperFiles: SystemWallpaperFiles {
     var backupWrites = 0
     var agentRestarts = 0
     var readError: (any Error)?
+    var reads = 0
+    var transactions = 0
+    /// Runs after each read, with its number, standing in for WallpaperAgent
+    /// changing the file without coordination.
+    var afterRead: ((Int) -> Void)?
+    /// Runs after each successful write, with its number.
+    var afterWrite: ((Int) -> Void)?
+    /// The next write fails; with `truncate`, it leaves a cut-off file.
+    var failNextWrite = false
+    var truncateOnFailure = false
+    /// What a failed write leaves behind, when it isn't LumaWall's own cut-off write.
+    var failureLeaves: Data?
+    /// The URL the coordinator grants, and every URL the store was read or written through.
+    /// Read errors for given read numbers, standing in for transient failures.
+    var readErrors: [Int: any Error] = [:]
+    var grantedURL = URL(fileURLWithPath: "/granted/Index.plist")
+    var usedURLs: [URL] = []
 
     init(store: [String: Any]) {
         self.store = try? PropertyListSerialization.data(fromPropertyList: store, format: .binary, options: 0)
     }
 
-    func readStore() throws -> Data {
+    func readStore(at url: URL) throws -> Data {
+        usedURLs.append(url)
         if let readError { throw readError }
-        guard let store else { throw CocoaError(.fileReadNoSuchFile) }
-        return store
+        guard let current = store else { throw CocoaError(.fileReadNoSuchFile) }
+        reads += 1
+        if let error = readErrors[reads] { throw error }
+        afterRead?(reads)
+        return current
     }
 
-    func writeStore(_ data: Data) throws {
+    func writeStore(_ data: Data, to url: URL) throws {
+        usedURLs.append(url)
         storeWrites += 1
+        if failNextWrite {
+            failNextWrite = false
+            if let failureLeaves {
+                store = failureLeaves
+            } else if truncateOnFailure {
+                store = data.prefix(data.count / 2)
+            } else {
+                afterWrite?(storeWrites)
+            }
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
         store = data
+        afterWrite?(storeWrites)
+    }
+
+    func coordinateStore(_ body: (URL) throws -> Void) throws {
+        transactions += 1
+        try body(grantedURL)
+    }
+
+    /// Replaces the store as another writer would.
+    func replaceStore(_ edit: (inout [String: Any]) -> Void) {
+        guard var root = try? PropertyListSerialization.propertyList(from: store ?? Data(), format: nil) as? [String: Any]
+        else { return }
+        edit(&root)
+        store = try? PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
     }
 
     func readBackup() throws -> Data? { backup }
@@ -38,7 +85,7 @@ final class FakeSystemWallpaperFiles: SystemWallpaperFiles {
     func restartWallpaperAgent() { agentRestarts += 1 }
 
     func storeRoot() throws -> [String: Any] {
-        try XCTUnwrap(PropertyListSerialization.propertyList(from: readStore(), format: nil) as? [String: Any])
+        try XCTUnwrap(PropertyListSerialization.propertyList(from: XCTUnwrap(store), format: nil) as? [String: Any])
     }
 }
 
@@ -257,5 +304,221 @@ final class NativeWallpaperAssignmentServiceTests: XCTestCase {
 
         XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-A"), "beach")
         XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-B"), "desert")
+    }
+
+    // MARK: Coordinated read-merge-write
+
+    private func setDesktop(_ root: inout [String: Any], _ display: String, config: String) {
+        var displays = root["Displays"] as? [String: Any] ?? [:]
+        displays[display] = ["Desktop": surface(provider: "com.apple.wallpaper.choice.image", config: config)]
+        root["Displays"] = displays
+    }
+
+    func testKeepsAChangeMacOSMadeToAnotherDisplayDuringTheWrite() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.afterRead = { read in
+            // WallpaperAgent changes display B right after LumaWall first reads.
+            if read == 1 { files.replaceStore { self.setDesktop(&$0, "DISPLAY-B", config: "desert") } }
+        }
+        try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])
+
+        let root = try files.storeRoot()
+        XCTAssertEqual(provider(root, "DISPLAY-A"), ours)
+        XCTAssertEqual(config(root, "DISPLAY-B"), "desert")
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testReappliesWhenMacOSOverwritesTheStoreRightAfterTheWrite() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.afterWrite = { write in
+            if write == 1 { files.replaceStore { self.setDesktop(&$0, "DISPLAY-A", config: "beach") } }
+        }
+        try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])
+
+        XCTAssertEqual(provider(try files.storeRoot(), "DISPLAY-A"), ours)
+        XCTAssertEqual(files.storeWrites, 2)
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testGivesUpOnAStoreThatKeepsChangingWithoutRestoringAnOldCopy() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        var latest = 0
+        files.afterRead = { _ in
+            latest += 1
+            files.replaceStore { self.setDesktop(&$0, "DISPLAY-B", config: "other-\(latest)") }
+        }
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])) {
+            guard case NativeWallpaperAssignmentService.AssignmentError.verificationFailed = $0 else {
+                return XCTFail("unexpected error \($0)")
+            }
+        }
+        files.afterRead = nil
+        XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-B"), "other-\(latest)")
+        XCTAssertEqual(files.agentRestarts, 0)
+    }
+
+    func testAFailedWriteThatCorruptedTheStorePutsBackTheCopyItRead() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        let before = files.store
+        files.failNextWrite = true
+        files.truncateOnFailure = true
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry]))
+        XCTAssertEqual(files.store, before)
+        XCTAssertEqual(files.agentRestarts, 0)
+    }
+
+    func testAFailedWriteLeavesANewerStoreAlone() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.failNextWrite = true
+        // The write fails cleanly, and macOS changes the file right after.
+        files.afterWrite = { _ in files.replaceStore { self.setDesktop(&$0, "DISPLAY-B", config: "desert") } }
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry]))
+        XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-B"), "desert")
+        XCTAssertEqual(files.storeWrites, 1)
+    }
+
+    func testEveryWriteHappensInsideOneCoordinatedTransaction() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])
+        XCTAssertEqual(files.transactions, 1)
+    }
+
+    func testLockScreenApplyWithNoIdleEntriesWritesNothing() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        try service(files, nativeModeEnabled: true).applyLockScreen(entry: entry)
+        XCTAssertEqual(files.storeWrites, 0)
+        XCTAssertEqual(files.agentRestarts, 0)
+    }
+
+    func testLockScreenApplySetsEveryIdleEntry() throws {
+        var store = appleStore()
+        store["Displays"] = [
+            "DISPLAY-A": ["Idle": surface(provider: "com.apple.wallpaper.choice.aerials", config: "tahoe")]
+        ]
+        let files = FakeSystemWallpaperFiles(store: store)
+        try service(files, nativeModeEnabled: true).applyLockScreen(entry: entry)
+        let display = (try files.storeRoot()["Displays"] as? [String: Any])?["DISPLAY-A"] as? [String: Any]
+        let idle = (display?["Idle"] as? [String: Any])?["Content"] as? [String: Any]
+        XCTAssertEqual(((idle?["Choices"] as? [[String: Any]])?.first)?["Provider"] as? String, ours)
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testReadsAndWritesGoThroughTheGrantedURL() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])
+        XCTAssertFalse(files.usedURLs.isEmpty)
+        XCTAssertEqual(Set(files.usedURLs), [files.grantedURL])
+    }
+
+    func testAFailedWriteLeavesAnotherWritersHalfWrittenFileAlone() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        let theirs = Data("bplist00-from-someone-else".utf8)
+        files.failNextWrite = true
+        files.failureLeaves = theirs
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry]))
+        XCTAssertEqual(files.store, theirs)
+    }
+
+    func testReappliesWhenMacOSDropsASpaceEntryRightAfterTheWrite() throws {
+        var store = appleStore()
+        store["Spaces"] = [
+            "SPACE-1": ["Displays": ["DISPLAY-A": ["Desktop": surface(provider: "com.apple.wallpaper.choice.image", config: "beach")]]]
+        ]
+        let files = FakeSystemWallpaperFiles(store: store)
+        files.afterWrite = { write in
+            guard write == 1 else { return }
+            files.replaceStore { $0["Spaces"] = ["SPACE-1": ["Displays": [String: Any]()]] }
+        }
+        try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])
+        XCTAssertEqual(files.storeWrites, 2)
+        XCTAssertEqual(provider(try files.storeRoot(), "DISPLAY-A"), ours)
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testWaitsOutAHalfWrittenStoreAfterAConflict() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        var finished: Data?
+        files.afterRead = { read in
+            switch read {
+            case 1: files.replaceStore { self.setDesktop(&$0, "DISPLAY-B", config: "desert") }
+            case 2:
+                // The agent is part-way through its next write.
+                finished = files.store
+                files.store = Data("bplist00-half".utf8)
+            case 3: files.store = finished
+            default: break
+            }
+        }
+        try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])
+        files.afterRead = nil
+        XCTAssertEqual(provider(try files.storeRoot(), "DISPLAY-A"), ours)
+        XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-B"), "desert")
+    }
+
+    func testAFailedWriteLeavesTheAgentsTruncatedFileAlone() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.failNextWrite = true
+        // Only the plist header: it matches LumaWall's write too, but proves nothing.
+        files.failureLeaves = Data("bplist00".utf8)
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry]))
+        XCTAssertEqual(files.store, Data("bplist00".utf8))
+    }
+
+    func testRestoresASurfaceWhoseSavedCopyHadNoChoices() throws {
+        var store = appleStore()
+        store["Displays"] = [
+            "DISPLAY-A": ["Desktop": ["Content": ["Shuffle": "$null"]]],
+            "DISPLAY-B": ["Desktop": surface(provider: "com.apple.wallpaper.choice.image", config: "forest")],
+        ]
+        let files = FakeSystemWallpaperFiles(store: store)
+        let service = service(files, nativeModeEnabled: true)
+        try service.apply(assignments: ["DISPLAY-A": entry])
+        files.agentRestarts = 0
+
+        _ = try service.restoreOriginalWallpaper()
+
+        XCTAssertNil(provider(try files.storeRoot(), "DISPLAY-A"))
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testRestoreStillRestartsTheAgentWhenItsCheckReadFailedOnce() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        let service = service(files, nativeModeEnabled: true)
+        try service.apply(assignments: ["DISPLAY-A": entry])
+        files.agentRestarts = 0
+        // Restore reads: 1 before, 2 conflict check, 3 the check after writing.
+        files.readErrors = [files.reads + 3: CocoaError(.fileReadUnknown)]
+
+        let result = try service.restoreOriginalWallpaper()
+
+        XCTAssertEqual(result, .init(restored: 1, missing: 0))
+        XCTAssertEqual(config(try files.storeRoot(), "DISPLAY-A"), "beach")
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testTheAgentBumpingLastUseDoesNotFailTheCheck() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.afterWrite = { _ in
+            files.replaceStore { root in
+                var displays = root["Displays"] as? [String: Any] ?? [:]
+                var display = displays["DISPLAY-A"] as? [String: Any] ?? [:]
+                var desktop = display["Desktop"] as? [String: Any] ?? [:]
+                desktop["LastUse"] = Date(timeIntervalSinceNow: 60)
+                display["Desktop"] = desktop
+                displays["DISPLAY-A"] = display
+                root["Displays"] = displays
+            }
+        }
+        try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])
+        XCTAssertEqual(files.storeWrites, 1)
+        XCTAssertEqual(files.agentRestarts, 1)
+    }
+
+    func testAPermissionErrorOnTheCheckReadReachesTheCaller() throws {
+        let files = FakeSystemWallpaperFiles(store: appleStore())
+        files.readErrors = [3: CocoaError(.fileReadNoPermission)]
+        XCTAssertThrowsError(try service(files, nativeModeEnabled: true).apply(assignments: ["DISPLAY-A": entry])) {
+            XCTAssertTrue(WallpaperHostCapabilities.isPermissionError($0), "\($0)")
+        }
     }
 }

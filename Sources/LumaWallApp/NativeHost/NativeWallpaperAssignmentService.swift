@@ -6,8 +6,13 @@ import Foundation
 /// Tests swap in an in-memory fake.
 @MainActor
 protocol SystemWallpaperFiles {
-    func readStore() throws -> Data
-    func writeStore(_ data: Data) throws
+    /// Runs `body` while holding a coordinated write on the store, so its
+    /// reads and writes form one transaction for coordinating writers.
+    /// `body` gets the URL the coordinator granted and reads and writes the
+    /// store only through it.
+    func coordinateStore(_ body: (URL) throws -> Void) throws
+    func readStore(at url: URL) throws -> Data
+    func writeStore(_ data: Data, to url: URL) throws
     func readBackup() throws -> Data?
     func writeBackup(_ data: Data) throws
     func restartWallpaperAgent()
@@ -121,90 +126,178 @@ struct NativeWallpaperAssignmentService {
     func apply(assignments: [String: NativeWallpaperDeployment.EntryInfo]) throws -> Set<String> {
         guard nativeModeEnabled() else { throw AssignmentError.nativeModeOff }
         nativeHostLog.info("assignment: begin for \(assignments.count) display(s)")
-        let (original, root) = try readStore()
         var changed = Set<String>()
-        for (uuid, entry) in assignments {
-            changed.formUnion(
-                NativeWallpaperAssignmentStore.update(
-                    root: root,
-                    choiceID: entry.id,
-                    videoURL: NativeWallpaperDeployment.videoURL(for: entry),
-                    displayUUIDs: [uuid]
-                ))
+        try transact(savingBackup: true) { root in
+            changed = []
+            for (uuid, entry) in assignments {
+                changed.formUnion(
+                    NativeWallpaperAssignmentStore.update(
+                        root: root,
+                        choiceID: entry.id,
+                        videoURL: NativeWallpaperDeployment.videoURL(for: entry),
+                        displayUUIDs: [uuid]
+                    ))
+            }
+            let missing = Set(assignments.keys).subtracting(changed)
+            if !missing.isEmpty {
+                let names = missing.sorted().joined(separator: ", ")
+                let known = ((root["Displays"] as? NSDictionary)?.allKeys as? [String] ?? []).sorted().joined(separator: ", ")
+                nativeHostLog.error(
+                    "assign: no Desktop surface for display(s) [\(names, privacy: .public)]; store has [\(known, privacy: .public)]")
+            }
+            guard !changed.isEmpty else { throw AssignmentError.unknownDisplay }
         }
-        let missing = Set(assignments.keys).subtracting(changed)
-        if !missing.isEmpty {
-            let names = missing.sorted().joined(separator: ", ")
-            let known = ((root["Displays"] as? NSDictionary)?.allKeys as? [String] ?? []).sorted().joined(separator: ", ")
-            nativeHostLog.error(
-                "assign: no Desktop surface for display(s) [\(names, privacy: .public)]; store has [\(known, privacy: .public)]")
-        }
-        guard !changed.isEmpty else { throw AssignmentError.unknownDisplay }
-        try replaceStore(original: original, with: root)
         nativeHostLog.info("assignment: verified; restarted WallpaperAgent")
-        return missing
+        return Set(assignments.keys).subtracting(changed)
     }
 
     func applyLockScreen(entry: NativeWallpaperDeployment.EntryInfo) throws {
         guard nativeModeEnabled() else { throw AssignmentError.nativeModeOff }
-        let (original, root) = try readStore()
-        NativeWallpaperAssignmentStore.updateIdleEverywhere(
-            root: root,
-            choiceID: entry.id,
-            videoURL: NativeWallpaperDeployment.videoURL(for: entry)
-        )
-        try replaceStore(original: original, with: root)
+        try transact(savingBackup: true) { root in
+            NativeWallpaperAssignmentStore.updateIdleEverywhere(
+                root: root,
+                choiceID: entry.id,
+                videoURL: NativeWallpaperDeployment.videoURL(for: entry)
+            )
+        }
     }
 
     /// Puts the user's own wallpaper back on every surface LumaWall took
     /// over, from the backup. Surfaces with no saved wallpaper stay as they
     /// are and are counted in `missing`.
     func restoreOriginalWallpaper() throws -> RestoreResult {
-        let (original, root) = try readStore()
-        let backup = try files.readBackup().flatMap {
-            try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary
+        let backup =
+            try files.readBackup().flatMap {
+                try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary
+            } ?? [:]
+        var result = RestoreResult(restored: 0, missing: 0)
+        try transact(savingBackup: false) { root in
+            let attempt = NativeWallpaperAssignmentStore.restoreOriginal(root: root, backup: backup, ownedFolders: ownedFolders)
+            // A retry after a write that landed finds nothing left to restore;
+            // keep what that write restored.
+            if attempt.restored > 0 || result.restored == 0 { result = attempt }
         }
-        let result = NativeWallpaperAssignmentStore.restoreOriginal(
-            root: root, backup: backup ?? [:], ownedFolders: ownedFolders)
-        guard result.restored > 0 else { return result }
-        try replaceStore(original: original, with: root, savingBackup: false)
-        nativeHostLog.info("restore original: \(result.restored) surface(s) restored, \(result.missing) without a backup")
+        if result.restored > 0 {
+            nativeHostLog.info("restore original: \(result.restored) surface(s) restored, \(result.missing) without a backup")
+        }
         return result
     }
 
-    private func readStore() throws -> (Data, NSMutableDictionary) {
-        let original: Data
-        do { original = try files.readStore() } catch {
+    private enum Attempt { case nothingToWrite, written, conflict }
+
+    /// Tries per change before giving up with `verificationFailed`.
+    private static let maxAttempts = 3
+
+    /// One coordinated read-merge-write of the store. `merge` edits a fresh
+    /// parse; the surfaces it changed are written, then checked on disk.
+    ///
+    /// WallpaperAgent writes the file without coordinating. So the file is
+    /// read again right before writing, and a change since the first read,
+    /// a half-written file, or a write that doesn't survive the check makes
+    /// the merge run again on the newer file. An older copy is never written
+    /// back over someone else's change. A change the agent makes between
+    /// that last read and the write is still lost; only the agent
+    /// coordinating could close that.
+    ///
+    /// Restarts WallpaperAgent after a verified write and returns whether
+    /// anything was written.
+    @discardableResult
+    private func transact(savingBackup: Bool, merge: (NSMutableDictionary) throws -> Void) throws -> Bool {
+        var sawConflict = false
+        // An earlier attempt's write may have landed even though its check
+        // couldn't confirm it.
+        var wrote = false
+        for attempt in 1...Self.maxAttempts {
+            var outcome = Attempt.nothingToWrite
+            try files.coordinateStore { url in
+                let before: Data
+                let original: NSMutableDictionary
+                let root: NSMutableDictionary
+                do {
+                    before = try readStoreData(at: url)
+                    original = try parse(before)
+                    root = try parse(before)
+                } catch {
+                    // After a conflict the agent may still be part-way through its write.
+                    guard sawConflict, attempt < Self.maxAttempts else { throw error }
+                    outcome = .conflict
+                    return
+                }
+                try merge(root)
+                let changed = NativeWallpaperAssignmentStore.changedSurfacePaths(from: original, to: root)
+                guard !changed.isEmpty else { return }
+                let encoded = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+                if savingBackup { try saveBackup(before) }
+                guard try reread(at: url) == before else {
+                    outcome = .conflict
+                    return
+                }
+                do {
+                    try files.writeStore(encoded, to: url)
+                } catch {
+                    logFailure("write", error)
+                    repairAfterFailedWrite(before: before, written: encoded, at: url)
+                    if WallpaperHostCapabilities.isPermissionError(error) { throw error }
+                    throw AssignmentError.writeFailed(error.localizedDescription)
+                }
+                wrote = true
+                let check = try reread(at: url).flatMap { try? parse($0) }
+                let kept = check.map { NativeWallpaperAssignmentStore.contents(at: changed, in: $0, match: root) } ?? false
+                outcome = kept ? .written : .conflict
+            }
+            switch outcome {
+            case .nothingToWrite:
+                guard wrote else { return false }
+                files.restartWallpaperAgent()
+                return true
+            case .written:
+                files.restartWallpaperAgent()
+                return true
+            case .conflict:
+                sawConflict = true
+                nativeHostLog.notice("assignment: the store changed under the write (attempt \(attempt)); merging again")
+            }
+        }
+        nativeHostLog.error("assignment: store kept changing; gave up after \(Self.maxAttempts) attempts")
+        throw AssignmentError.verificationFailed
+    }
+
+    /// After a failed write, puts back the copy this transaction read, but
+    /// only when the file is a cut-off copy of LumaWall's own write: it
+    /// doesn't parse, and it runs past the first byte where LumaWall's write
+    /// differs from the file it read, which another writer wouldn't produce.
+    /// Anything else stays. If the agent finishes a write of its own between
+    /// this check and the put-back, that write is lost.
+    private func repairAfterFailedWrite(before: Data, written: Data, at url: URL) {
+        let shared = zip(before, written).prefix { $0 == $1 }.count
+        guard let current = try? files.readStore(at: url), current.count > shared,
+            (try? parse(current)) == nil, written.starts(with: current)
+        else { return }
+        try? files.writeStore(before, to: url)
+    }
+
+    /// Reads the store again inside a transaction. Nil when it can't be read
+    /// right now; permission errors still reach the caller.
+    private func reread(at url: URL) throws -> Data? {
+        do { return try files.readStore(at: url) } catch {
+            if WallpaperHostCapabilities.isPermissionError(error) { throw error }
+            return nil
+        }
+    }
+
+    private func readStoreData(at url: URL) throws -> Data {
+        do { return try files.readStore(at: url) } catch {
             logFailure("read", error)
             // Callers switch every display to the overlay on a permission error.
             if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             throw AssignmentError.unreadableStore
         }
-        let source = try PropertyListSerialization.propertyList(
-            from: original,
-            options: [.mutableContainersAndLeaves],
-            format: nil
-        )
-        guard let root = source as? NSMutableDictionary else { throw AssignmentError.invalidStore }
-        return (original, root)
     }
 
-    /// Writes `root`, checks macOS kept it, puts `original` back if not, and
-    /// restarts WallpaperAgent so it loads the new choices.
-    private func replaceStore(original: Data, with root: NSMutableDictionary, savingBackup: Bool = true) throws {
-        let encoded = try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
-        if savingBackup { try saveBackup(original) }
-        do {
-            try files.writeStore(encoded)
-            guard try files.readStore() == encoded else { throw AssignmentError.verificationFailed }
-        } catch {
-            logFailure("write", error)
-            try? files.writeStore(original)
-            if let assignmentError = error as? AssignmentError { throw assignmentError }
-            if WallpaperHostCapabilities.isPermissionError(error) { throw error }
-            throw AssignmentError.writeFailed(error.localizedDescription)
-        }
-        files.restartWallpaperAgent()
+    private func parse(_ data: Data) throws -> NSMutableDictionary {
+        let source = try PropertyListSerialization.propertyList(from: data, options: [.mutableContainersAndLeaves], format: nil)
+        guard let root = source as? NSMutableDictionary else { throw AssignmentError.invalidStore }
+        return root
     }
 
     /// Keeps, per surface, the last wallpaper that wasn't LumaWall's, so a
@@ -246,25 +339,28 @@ struct LiveSystemWallpaperFiles: SystemWallpaperFiles {
             .appendingPathComponent("WallpaperIndex.plist")
     }
 
-    func readStore() throws -> Data { try Data(contentsOf: Self.storeURL) }
+    /// Holds a coordinated write on `Index.plist` while `body` reads,
+    /// merges and writes it through the granted URL. `.forMerging` tells
+    /// other coordinating processes the file is read and rewritten in place.
+    func coordinateStore(_ body: (URL) throws -> Void) throws {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var bodyError: (any Error)?
+        coordinator.coordinate(writingItemAt: Self.storeURL, options: .forMerging, error: &coordinationError) { grantedURL in
+            do { try body(grantedURL) } catch { bodyError = error }
+        }
+        if let coordinationError { throw coordinationError }
+        if let bodyError { throw bodyError }
+    }
+
+    func readStore(at url: URL) throws -> Data { try Data(contentsOf: url) }
 
     /// `Index.plist` is a live file owned by WallpaperAgent. Foundation's
     /// `.atomic` option creates and renames a sibling temporary file, which can
-    /// fail while the agent is observing the directory. Coordinate the replace
-    /// and write the already-encoded plist to the granted URL instead.
-    func writeStore(_ data: Data) throws {
-        let coordinator = NSFileCoordinator(filePresenter: nil)
-        var coordinationError: NSError?
-        var writeError: (any Error)?
-        coordinator.coordinate(writingItemAt: Self.storeURL, options: .forReplacing, error: &coordinationError) { grantedURL in
-            do {
-                try data.write(to: grantedURL, options: [])
-            } catch {
-                writeError = error
-            }
-        }
-        if let coordinationError { throw coordinationError }
-        if let writeError { throw writeError }
+    /// fail while the agent is observing the directory, so this writes in
+    /// place. Call it inside `coordinateStore`.
+    func writeStore(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: [])
     }
 
     func readBackup() throws -> Data? {
