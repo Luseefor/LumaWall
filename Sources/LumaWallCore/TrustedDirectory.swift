@@ -106,6 +106,26 @@ public final class TrustedDirectory {
         return try handle.readToEnd() ?? Data()
     }
 
+    /// Writes `contents` to `name` in one step: the bytes go to a new hidden
+    /// file opened `O_EXCL | O_NOFOLLOW`, which is then renamed over `name`.
+    /// A symlink at `name` is replaced, never written through. Fails on a
+    /// folder at `name`, leaving nothing behind.
+    public func writeFile(named name: String, contents: Data) throws {
+        try Self.checkName(name)
+        let temp = ".\(name).\(UUID().uuidString).tmp"
+        let file = openat(fd, temp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
+        guard file >= 0 else { throw POSIXError.current }
+        do {
+            let handle = FileHandle(fileDescriptor: file, closeOnDealloc: true)
+            try handle.write(contentsOf: contents)
+            try handle.close()
+            guard renameat(fd, temp, fd, name) == 0 else { throw POSIXError.current }
+        } catch {
+            unlinkat(fd, temp, 0)
+            throw error
+        }
+    }
+
     /// Deletes `name` only when it is a file or a symlink. Refuses folders.
     public func removeFile(named name: String) throws {
         try Self.checkName(name)
