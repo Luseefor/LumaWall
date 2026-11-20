@@ -11,6 +11,7 @@ mkdir -p "$output_root"
 run_dir="$(mktemp -d "$output_root/run.XXXXXX")"
 printf 'Validation results: %s\n' "$run_dir"
 
+swift format lint --strict --recursive Sources WallpaperExtension Tests
 swift test 2>&1 | tee "$run_dir/core-tests.log"
 xcodegen generate
 
