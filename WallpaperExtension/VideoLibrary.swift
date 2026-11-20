@@ -3,19 +3,6 @@ import Foundation
 import ImageIO
 import os
 
-struct VideoEntry: Codable {
-    let id: String
-    var name: String
-    var filename: String
-    var duration: Double
-    var fps: Double
-    var resolution: CGSize
-    var dateAdded: Date
-    var variants: [VideoVariant]?
-    var contentHash: String?
-    var audioStripped: Bool?
-}
-
 final class VideoLibrary: Sendable {
     static let shared = VideoLibrary()
 
@@ -80,9 +67,10 @@ final class VideoLibrary: Sendable {
                 sourceFPS: VariantSelection.wholeFPS(entry.fps),
                 sourceResolution: entry.resolution,
                 // A copy listed in metadata but missing on disk would leave the
-                // renderer retrying a dead URL; choose among files that exist.
+                // renderer retrying a dead URL; choose among files that exist,
+                // and never a symlink out of the entry.
                 variants: (entry.variants ?? []).filter {
-                    FileManager.default.fileExists(atPath: variantURL(for: id, variant: $0).path)
+                    LibraryEntryScan.isRegularFile(variantURL(for: id, variant: $0))
                 },
                 displayPixels: displayPixels,
             )
@@ -109,54 +97,18 @@ final class VideoLibrary: Sendable {
             return
         }
 
-        for dir in subdirs where dir.hasDirectoryPath {
-            let id = dir.lastPathComponent
-
-            // Quarantine anything that isn't a well-formed entry directory.
-            // Skip (never delete) so a corrupt or hand-edited library can't make
-            // a stray name drive a removal outside the tree.
-            guard PathSafety.isValidEntryID(id) else {
-                extensionLog("[VideoLibrary] Skipping non-UUID directory: \(id)")
-                continue
-            }
-
-            let metadataURL = dir.appendingPathComponent("metadata.json")
-
-            if let data = try? Data(contentsOf: metadataURL),
-                let entry = try? JSONDecoder().decode(VideoEntry.self, from: data)
-            {
-                // Metadata id must match its containing directory, and the
-                // filename must be a safe basename that resolves inside `dir`.
-                guard entry.id == id, PathSafety.isSafeComponent(entry.filename) else {
-                    extensionLog("[VideoLibrary] Quarantining \(id): metadata id/filename mismatch or unsafe")
+        // Read-only: the app publishes and prunes entries, and may be
+        // staging one right now (`LibraryEntryScan`).
+        for dir in subdirs {
+            switch LibraryEntryScan.read(directory: dir) {
+            case let .entry(entry):
+                guard PathSafety.contained(videoURL(for: entry), in: videosDir) else {
+                    extensionLog("[VideoLibrary] Skipping \(entry.id): video path escapes library")
                     continue
                 }
-                let videoFile = dir.appendingPathComponent(entry.filename)
-                guard PathSafety.contained(videoFile, in: videosDir) else {
-                    extensionLog("[VideoLibrary] Quarantining \(id): video path escapes library")
-                    continue
-                }
-                guard fm.fileExists(atPath: videoFile.path) else {
-                    extensionLog("[VideoLibrary] Pruning orphaned entry \(id): video file missing")
-                    try? fm.removeItem(at: dir)
-                    continue
-                }
-                discovered.append(sanitizingVariants(entry))
-            } else if let videoFile = findVideoFile(in: dir) {
-                let entry = VideoEntry(
-                    id: id,
-                    name: videoFile.deletingPathExtension().lastPathComponent,
-                    filename: videoFile.lastPathComponent,
-                    duration: 0,
-                    fps: 0,
-                    resolution: .zero,
-                    dateAdded: Date(),
-                )
                 discovered.append(entry)
-                try? JSONEncoder().encode(entry).write(to: metadataURL)
-            } else {
-                extensionLog("[VideoLibrary] Pruning empty directory \(id): no video file found")
-                try? fm.removeItem(at: dir)
+            case let .skipped(reason):
+                extensionLog("[VideoLibrary] Skipping \(dir.lastPathComponent): \(reason)")
             }
         }
 
@@ -231,18 +183,6 @@ final class VideoLibrary: Sendable {
         extensionLog("[VideoLibrary] Removed: \(id)")
     }
 
-    /// Drop any variants whose filename isn't a safe basename, so a corrupt
-    /// metadata.json can't steer variant selection to an out-of-tree path.
-    private func sanitizingVariants(_ entry: VideoEntry) -> VideoEntry {
-        guard let variants = entry.variants else { return entry }
-        let safe = variants.filter { PathSafety.isSafeComponent($0.filename) }
-        guard safe.count != variants.count else { return entry }
-        extensionLog("[VideoLibrary] Dropped \(variants.count - safe.count) unsafe variant(s) from \(entry.id)")
-        var copy = entry
-        copy.variants = safe.isEmpty ? nil : safe
-        return copy
-    }
-
     /// Update metadata for a video entry (e.g., after probing duration/fps/resolution).
     func updateMetadata(for id: String, duration: Double, fps: Double, resolution: CGSize) {
         lock.withLock { entries in
@@ -307,18 +247,6 @@ final class VideoLibrary: Sendable {
 
     private func saveIndex(_ entries: [VideoEntry]) {
         try? JSONEncoder().encode(entries).write(to: indexURL, options: .atomic)
-    }
-
-    private func findVideoFile(in directory: URL) -> URL? {
-        let extensions = ["mp4", "mov", "m4v"]
-        guard
-            let contents = try? FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: nil,
-            )
-        else { return nil }
-        return contents.first { file in
-            extensions.contains(file.pathExtension.lowercased())
-        }
     }
 
     /// Migrate legacy single-file `wallpaper.{mp4,mov,m4v}` from Documents root into the library.
