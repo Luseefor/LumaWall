@@ -15,20 +15,18 @@ extension WallpaperXPCHandler {
     private func removeChoiceRequestBody(request: Any?, reply: @escaping @Sendable ((any Error)?) -> Void) {
         extensionLog("=== REMOVE CHOICE REQUEST ===")
 
-        // Extract video ID from the choice request using Mirror (same pattern as selectedChoicesDidChange)
-        var videoID: String?
-        if let reqObj = request as? NSObject {
-            let desc = String(describing: reqObj)
-            if let range = desc.range(of: "identifier: \"") {
-                let after = desc[range.upperBound...]
-                if let endQuote = after.firstIndex(of: "\"") {
-                    videoID = String(after[..<endQuote])
-                }
-            }
+        // Settings lists choices under the provider ID SettingsProvider uses.
+        let ownProvider = Bundle.main.bundleIdentifier ?? "app.lumawall.personal.wallpaper"
+        let target = request.map {
+            ChoiceRemoval.target(in: $0, ownProvider: ownProvider) { VideoLibrary.shared.entry(for: $0) != nil }
         }
-
-        guard let videoID else {
-            extensionLog("  [Remove] Could not extract video ID from request")
+        guard case let .remove(videoID) = target else {
+            if case let .refuse(reason) = target {
+                extensionLog("  [Remove] Refused: \(reason)")
+            } else {
+                extensionLog("  [Remove] Refused: no request")
+            }
+            if let request, verboseLoggingEnabled { dumpMirror(request, label: "removeRequest") }
             reply(nil)
             return
         }
@@ -59,7 +57,7 @@ extension WallpaperXPCHandler {
         if let proxy = agentProxy {
             proxy.invalidateSnapshots { error in
                 if let error {
-                    extensionLog("  [Remove] invalidateSnapshots error: \(error)")
+                    extensionLog("  [Remove] invalidateSnapshots error: \(LogRedaction.describe(error))")
                 }
             }
         }
@@ -104,7 +102,7 @@ extension WallpaperXPCHandler {
             }
             if let proxy = agentProxy {
                 proxy.invalidateSnapshots { error in
-                    if let error { extensionLog("  [Choice] invalidateSnapshots error: \(error)") }
+                    if let error { extensionLog("  [Choice] invalidateSnapshots error: \(LogRedaction.describe(error))") }
                 }
             }
             reply(nil)
@@ -124,7 +122,7 @@ extension WallpaperXPCHandler {
             if let proxy = agentProxy {
                 proxy.invalidateSnapshots { error in
                     if let error {
-                        extensionLog("  [Choice] invalidateSnapshots error: \(error)")
+                        extensionLog("  [Choice] invalidateSnapshots error: \(LogRedaction.describe(error))")
                     }
                 }
             }
@@ -161,7 +159,7 @@ extension WallpaperXPCHandler {
         if let proxy = agentProxy {
             proxy.invalidateSnapshots { error in
                 if let error {
-                    extensionLog("  [Choice] invalidateSnapshots error: \(error)")
+                    extensionLog("  [Choice] invalidateSnapshots error: \(LogRedaction.describe(error))")
                 }
             }
         }

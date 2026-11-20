@@ -425,7 +425,7 @@ class ShimViewModelsXPC: NSObject, NSSecureCoding {
         do {
             try archiver.encodeEncodable(value, forKey: "WallpaperSettingsViewModels")
         } catch {
-            extensionLog("  [ShimXPC] encode error: \(error)")
+            extensionLog("  [ShimXPC] encode error: \(LogRedaction.describe(error))")
         }
     }
 }

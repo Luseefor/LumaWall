@@ -32,13 +32,7 @@ extension WallpaperXPCHandler {
             return
         }
 
-        var contextOptions: [String: Any] = [:]
-        if let did = displayID { contextOptions["displayId"] = did }
-        let caContextRaw: Any? =
-            contextOptions.isEmpty
-            ? CAContext.remoteContext()
-            : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
-        guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
+        guard let caContext = makeRemoteCAContext(displayID: displayID) else {
             reply(
                 nil,
                 NSError(domain: "LumaWallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))

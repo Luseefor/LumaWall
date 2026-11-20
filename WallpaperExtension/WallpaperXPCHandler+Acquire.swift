@@ -128,6 +128,17 @@ extension WallpaperXPCHandler {
             destSize: destSize, scaleFactor: scaleFactor,
             displayID: displayID, isPreview: isPreview
         )
+        // A size that isn't a plausible pixel count fails this request
+        // before anything is registered for it.
+        guard let pixels = StillSize(points: destSize, scale: scaleFactor) else {
+            extensionLog("  [acquire] rejected geometry \(destSize) @\(scaleFactor)x")
+            reply(
+                nil,
+                NSError(
+                    domain: "LumaWallExtension", code: 6,
+                    userInfo: [NSLocalizedDescriptionKey: "Acquire geometry out of range"]))
+            return
+        }
         // Extract choice configuration and files from descriptor via Mirror traversal
         // Path: WallpaperCreationRequestXPC.rawValue.descriptor.{configuration, files}
         var choiceConfiguration: String?
@@ -167,7 +178,7 @@ extension WallpaperXPCHandler {
         }
 
         traceLog(
-            "  destination: \(destSize) @\(scaleFactor)x, isPreview: \(isPreview), pid: \(connectionPID), choice: \(choiceConfiguration ?? "nil"), files: \(choiceFiles)"
+            "  destination: \(destSize) @\(scaleFactor)x, isPreview: \(isPreview), pid: \(connectionPID), choice: \(choiceConfiguration ?? "nil"), files: \(choiceFiles.map(LogRedaction.fileLabel))"
         )
 
         // Native shuffle: adopt the frequency the host sent (optionValues in the
@@ -212,7 +223,7 @@ extension WallpaperXPCHandler {
         // Read (and later decode) the cached still only where a new renderer
         // is seeded with it: a same-choice re-acquire or an in-place switch
         // never uses it.
-        let pixelWidth = Int(destSize.width * scaleFactor), pixelHeight = Int(destSize.height * scaleFactor)
+        let pixelWidth = pixels.width, pixelHeight = pixels.height
         let loadStill = { @Sendable [choiceConfiguration] (url: URL) in
             loadCachedSnapshotImage(forChoice: choiceConfiguration, videoURL: url, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
         }

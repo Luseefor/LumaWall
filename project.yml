@@ -139,6 +139,7 @@ targets:
       - path: WallpaperExtension/ThermalHold.swift
       - path: WallpaperExtension/RendererLifecycle.swift
       - path: WallpaperExtension/LogFile.swift
+      - path: WallpaperExtension/LogRedaction.swift
       - path: WallpaperExtension/RendererCopy.swift
       - path: WallpaperExtension/DisplaySleep.swift
       - path: WallpaperExtension/SurfaceSlot.swift
@@ -147,8 +148,14 @@ targets:
       - path: WallpaperExtension/PowerPolling.swift
       - path: WallpaperExtension/PrefsReload.swift
       - path: WallpaperExtension/LibraryScanRecord.swift
+      - path: WallpaperExtension/LibraryEntryScan.swift
+      - path: WallpaperExtension/PathSafety.swift
       - path: WallpaperExtension/StillCache.swift
       - path: WallpaperExtension/StillCacheStore.swift
+      - path: WallpaperExtension/CallerAdmission.swift
+      - path: WallpaperExtension/ChoiceRemoval.swift
+      - path: WallpaperExtension/NotificationGuards.swift
+      - path: WallpaperExtension/RuntimeLayout.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:

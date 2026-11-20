@@ -42,6 +42,7 @@ extension WallpaperXPCHandler {
         // Agent is the authoritative source for presentation mode.
         // Clear the screen-lock override when the Agent confirms the screen isn't locked.
         WallpaperState.shared.isScreenLocked = (presentationMode == "locked")
+        if presentationMode == "locked" { LumaWallExtension.noteAgentLocked() }
 
         let prefs = WallpaperPrefs.shared
 

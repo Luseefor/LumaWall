@@ -25,13 +25,7 @@ extension WallpaperXPCHandler {
             renderChoice = acquired.renderChoice
         let videoURL = acquired.videoURL, pixelWidth = acquired.pixelWidth, pixelHeight = acquired.pixelHeight,
             loadStill = acquired.loadStill
-        var contextOptions: [String: Any] = [:]
-        if let did = displayID { contextOptions["displayId"] = did }
-        let caContextRaw: Any? =
-            contextOptions.isEmpty
-            ? CAContext.remoteContext()
-            : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
-        guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
+        guard let caContext = makeRemoteCAContext(displayID: displayID) else {
             extensionLog("  ERROR: remote CAContext creation failed, failing acquire")
             reply(
                 nil,
@@ -109,7 +103,7 @@ extension WallpaperXPCHandler {
         // Claim the single create slot for this display. If a racing (preview)
         // acquire beat us to it, skip, exactly one renderer per display.
         if let token = WallpaperState.shared.claimRendererCreate(for: key) {
-            traceLog("  Setting up VideoRenderer with: \(videoURL.lastPathComponent) (coldStart=\(coldStart))")
+            traceLog("  Setting up VideoRenderer with: \(LogRedaction.fileLabel(videoURL)) (coldStart=\(coldStart))")
             let boxedRoot = SendableBox(value: rootLayer)
             let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
             // The reply waits in the gate, with those of acquires that reuse
@@ -141,7 +135,7 @@ extension WallpaperXPCHandler {
                         isPreview: isPreview,
                     )
                 } catch {
-                    extensionLog("  [Renderer] Failed to create: \(error); seeded the gradient layer")
+                    extensionLog("  [Renderer] Failed to create: \(LogRedaction.describe(error)); seeded the gradient layer")
                     WallpaperState.shared.clearRendererPending(for: key, token: token)
                     // Unblock the acquire regardless, with something displayable.
                     installGradientFallback(on: boxedRoot.value)
@@ -169,7 +163,7 @@ extension WallpaperXPCHandler {
                         seeded = "the gradient layer (\(seeded) didn't reach the display layer)"
                     }
                     surfaceReady(key, token: token)
-                    traceLog("  [acquire] cold start → replied after seeding \(seeded) for \(videoURL.lastPathComponent)")
+                    traceLog("  [acquire] cold start → replied after seeding \(seeded) for \(LogRedaction.fileLabel(videoURL))")
                 }
                 WallpaperPrefs.shared.setActive(true)
                 // Switch: reply only once the first video frame is composited (cold start

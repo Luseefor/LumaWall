@@ -102,7 +102,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         guard let data = try? JSONEncoder().encode(state) else { return }
         try? data.write(to: Self.stateURL, options: .atomic)
         postStateNotification()
-        extensionLog("[WallpaperPrefs] setActive(\(active), video: \(videoName ?? "nil"))")
+        extensionLog("[WallpaperPrefs] setActive(\(active), video: \(videoID ?? "nil"))")
     }
 
     /// Call when the active video changes while the extension is already active.
@@ -114,7 +114,7 @@ final class WallpaperPrefs: @unchecked Sendable {
         guard let data = try? JSONEncoder().encode(state) else { return }
         try? data.write(to: Self.stateURL, options: .atomic)
         postStateNotification()
-        traceLog("[WallpaperPrefs] updateCurrentVideo(\(videoName ?? "nil"))")
+        traceLog("[WallpaperPrefs] updateCurrentVideo(\(videoID ?? "nil"))")
     }
 
     private func buildContextStates() -> [ContextState] {
@@ -146,7 +146,7 @@ final class WallpaperPrefs: @unchecked Sendable {
             )
             return PrefsReload.between(old, prefs)
         } catch {
-            extensionLog("[WallpaperPrefs] Failed to decode prefs: \(error)")
+            extensionLog("[WallpaperPrefs] Failed to decode prefs: \(LogRedaction.describe(error))")
             return .none
         }
     }

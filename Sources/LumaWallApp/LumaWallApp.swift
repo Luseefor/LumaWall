@@ -96,6 +96,7 @@ struct RootView: View {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .modifier(NativeModeDisclosure(model: model))
         }
         .preferredColorScheme(.dark)
         .tint(Theme.accent)

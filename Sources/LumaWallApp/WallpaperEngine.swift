@@ -282,7 +282,11 @@ final class OverlayWallpaperEngine {
         return SharedPlaybackHub.activeDecoderCount + privateCount
     }
 
-    func restore(using library: [WallpaperAsset], nativeHostActive: Bool = false) async {
+    /// With `nativeHostActive`, default-crop displays belong to the system
+    /// host except the `claiming` ones, where native mode failed.
+    func restore(
+        using library: [WallpaperAsset], nativeHostActive: Bool = false, claiming: Set<DisplayID> = []
+    ) async {
         let connected = displays.refresh()
         let connectedByID = Dictionary(uniqueKeysWithValues: connected.map { ($0.displayID, $0) })
         let connectedIDs = Set(connectedByID.keys)
@@ -327,7 +331,7 @@ final class OverlayWallpaperEngine {
             // entry to an Apple image choice, wiping the native video
             // assignment (this left desktops showing stills/defaults).
             if nativeHostActive, assignment.composition.usesDefaultCrop,
-                assignment.composition.spanningCanvas == nil
+                assignment.composition.spanningCanvas == nil, !claiming.contains(assignment.displayID)
             {
                 dismantleSession(assignment.displayID)
                 continue

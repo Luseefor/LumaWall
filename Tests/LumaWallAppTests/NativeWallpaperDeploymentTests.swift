@@ -25,6 +25,21 @@ final class NativeWallpaperDeploymentTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: metadata.path))
     }
 
+    func testASnapshotCacheClearLeavesTheRequestFileTheExtensionChecks() throws {
+        // The extension ignores clearCaches unless this file is there and fresh
+        // (WallpaperExtension/NotificationGuards.swift, CacheClearRequest).
+        let documents = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: documents) }
+
+        NativeWallpaperDeployment.requestSnapshotCacheClear(documentsURL: documents, post: {})
+
+        let request = documents.appendingPathComponent("clear-caches.request")
+        let modified = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: request.path)[.modificationDate] as? Date)
+        XCTAssertLessThan(abs(modified.timeIntervalSinceNow), 5)
+    }
+
     func testMissingDeploymentCanBeCreated() throws {
         let videos = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: UUID().uuidString, videosFolderURL: videos))
@@ -434,12 +449,66 @@ final class VariantPublicationTests: XCTestCase {
         let current = try stage(job(hash: "aaa"))
         let stale = try stage(job(hash: "old"))
         for url in [partial, legacyTemp] { try Data("x".utf8).write(to: url) }
-        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
         XCTAssertFalse(fm.fileExists(atPath: partial.path))
         XCTAssertFalse(fm.fileExists(atPath: legacyTemp.path))
         XCTAssertFalse(fm.fileExists(atPath: stale.path))
         XCTAssertTrue(fm.fileExists(atPath: current.path))
         XCTAssertTrue(fm.fileExists(atPath: videos.appendingPathComponent(id).appendingPathComponent("metadata.json").path))
+    }
+
+    func testStartupCleanupLeavesSymlinkTargetsAlone() throws {
+        // Cleanup listed the staging folder and entry folders by path, so
+        // either one swapped for a symlink had its target's files deleted.
+        let fm = FileManager.default
+        try deploy(hash: "aaa")
+        let victim = root.appendingPathComponent("Documents", isDirectory: true)
+        try fm.createDirectory(at: victim, withIntermediateDirectories: true)
+        let precious = victim.appendingPathComponent("thesis.pages")
+        let legacyName = "Wallpaper.minimal.mov.\(UUID().uuidString).tmp.mov"
+        for url in [precious, victim.appendingPathComponent(legacyName)] { try Data("keep".utf8).write(to: url) }
+        let entry = NativeWallpaperDeployment.EntryInfo(
+            id: id, name: "x", filename: "Wallpaper.mov", duration: 5, fps: 30,
+            resolution: CGSize(width: 1280, height: 720), dateAdded: Date())
+        try JSONEncoder().encode(entry).write(to: victim.appendingPathComponent("metadata.json"))
+        try fm.removeItem(at: staging)
+        try fm.createSymbolicLink(at: staging, withDestinationURL: victim)
+        let linkedEntry = videos.appendingPathComponent(UUID().uuidString)
+        try fm.createSymbolicLink(at: linkedEntry, withDestinationURL: victim)
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+        XCTAssertTrue(fm.fileExists(atPath: precious.path))
+        XCTAssertTrue(fm.fileExists(atPath: victim.appendingPathComponent(legacyName).path))
+    }
+
+    func testStartupCleanupRefusesASymlinkAboveTheStagingFolder() throws {
+        // The extension can swap its own Documents folder for a symlink;
+        // cleanup then opened a real copy-staging folder somewhere else.
+        let fm = FileManager.default
+        let victim = root.appendingPathComponent("Elsewhere", isDirectory: true)
+        let foreign = victim.appendingPathComponent("copy-staging", isDirectory: true)
+        try fm.createDirectory(at: foreign, withIntermediateDirectories: true)
+        let movie = foreign.appendingPathComponent("\(id).\(UUID().uuidString).partial.mov")
+        try Data("keep".utf8).write(to: movie)
+        let docs = root.appendingPathComponent("Documents")
+        try fm.createSymbolicLink(at: docs, withDestinationURL: victim)
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(
+            videosFolderURL: docs.appendingPathComponent("videos"),
+            stagingFolderURL: docs.appendingPathComponent("copy-staging"), trustedAncestor: root)
+        XCTAssertTrue(fm.fileExists(atPath: movie.path))
+    }
+
+    func testStartupCleanupDeletesOnlyStagedMovies() throws {
+        let fm = FileManager.default
+        try deploy(hash: "aaa")
+        let note = staging.appendingPathComponent("README.txt")
+        let folder = staging.appendingPathComponent("nested", isDirectory: true)
+        try Data("x".utf8).write(to: note)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+        XCTAssertTrue(fm.fileExists(atPath: note.path))
+        XCTAssertTrue(fm.fileExists(atPath: folder.path))
     }
 
     func testLegacyCleanupKeepsAPrimaryRecoveredFromAnExport() throws {
@@ -461,7 +530,7 @@ final class VariantPublicationTests: XCTestCase {
         let orphan = unlisted.appendingPathComponent("Wallpaper.qhd.mov.\(UUID().uuidString).tmp.mov")
         try Data("x".utf8).write(to: orphan)
 
-        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
         XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(recovered).path))
         XCTAssertTrue(fm.fileExists(atPath: userFile.path))
         XCTAssertTrue(fm.fileExists(atPath: orphan.path))

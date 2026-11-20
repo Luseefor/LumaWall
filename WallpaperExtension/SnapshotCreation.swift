@@ -39,7 +39,7 @@ func createSnapshotViaRuntime(currentTime: CMTime? = nil) async -> AnyObject? {
         let result = try await generator.image(at: requestTime)
         image = result.image
     } catch {
-        extensionLog("  [Snapshot] Failed to get video frame: \(error)")
+        extensionLog("  [Snapshot] Failed to get video frame: \(LogRedaction.describe(error))")
         return nil
     }
 

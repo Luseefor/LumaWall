@@ -2,19 +2,24 @@ import AVFoundation
 import Foundation
 import ImageIO
 
-/// Removes reproducible WallpaperAgent snapshots while preserving every source
-/// video and user assignment. The Agent regenerates the right poster on demand.
+/// Removes the extension's own stills from WallpaperAgent's cache directory,
+/// leaving every source video, user assignment and Agent file alone. Runs
+/// only when the app left a fresh request (`CacheClearRequest`): the
+/// notification that triggers it can come from any process.
 func clearWallpaperSnapshotCache() {
+    let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    guard CacheClearRequest.consume(in: documents) else {
+        extensionLog("[BMPCache] Ignored clearCaches: no fresh request from the app")
+        return
+    }
     guard let cacheDir = WallpaperState.shared.cacheDirectoryURL else { return }
     let gained = cacheDir.startAccessingSecurityScopedResource()
     defer { if gained { cacheDir.stopAccessingSecurityScopedResource() } }
-    guard gained,
-        let contents = try? FileManager.default.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil)
-    else { return }
-    for file in contents where file.pathExtension == "bmp" {
-        try? FileManager.default.removeItem(at: file)
+    guard gained, let cleared = StillCacheSweep.clear(in: cacheDir) else {
+        extensionLog("[BMPCache] Cache directory unavailable or not a directory, cleared nothing")
+        return
     }
-    extensionLog("[BMPCache] Cleared generated wallpaper snapshots")
+    extensionLog("[BMPCache] Cleared \(cleared) generated wallpaper snapshot(s)")
 }
 
 /// Serializes every write, copy and eviction in the cache directory.
@@ -39,7 +44,7 @@ func loadCachedSnapshotImage(forChoice videoID: String?, videoURL: URL, pixelWid
         size: StillSize(width: pixelWidth, height: pixelHeight),
     )
     traceLog(
-        "  [InitContent] cached still for \(videoURL.lastPathComponent) at \(pixelWidth)x\(pixelHeight): \(image.map { "\($0.width)x\($0.height)" } ?? "none")"
+        "  [InitContent] cached still for \(LogRedaction.fileLabel(videoURL)) at \(pixelWidth)x\(pixelHeight): \(image.map { "\($0.width)x\($0.height)" } ?? "none")"
     )
     return image
 }
@@ -86,7 +91,7 @@ func writeBMPSnapshot(videoURL: URL, videoID: String? = nil, displayPixelWidth: 
     do {
         try Data("{\"version\":2}".utf8).write(to: versionURL, options: .atomic)
     } catch {
-        traceLog("  [BMPCache] cacheVersion.db failed: \(error)")
+        traceLog("  [BMPCache] cacheVersion.db failed: \(LogRedaction.describe(error))")
     }
 }
 
@@ -103,7 +108,7 @@ func firstFrameImage(of videoURL: URL) async -> CGImage? {
     do {
         return try await generator.image(at: .zero).image
     } catch {
-        traceLog("  [BMPCache] Failed to get video frame: \(error)")
+        traceLog("  [BMPCache] Failed to get video frame: \(LogRedaction.describe(error))")
         return nil
     }
 }

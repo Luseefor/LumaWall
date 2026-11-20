@@ -173,6 +173,7 @@ enum NativeWallpaperDeployment {
     /// and which battery copy to encode first.
     @MainActor
     static func ensureDeployed(asset: WallpaperAsset, surfaces: [Surface]) async throws -> EntryInfo {
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
@@ -211,6 +212,8 @@ enum NativeWallpaperDeployment {
         let displayPixels = surfaces.map(\.pixelSize)
         playbackChanged(entryID: entryID, surfaces: surfaces)
         let hash = try await hashStore.hash(for: asset.mediaURL)
+        // Hashing a large file takes a while; native mode may be off by now.
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         if let existing = try entry(id: entryID),
             FileManager.default.fileExists(atPath: videoURL(for: existing).path),
             existing.contentHash == hash
@@ -246,10 +249,12 @@ enum NativeWallpaperDeployment {
             let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
             // Under the entry lock, so a copy of the previous source that is
             // being published finishes first and can't land after the reset.
+            // TrustedDirectory, so an entry folder swapped for a symlink
+            // loses the link and not what it points at.
             try entryLock.withLock {
-                if fm.fileExists(atPath: dir.path) {
-                    try fm.removeItem(at: dir)
-                }
+                do {
+                    try TrustedDirectory(url: videosFolderURL, below: containerURL).removeItem(named: entryID)
+                } catch POSIXError.ENOENT {}
             }
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             let filename =
@@ -262,6 +267,12 @@ enum NativeWallpaperDeployment {
         }.value
 
         let probe = try await probe(url: staged.dest)
+        // The copy and probe take a while too. Without metadata the partial
+        // entry is redeployed from scratch next time.
+        guard NativeModeSetting.isEnabledNow else {
+            try? FileManager.default.removeItem(at: staged.dir)
+            throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff
+        }
         let entry = EntryInfo(
             id: entryID,
             name: asset.name,
@@ -315,6 +326,30 @@ enum NativeWallpaperDeployment {
         )
     }
 
+    /// Ask the extension to clear its stills from WallpaperAgent's cache. Any
+    /// process can post `clearCaches`, so the extension acts on it only when
+    /// this request file is there and fresh (`CacheClearRequest` in the
+    /// extension).
+    static func requestSnapshotCacheClear(
+        documentsURL: URL = WallpaperHostCapabilities.extensionDocumentsURL,
+        post: () -> Void = postClearCaches
+    ) {
+        // Atomic: replaces whatever is at the path, symlink included, and
+        // gives the file a fresh modification date.
+        try? Data().write(to: documentsURL.appendingPathComponent("clear-caches.request"), options: .atomic)
+        post()
+    }
+
+    private static func postClearCaches() {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("app.lumawall.personal.clearCaches" as CFString),
+            nil,
+            nil,
+            true
+        )
+    }
+
     private struct Probe {
         let duration: Double
         let fps: Double
@@ -357,7 +392,9 @@ enum NativeWallpaperDeployment {
         generator.maximumSize = CGSize(width: 640, height: 360)
         guard let cgImage = try? await generator.image(at: .zero).image else { return }
         let rep = NSBitmapImageRep(cgImage: cgImage)
-        guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else { return }
+        guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]),
+            NativeModeSetting.isEnabledNow
+        else { return }
         try? jpeg.write(to: directory.appendingPathComponent("thumbnail.jpg"), options: .atomic)
     }
 

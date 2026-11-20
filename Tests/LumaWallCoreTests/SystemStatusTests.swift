@@ -50,19 +50,67 @@ struct SystemStatusTests {
     }
 
     @Test func clearDiskRemovesScratchUnderGivenRoot() throws {
-        // Fully temp-isolated: only the Scratch dir under our root is touched.
-        // The real ~/Library/Caches/LumaWall branch is intentionally untested.
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let scratch = root.appendingPathComponent("Scratch", isDirectory: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         try Data(repeating: 0, count: 16).write(to: scratch.appendingPathComponent("tmp.bin"))
         defer { try? FileManager.default.removeItem(at: root) }
 
-        // The real ~/Library/Caches/LumaWall branch may or may not exist on the
-        // test machine, so only bound the count from below; the Scratch half is
-        // fully temp-isolated and asserted exactly.
-        #expect(try CacheCleaner.clearDisk(preservingLibraryRoot: root) >= 1)
+        let caches = root.appendingPathComponent("NoCaches", isDirectory: true)
+        #expect(try CacheCleaner.clearDisk(preservingLibraryRoot: root, cachesURL: caches) == 1)
         #expect(!FileManager.default.fileExists(atPath: scratch.path))
+    }
+
+    @Test func clearDiskEmptiesTheCacheFolderGivenToIt() throws {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: base) }
+        let cache = base.appendingPathComponent("Caches/LumaWall/posters", isDirectory: true)
+        try fm.createDirectory(at: cache, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: cache.appendingPathComponent("a.jpg"))
+        let root = base.appendingPathComponent("lib", isDirectory: true)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let removed = try CacheCleaner.clearDisk(
+            preservingLibraryRoot: root, cachesURL: base.appendingPathComponent("Caches"))
+        #expect(removed == 1)
+        #expect(try fm.contentsOfDirectory(atPath: base.appendingPathComponent("Caches/LumaWall").path).isEmpty)
+    }
+
+    @Test func clearDiskLeavesSymlinkTargetsAlone() throws {
+        // contentsOfDirectory and removeItem followed a cache or Scratch
+        // folder swapped for a symlink and emptied its target.
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: base) }
+        let victim = base.appendingPathComponent("Documents", isDirectory: true)
+        try fm.createDirectory(at: victim, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: victim.appendingPathComponent("thesis.pages"))
+        let caches = base.appendingPathComponent("Caches", isDirectory: true)
+        let root = base.appendingPathComponent("lib", isDirectory: true)
+        try fm.createDirectory(at: caches, withIntermediateDirectories: true)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: caches.appendingPathComponent("LumaWall"), withDestinationURL: victim)
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Scratch"), withDestinationURL: victim)
+
+        _ = try CacheCleaner.clearDisk(preservingLibraryRoot: root, cachesURL: caches)
+        #expect(fm.fileExists(atPath: victim.appendingPathComponent("thesis.pages").path))
+    }
+
+    @Test func clearDiskReportsACacheFolderItCannotOpen() throws {
+        // A permissions failure used to read as "nothing to remove".
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let locked = base.appendingPathComponent("Caches/LumaWall", isDirectory: true)
+        try fm.createDirectory(at: locked, withIntermediateDirectories: true)
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? fm.removeItem(at: base)
+        }
+        #expect(throws: POSIXError(.EACCES)) {
+            try CacheCleaner.clearDisk(preservingLibraryRoot: base, cachesURL: base.appendingPathComponent("Caches"))
+        }
     }
 
     @Test func sessionLockReadsTheWindowServerFlag() {

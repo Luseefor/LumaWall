@@ -52,9 +52,13 @@ public enum StoreIO {
     /// first launch). When bytes exist but decoding fails, the file is moved
     /// aside as `<name>.corrupt-<epoch>` before returning nil, so a later
     /// persist cannot destroy the evidence.
-    public static func readJSON<T: Decodable>(from url: URL, as type: T.Type) -> T? {
+    /// `isValid` rejects bytes that decode but break an invariant the type
+    /// can't express, such as a repeated ID; those are quarantined too.
+    public static func readJSON<T: Decodable>(
+        from url: URL, as type: T.Type, isValid: (T) -> Bool = { _ in true }
+    ) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
-        if let decoded = try? JSONDecoder.lumaWall.decode(type, from: data) {
+        if let decoded = try? JSONDecoder.lumaWall.decode(type, from: data), isValid(decoded) {
             return decoded
         }
         quarantineCorruptFile(at: url)

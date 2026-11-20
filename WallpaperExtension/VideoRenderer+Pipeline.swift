@@ -9,7 +9,7 @@ extension VideoRenderer {
     func showFallbackStill() {
         let still = fallbackStill(copy.activeOriginal)
         extensionLog(
-            "  [Renderer #\(debugID)] gave up rebuilding \(asset.url.lastPathComponent) after \(RendererLifecycle.maxFailures) failures, showing \(still == nil ? "the gradient" : "the still")"
+            "  [Renderer #\(debugID)] gave up rebuilding \(LogRedaction.fileLabel(asset.url)) after \(RendererLifecycle.maxFailures) failures, showing \(still == nil ? "the gradient" : "the still")"
         )
         guard let image = still ?? Self.makeGradientStill(),
             let buffer = makeStillSampleBuffer(from: image)
@@ -64,7 +64,7 @@ extension VideoRenderer {
     /// the new pipeline only when this flush reports back. The clock freezes
     /// first so fresh PTS-0 frames aren't judged late.
     func beginReset(_ kind: RendererLifecycle.ResetKind, generation: Int) {
-        traceLog("  [reset #\(debugID)] BEGIN \(kind) gen=\(generation) asset=\(asset.url.lastPathComponent)")
+        traceLog("  [reset #\(debugID)] BEGIN \(kind) gen=\(generation) asset=\(LogRedaction.fileLabel(asset.url))")
         cancelRamp()
         CMTimebaseSetRate(timebase, rate: 0.0)
         renderer.stopRequestingMediaData()
@@ -91,7 +91,7 @@ extension VideoRenderer {
         // keep its offset so the timeline stays continuous.
         let resumePoint = LoopTiming.resumePoint(timeline: resumeTime, loopStart: ptsOffset, previousLoopStart: previousPtsOffset)
         guard let reader = try? AVAssetReader(asset: asset) else {
-            extensionLog("  [reset #\(debugID)] FAILED to create AVAssetReader for \(asset.url.lastPathComponent)")
+            extensionLog("  [reset #\(debugID)] FAILED to create AVAssetReader for \(LogRedaction.fileLabel(asset.url))")
             return false
         }
         if continuing {
@@ -103,7 +103,7 @@ extension VideoRenderer {
         reader.add(output)
         guard reader.startReading() else {
             extensionLog(
-                "  [reset #\(debugID)] FAILED to start reading \(asset.url.lastPathComponent): \(reader.error?.localizedDescription ?? "unknown")"
+                "  [reset #\(debugID)] FAILED to start reading \(LogRedaction.fileLabel(asset.url)): \(reader.error.map(LogRedaction.describe) ?? "unknown")"
             )
             return false
         }
@@ -130,7 +130,7 @@ extension VideoRenderer {
             }
         }
         traceLog(
-            "  [reset #\(debugID)] BUILT \(kind) continuing=\(continuing) asset=\(asset.url.lastPathComponent) rendererStatus=\(renderer.status.rawValue)"
+            "  [reset #\(debugID)] BUILT \(kind) continuing=\(continuing) asset=\(LogRedaction.fileLabel(asset.url)) rendererStatus=\(renderer.status.rawValue)"
         )
         feedLogBudget = 4
         prepareNextReader()

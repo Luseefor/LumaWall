@@ -13,7 +13,7 @@ import ImageIO
 func findVideoURL(forChoice videoID: String?) -> URL? {
     guard let videoID,
         let url = VideoLibrary.shared.videoURL(for: videoID),
-        FileManager.default.fileExists(atPath: url.path)
+        LibraryEntryScan.isPlayable(url)
     else {
         if videoID != nil {
             extensionLog("  [VideoDiscovery] no file for choice \(videoID ?? "nil"), returning nil (no wrong-video fallback)")
@@ -42,7 +42,7 @@ func generateThumbnail(from videoURL: URL) async -> URL? {
     do {
         cgImage = try await generator.image(at: .zero).image
     } catch {
-        extensionLog("  Thumbnail generation failed: \(error)")
+        extensionLog("  Thumbnail generation failed: \(LogRedaction.describe(error))")
         return nil
     }
 
@@ -68,6 +68,6 @@ func generateThumbnail(from videoURL: URL) async -> URL? {
         return nil
     }
 
-    extensionLog("  Thumbnail saved: \(thumbnailURL.path)")
+    extensionLog("  Thumbnail saved: \(thumbnailURL.lastPathComponent)")
     return thumbnailURL
 }

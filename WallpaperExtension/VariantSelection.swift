@@ -9,6 +9,13 @@ struct VideoVariant: Codable, Equatable {
 /// Picks the variant to play for a playback policy, the pure half of
 /// `VideoLibrary.bestVariantURL`, separated so it can be tested.
 enum VariantSelection {
+    /// A metadata frame rate in whole frames, or 0 (unknown) when it's not
+    /// a plausible rate. `Int(_:)` traps on NaN, infinity and huge values.
+    static func wholeFPS(_ fps: Double) -> Int {
+        guard fps.isFinite, fps > 0, fps <= 1_000 else { return 0 }
+        return Int(fps.rounded())
+    }
+
     /// The variant to play, or nil for the original file.
     ///
     /// `full` plays the original unless a variant matches the source frame
