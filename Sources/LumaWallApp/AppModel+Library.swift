@@ -125,11 +125,19 @@ extension AppModel {
     }
 
     func importVideos(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
+        // Web links dropped on the window are refused here, before anything
+        // opens them; only files on this Mac reach the importer.
+        let files = MediaImporter.localFiles(in: urls)
+        let skipped = urls.count - files.count
+        guard !files.isEmpty else {
+            if skipped > 0 { present("Import details", VerifiedFileCopy.CopyError.notALocalFile.localizedDescription) }
+            return
+        }
         isImporting = true
         Task {
             var notes: [String] = []
-            for url in urls {
+            if skipped > 0 { notes.append(VerifiedFileCopy.CopyError.notALocalFile.localizedDescription) }
+            for url in files {
                 // NOTE: `defer` inside a loop defers to the enclosing scope, not
                 // the iteration, the old code held all security-scoped refs until
                 // every import finished. Per-URL helper scopes each access.
@@ -160,6 +168,10 @@ extension AppModel {
     }
 
     func remove(_ asset: WallpaperAsset) {
+        let entryID = asset.id.rawValue.uuidString
+        // Before any suspension: an apply or restore running meanwhile must
+        // not deploy or assign the wallpaper being removed.
+        NativeWallpaperDeployment.markRemoved(entryID: entryID)
         Task {
             for (displayID, wallpaperID) in activeByDisplay where wallpaperID == asset.id {
                 try? await engine.clear(displayID)
@@ -176,6 +188,20 @@ extension AppModel {
                 await reload()
             } catch {
                 present("LumaWall", error.localizedDescription)
+            }
+            // Once the row is gone (removed, or dropped as invalid), its
+            // deployed copy goes too, so System Settings stops offering it.
+            guard await store.asset(id: asset.id) == nil else {
+                NativeWallpaperDeployment.unmarkRemoved(entryID: entryID)
+                return
+            }
+            do {
+                try await NativeWallpaperDeployment.removeDeployment(entryID: entryID)
+            } catch {
+                present(
+                    "LumaWall",
+                    "\(asset.name) was removed from the library, but its copy for System Settings couldn't be deleted. "
+                        + error.localizedDescription)
             }
         }
     }

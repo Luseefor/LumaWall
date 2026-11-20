@@ -122,6 +122,51 @@ struct TrustedDirectoryTests {
         #expect(throws: (any Error).self) { try dir.readFile(named: "..") }
     }
 
+    @Test func publishMovesAFolderIntoPlace() throws {
+        let (root, _, cleanup) = try makeTree()
+        defer { cleanup() }
+        let staging = root.appendingPathComponent("staging/new", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        try Data("v2".utf8).write(to: staging.appendingPathComponent("a.mov"))
+        let videos = root.appendingPathComponent("videos", isDirectory: true)
+        try fm.createDirectory(at: videos, withIntermediateDirectories: true)
+
+        try TrustedDirectory(url: root.appendingPathComponent("staging"))
+            .publishItem(named: "new", into: TrustedDirectory(url: videos), as: "entry")
+        #expect(try Data(contentsOf: videos.appendingPathComponent("entry/a.mov")) == Data("v2".utf8))
+        #expect(!fm.fileExists(atPath: staging.path))
+    }
+
+    @Test func publishReplacesAnExistingFolderInOneStep() throws {
+        let (root, _, cleanup) = try makeTree()
+        defer { cleanup() }
+        let staging = root.appendingPathComponent("staging/new", isDirectory: true)
+        let old = root.appendingPathComponent("videos/entry", isDirectory: true)
+        for dir in [staging, old] { try fm.createDirectory(at: dir, withIntermediateDirectories: true) }
+        try Data("v2".utf8).write(to: staging.appendingPathComponent("a.mov"))
+        try Data("v1".utf8).write(to: old.appendingPathComponent("old.mov"))
+
+        try TrustedDirectory(url: root.appendingPathComponent("staging"))
+            .publishItem(named: "new", into: TrustedDirectory(url: root.appendingPathComponent("videos")), as: "entry")
+        #expect(try fm.contentsOfDirectory(atPath: old.path) == ["a.mov"])
+        #expect(try fm.contentsOfDirectory(atPath: root.appendingPathComponent("staging").path).isEmpty)
+    }
+
+    @Test func publishOverASymlinkLeavesItsTargetAlone() throws {
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        let staging = root.appendingPathComponent("staging/new", isDirectory: true)
+        let videos = root.appendingPathComponent("videos", isDirectory: true)
+        for dir in [staging, videos] { try fm.createDirectory(at: dir, withIntermediateDirectories: true) }
+        try fm.createSymbolicLink(at: videos.appendingPathComponent("entry"), withDestinationURL: victim)
+
+        try TrustedDirectory(url: root.appendingPathComponent("staging"))
+            .publishItem(named: "new", into: TrustedDirectory(url: videos), as: "entry")
+        #expect(fm.fileExists(atPath: victim.appendingPathComponent("precious.txt").path))
+        #expect((try? fm.destinationOfSymbolicLink(atPath: videos.appendingPathComponent("entry").path)) == nil)
+        #expect(try TrustedDirectory(url: videos).kind(ofItemNamed: "entry") == .directory)
+    }
+
     @Test func removingAMissingItemThrowsNoSuchFile() throws {
         let (root, _, cleanup) = try makeTree()
         defer { cleanup() }

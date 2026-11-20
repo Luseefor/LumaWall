@@ -107,14 +107,9 @@ extension NativeWallpaperDeployment {
     /// True when the entry lacks a copy it should have: one added in a later
     /// version, one deleted from disk, or one made at a different frame rate.
     static func needsVariants(_ entry: EntryInfo, displayPixels: [CGSize], fileExists: ((String) -> Bool)? = nil) -> Bool {
-        let exists =
-            fileExists ?? { filename in
-                FileManager.default.fileExists(
-                    atPath:
-                        videosFolderURL
-                        .appendingPathComponent(entry.id, isDirectory: true)
-                        .appendingPathComponent(filename).path)
-            }
+        // A symlink where a copy should be doesn't count: previews refuse it,
+        // so it has to be encoded again.
+        let exists = fileExists ?? { isRegularFile($0, inEntry: entry.id) }
         let have = entry.variants ?? []
         return variantSpecs(sourceSize: entry.resolution, sourceFPS: entry.fps, displayPixels: displayPixels).contains { spec in
             !have.contains { $0.filename == spec.filename && $0.fps == spec.recordedFPS && exists($0.filename) }

@@ -1,6 +1,5 @@
 import AVFoundation
 import AppKit
-import CryptoKit
 import Foundation
 import LumaWallCore
 
@@ -173,11 +172,13 @@ enum NativeWallpaperDeployment {
     /// and which battery copy to encode first.
     @MainActor
     static func ensureDeployed(asset: WallpaperAsset, surfaces: [Surface]) async throws -> EntryInfo {
-        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         let entryID = asset.id.rawValue.uuidString
         guard PathSafety.isValidEntryID(entryID) else {
             throw DeploymentError.invalidEntry
         }
+        // A removed wallpaper is refused whatever the mode.
+        guard !removedEntries.contains(entryID) else { throw DeploymentError.removed }
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         if !copyEncodingPrepared {
             copyEncodingPrepared = true
             Task.detached(priority: .utility) { await prepareCopyEncoding() }
@@ -188,14 +189,29 @@ enum NativeWallpaperDeployment {
         // over it. Keyed by entry so different wallpapers still deploy in
         // parallel; awaiting a Task value never blocks the actor.
         if let running = deploymentTasks[entryID] {
-            return try await running.value
+            return try await checkedNotRemoved(running.value, entryID: entryID)
         }
         let task = Task<EntryInfo, Error> {
             try await deploy(asset: asset, entryID: entryID, surfaces: surfaces)
         }
         deploymentTasks[entryID] = task
         defer { deploymentTasks.removeValue(forKey: entryID) }
-        return try await task.value
+        return try await checkedNotRemoved(task.value, entryID: entryID)
+    }
+
+    /// Wallpapers removed this session. Removal marks the ID before its
+    /// first suspension, so a restore or apply that read the library earlier
+    /// can't deploy it again, and one already deploying can't go on to
+    /// assign it. Entry IDs are UUIDs and never come back.
+    @MainActor
+    static var removedEntries: Set<String> = []
+
+    /// `entry`, unless its wallpaper was removed while it deployed. Callers
+    /// assign the entry right after this returns, without suspending.
+    @MainActor
+    private static func checkedNotRemoved(_ entry: EntryInfo, entryID: String) throws -> EntryInfo {
+        guard !removedEntries.contains(entryID) else { throw DeploymentError.removed }
+        return entry
     }
 
     /// Set once the first deploy of this run has queued the cleanup of
@@ -207,6 +223,12 @@ enum NativeWallpaperDeployment {
     @MainActor
     private static var deploymentTasks: [String: Task<EntryInfo, Error>] = [:]
 
+    /// Returns once no deploy of `entryID` is running; its result is ignored.
+    @MainActor
+    static func waitForDeployment(of entryID: String) async {
+        if let running = deploymentTasks[entryID] { _ = try? await running.value }
+    }
+
     @MainActor
     private static func deploy(asset: WallpaperAsset, entryID: String, surfaces: [Surface]) async throws -> EntryInfo {
         let displayPixels = surfaces.map(\.pixelSize)
@@ -215,7 +237,7 @@ enum NativeWallpaperDeployment {
         // Hashing a large file takes a while; native mode may be off by now.
         guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         if let existing = try entry(id: entryID),
-            FileManager.default.fileExists(atPath: videoURL(for: existing).path),
+            isRegularFile(existing.filename, inEntry: entryID),
             existing.contentHash == hash
         {
             // Libraries missing any planned copy (pre-variant ones, or ones
@@ -243,36 +265,20 @@ enum NativeWallpaperDeployment {
 
         // Stage the (potentially large) video file off the main actor. The old
         // code copied gigabytes on MainActor, stalling the UI + watchdog.
+        let filename =
+            PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
+            ? asset.mediaURL.lastPathComponent
+            : "Wallpaper.mov"
+        try FileManager.default.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
+        let stagingFolder = try makeStagingFolder(appropriateFor: videosFolderURL)
+        defer { try? FileManager.default.removeItem(at: stagingFolder) }
         let staged = try await Task.detached(priority: .utility) {
-            let fm = FileManager.default
-            try fm.createDirectory(at: videosFolderURL, withIntermediateDirectories: true)
-            let dir = videosFolderURL.appendingPathComponent(entryID, isDirectory: true)
-            // Under the entry lock, so a copy of the previous source that is
-            // being published finishes first and can't land after the reset.
-            // TrustedDirectory, so an entry folder swapped for a symlink
-            // loses the link and not what it points at.
-            try entryLock.withLock {
-                do {
-                    try TrustedDirectory(url: videosFolderURL, below: containerURL).removeItem(named: entryID)
-                } catch POSIXError.ENOENT {}
-            }
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            let filename =
-                PathSafety.isSafeComponent(asset.mediaURL.lastPathComponent)
-                ? asset.mediaURL.lastPathComponent
-                : "Wallpaper.mov"
-            let dest = dir.appendingPathComponent(filename)
-            try fm.copyItem(at: asset.mediaURL, to: dest)
-            return (dir: dir, dest: dest, filename: filename)
+            try stageDeployment(source: asset.mediaURL, entryID: entryID, filename: filename, stagingFolderURL: stagingFolder)
         }.value
-
-        let probe = try await probe(url: staged.dest)
-        // The copy and probe take a while too. Without metadata the partial
-        // entry is redeployed from scratch next time.
-        guard NativeModeSetting.isEnabledNow else {
-            try? FileManager.default.removeItem(at: staged.dir)
-            throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff
-        }
+        let probe = try await probe(url: staged.videoURL)
+        // The copy and probe take a while too. Nothing is published yet; the
+        // staging folder goes with the defer above.
+        guard NativeModeSetting.isEnabledNow else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
         let entry = EntryInfo(
             id: entryID,
             name: asset.name,
@@ -281,20 +287,24 @@ enum NativeWallpaperDeployment {
             fps: probe.fps,
             resolution: probe.resolution,
             dateAdded: asset.createdAt,
-            contentHash: hash,
+            contentHash: staged.hash,
             audioStripped: false
         )
         let data = try JSONEncoder().encode(entry)
-        try data.write(to: staged.dir.appendingPathComponent("metadata.json"), options: .atomic)
-        await generateThumbnail(for: staged.dest, in: staged.dir)
+        try data.write(to: staged.directoryURL.appendingPathComponent("metadata.json"), options: .atomic)
+        await generateThumbnail(for: staged.videoURL, in: staged.directoryURL)
+        try await Task.detached(priority: .utility) {
+            try publishDeployment(staged, stagingFolderURL: stagingFolder)
+        }.value
         notifyLibraryChanged()
+        let deployed = videoURL(for: entry)
         Task.detached {
             await ensureVariants(
                 for: entryID,
-                contentHash: hash,
-                sourceURL: staged.dest,
-                sourceFPS: probe.fps,
-                sourceSize: probe.resolution,
+                contentHash: staged.hash,
+                sourceURL: deployed,
+                sourceFPS: entry.fps,
+                sourceSize: entry.resolution,
                 displayPixels: displayPixels
             )
         }
@@ -312,7 +322,21 @@ enum NativeWallpaperDeployment {
         } catch CocoaError.fileReadNoSuchFile {
             return nil
         }
-        return try JSONDecoder().decode(EntryInfo.self, from: data)
+        // Bytes that don't decode (a truncated write, a hand edit) read as
+        // missing so the next deploy replaces them. Read errors still throw.
+        guard let decoded = try? JSONDecoder().decode(EntryInfo.self, from: data) else { return nil }
+        return validated(decoded, id: id)
+    }
+
+    /// The extension can write its container, so metadata.json is checked
+    /// like any outside input: the ID must name its own folder and the
+    /// filename be a plain basename. An entry failing that reads as missing,
+    /// so the next deploy replaces it. Copies with unsafe names are dropped.
+    static func validated(_ entry: EntryInfo, id: String) -> EntryInfo? {
+        guard entry.id == id, PathSafety.isSafeComponent(entry.filename) else { return nil }
+        var entry = entry
+        entry.variants = entry.variants?.filter { PathSafety.isSafeComponent($0.filename) }
+        return entry
     }
 
     static func notifyLibraryChanged() {
@@ -373,14 +397,7 @@ enum NativeWallpaperDeployment {
 
     private static func contentHash(for url: URL) async throws -> String {
         try await Task.detached(priority: .utility) {
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            var hasher = SHA256()
-            while let data = try handle.read(upToCount: 1_024 * 1_024), !data.isEmpty {
-                try Task.checkCancellation()
-                hasher.update(data: data)
-            }
-            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+            try VerifiedFileCopy.sha256(ofFileAt: url).sha256
         }.value
     }
 
@@ -399,10 +416,11 @@ enum NativeWallpaperDeployment {
     }
 
     enum DeploymentError: LocalizedError {
-        case invalidEntry, noVideoTrack, invalidDuration
+        case invalidEntry, noVideoTrack, invalidDuration, removed
         var errorDescription: String? {
             switch self {
             case .invalidEntry: "Could not prepare that wallpaper for the system host."
+            case .removed: "That wallpaper was removed from the library."
             case .noVideoTrack: "That file has no video track."
             case .invalidDuration: "That video duration is invalid."
             }
