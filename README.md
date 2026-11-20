@@ -35,23 +35,22 @@ On macOS 15–25, or in SwiftPM overlay-only builds, LumaWall sets the desktop i
 
 ## Build
 
-Library and overlay tests (macOS 15+):
+Install the pinned XcodeGen once, then run the checks:
 
 ```sh
-cd LumaWall
-swift build -c release
-swift test
+./ci/bootstrap.sh                     # XcodeGen 2.46.0 into .tools/
+./ci/check.sh                         # core tests, app and extension tests, Release build
+./ci/test.sh RendererLifecycleTests   # one test class or suite
 ```
 
-Native host with the wallpaper appex (macOS 26+):
+The Xcode project is generated from `project.yml`; regenerate it with
+`./ci/xcodegen.sh generate`. Builds land in `.derived`. Building registers
+the built wallpaper extension with macOS, which can replace a live
+wallpaper from `/Applications/LumaWall.app`. The scripts unregister their
+builds when they exit; after a raw `xcodebuild`, run
+`./ci/unregister-builds.sh`. See [AGENTS.md](AGENTS.md) for more.
 
-```sh
-cd LumaWall
-xcodegen generate
-xcodebuild -scheme LumaWall -configuration Release -derivedDataPath .derived build
-```
-
-Install the built app to `/Applications/LumaWall.app` for the path this project expects.
+To use a build as your wallpaper, install it to `/Applications/LumaWall.app`.
 
 ## Architecture
 
