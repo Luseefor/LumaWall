@@ -104,11 +104,18 @@ extension NativeWallpaperDeployment {
             while let worker { await worker.value }
         }
 
-        /// Cancels a running 1440p export that is no longer ready, or that a
-        /// waiting job outranks. Battery encodes always finish: they are short
-        /// next to a 4K export and redoing one wastes more than it saves.
+        /// Cancels a running job that was dropped (native mode turned off, or
+        /// its wallpaper went away), and a running 1440p export that is no
+        /// longer ready or that a waiting job outranks. Other battery encodes
+        /// finish: they are short next to a 4K export and redoing one wastes
+        /// more than it saves.
         private func preemptIfNeeded() {
-            guard let current = running, current.job.spec.forFullQuality, !current.preempted else { return }
+            guard let current = running, !current.preempted else { return }
+            if case .drop = readiness(current.job) {
+                cancelRunning()
+                return
+            }
+            guard current.job.spec.forFullQuality else { return }
             guard case .ready(let rank) = readiness(current.job) else {
                 cancelRunning()
                 return

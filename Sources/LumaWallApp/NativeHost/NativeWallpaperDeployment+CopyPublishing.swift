@@ -143,11 +143,12 @@ extension NativeWallpaperDeployment {
                 case .skipped: return .notNow
                 }
             }
-            guard NativeModeSetting.isEnabledNow else { return .notNow }
             guard let resolution = await videoSize(of: staged) else {
                 try? fm.removeItem(at: staged)
                 return .failed
             }
+            // Publishing writes into the extension's container.
+            guard NativeModeSetting.isEnabledNow else { return .notNow }
             switch publish(staged, job: job, resolution: resolution) {
             case .published:
                 notifyLibraryChanged()

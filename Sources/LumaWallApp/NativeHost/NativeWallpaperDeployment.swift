@@ -265,6 +265,12 @@ enum NativeWallpaperDeployment {
         }.value
 
         let probe = try await probe(url: staged.dest)
+        // The copy and probe take a while too. Without metadata the partial
+        // entry is redeployed from scratch next time.
+        guard NativeModeSetting.isEnabledNow else {
+            try? FileManager.default.removeItem(at: staged.dir)
+            throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff
+        }
         let entry = EntryInfo(
             id: entryID,
             name: asset.name,
@@ -360,7 +366,9 @@ enum NativeWallpaperDeployment {
         generator.maximumSize = CGSize(width: 640, height: 360)
         guard let cgImage = try? await generator.image(at: .zero).image else { return }
         let rep = NSBitmapImageRep(cgImage: cgImage)
-        guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else { return }
+        guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]),
+            NativeModeSetting.isEnabledNow
+        else { return }
         try? jpeg.write(to: directory.appendingPathComponent("thumbnail.jpg"), options: .atomic)
     }
 
