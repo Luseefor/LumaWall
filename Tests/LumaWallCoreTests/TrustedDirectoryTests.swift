@@ -234,4 +234,21 @@ struct TrustedDirectoryTests {
         #expect(try fm.contentsOfDirectory(atPath: root.path) == ["metadata.json"])
         #expect(throws: POSIXError.self) { try dir.writeFile(named: "../out.json", contents: Data("x".utf8)) }
     }
+
+    @Test func makesASubfolderOrOpensTheOneThere() throws {
+        let (root, _, cleanup) = try makeTree()
+        defer { cleanup() }
+        let dir = try TrustedDirectory(url: root)
+        try dir.makeSubdirectory(named: "copy-staging").writeFile(named: "a", contents: Data("x".utf8))
+        // A second call opens the same folder.
+        #expect(try dir.makeSubdirectory(named: "copy-staging").kind(ofItemNamed: "a") == .file)
+    }
+
+    @Test func makingASubfolderRefusesASymlinkInItsPlace() throws {
+        let (root, victim, cleanup) = try makeTree()
+        defer { cleanup() }
+        try fm.createSymbolicLink(at: root.appendingPathComponent("copy-staging"), withDestinationURL: victim)
+        #expect(throws: POSIXError.self) { try TrustedDirectory(url: root).makeSubdirectory(named: "copy-staging") }
+        #expect(try fm.contentsOfDirectory(atPath: victim.path) == ["precious.txt"])
+    }
 }

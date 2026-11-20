@@ -76,6 +76,15 @@ public final class TrustedDirectory {
         return TrustedDirectory(fd: child)
     }
 
+    /// The folder `name` inside this one, made first if it is missing.
+    /// Throws when something other than a real folder is there, a symlink
+    /// included.
+    public func makeSubdirectory(named name: String) throws -> TrustedDirectory {
+        try Self.checkName(name)
+        guard mkdirat(fd, name, 0o755) == 0 || errno == EEXIST else { throw POSIXError.current }
+        return try subdirectory(name)
+    }
+
     /// The items in this folder, without `.` and `..`, as they are on disk:
     /// a symlink is reported as `.symlink` whatever it points at.
     public func entries() throws -> [Entry] {
@@ -165,7 +174,9 @@ public final class TrustedDirectory {
     public func publishItem(named name: String, into destination: TrustedDirectory, as newName: String) throws {
         try Self.checkName(name)
         try Self.checkName(newName)
-        while true {
+        // Bounded: another process creating and deleting `newName` over and
+        // over must not keep the caller, who may hold a lock, here forever.
+        for _ in 0..<8 {
             if renameatx_np(fd, name, destination.fd, newName, UInt32(RENAME_EXCL)) == 0 { return }
             guard errno == EEXIST else { throw POSIXError.current }
             if renameatx_np(fd, name, destination.fd, newName, UInt32(RENAME_SWAP)) == 0 {
@@ -178,6 +189,7 @@ public final class TrustedDirectory {
             // The old item vanished between the two renames; try a plain move again.
             guard errno == ENOENT else { throw POSIXError.current }
         }
+        throw POSIXError(.EBUSY)
     }
 
     private static func checkName(_ name: String) throws {
