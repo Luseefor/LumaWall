@@ -58,9 +58,10 @@ representative at an online or offline event.
 
 ## Enforcement
 
+<!-- TODO(owner): add a dedicated conduct-reporting email address here before public release. -->
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainer at [https://github.com/Luseefor](https://github.com/Luseefor)
-or via private advisory on the repository.
+reported privately to the project maintainer via the contact listed on their
+GitHub profile ([https://github.com/Luseefor](https://github.com/Luseefor)).
 All complaints will be reviewed and investigated promptly and fairly.
 
 All project maintainers are obligated to respect the privacy and security of the
