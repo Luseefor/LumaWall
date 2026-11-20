@@ -19,7 +19,7 @@ extension VideoRenderer {
     func start(onFirstFrameReady: (@Sendable () -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self else { onFirstFrameReady?(); return }
-            traceLog("  [start #\(debugID)] asset=\(asset.url.lastPathComponent)")
+            traceLog("  [start #\(debugID)] asset=\(LogRedaction.fileLabel(asset.url))")
             guard isRunning else { traceLog("  [start #\(debugID)] aborted, already stopped"); onFirstFrameReady?(); return }
             // The tier can change while `create` loads the track, and a
             // policy recorded before this job doesn't pick a copy when it
@@ -44,13 +44,13 @@ extension VideoRenderer {
             // it missed still sees it.
             send(.started(displayAsleep: WallpaperState.shared.isDisplayAsleep, holding: holding))
             if holding {
-                traceLog("  [start #\(debugID)] preview holds its still, no pipeline for \(asset.url.lastPathComponent)")
+                traceLog("  [start #\(debugID)] preview holds its still, no pipeline for \(LogRedaction.fileLabel(asset.url))")
                 onFirstFrameReady?()
                 return
             }
             let built = buildFirstPipeline()
             if !built {
-                extensionLog("  [start #\(debugID)] FAILED to start reading \(asset.url.lastPathComponent)")
+                extensionLog("  [start #\(debugID)] FAILED to start reading \(LogRedaction.fileLabel(asset.url))")
             }
             send(.pipelineBuilt(built))
 
@@ -139,7 +139,7 @@ extension VideoRenderer {
     /// now (falling back to the original), and applies that tier in the same
     /// job. A switch that opens nothing keeps the old choice and its selector.
     func switchVideo(to url: URL, variantSelector: @escaping RendererCopy.Selector) {
-        traceLog("  [switchVideo #\(debugID)] REQUEST target=\(url.lastPathComponent)")
+        traceLog("  [switchVideo #\(debugID)] REQUEST target=\(LogRedaction.fileLabel(url))")
         queue.async { [weak self] in
             guard let self, isRunning else { return }
             let tier = tierSource()
@@ -149,16 +149,17 @@ extension VideoRenderer {
                 open: loadBlocking)
             {
             case .held:
-                traceLog("  [switchVideo #\(debugID)] DEFERRED until wake or reopen: \(url.lastPathComponent)")
+                traceLog("  [switchVideo #\(debugID)] DEFERRED until wake or reopen: \(LogRedaction.fileLabel(url))")
                 return
             case let .opened(loaded):
                 adopt(loaded)
                 send(.assetChanged)
             case .unchanged:
-                traceLog("  [switchVideo #\(debugID)] DEDUP: already on \(asset.url.lastPathComponent)")
+                traceLog("  [switchVideo #\(debugID)] DEDUP: already on \(LogRedaction.fileLabel(asset.url))")
             case .failed:
                 extensionLog(
-                    "  [switchVideo #\(debugID)] no playable file for \(url.lastPathComponent), keeping \(asset.url.lastPathComponent)")
+                    "  [switchVideo #\(debugID)] no playable file for \(LogRedaction.fileLabel(url)), keeping \(LogRedaction.fileLabel(asset.url))"
+                )
             }
             applyTier(tier, animated: false)
         }
@@ -168,7 +169,7 @@ extension VideoRenderer {
     func loadBlocking(_ url: URL) -> (AVURLAsset, AVAssetTrack)? {
         let newAsset = AVURLAsset(url: url)
         guard let track = Self.loadFirstVideoTrackBlocking(newAsset) else {
-            traceLog("  [Renderer #\(debugID)] no video track in \(url.lastPathComponent)")
+            traceLog("  [Renderer #\(debugID)] no video track in \(LogRedaction.fileLabel(url))")
             return nil
         }
         return (newAsset, track)
@@ -177,7 +178,7 @@ extension VideoRenderer {
     /// Make a loaded file the current asset; the next build restarts on it.
     func adopt(_ loaded: (AVURLAsset, AVAssetTrack)) {
         (asset, videoTrack) = loaded
-        traceLog("  [Renderer #\(debugID)] now reading \(asset.url.lastPathComponent)")
+        traceLog("  [Renderer #\(debugID)] now reading \(LogRedaction.fileLabel(asset.url))")
     }
 
     /// Tag a sample buffer so the renderer displays it immediately, replacing all
@@ -204,7 +205,7 @@ extension VideoRenderer {
     /// Must never run on the main thread (or any Swift cooperative thread).
     static func loadFirstVideoTrackBlocking(_ asset: AVURLAsset) -> AVAssetTrack? {
         assert(!Thread.isMainThread, "blocking track load must not run on the main thread")
-        traceLog("  [load] blocking-load START \(asset.url.lastPathComponent) (queue will block until AVF replies)")
+        traceLog("  [load] blocking-load START \(LogRedaction.fileLabel(asset.url)) (queue will block until AVF replies)")
         let sem = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var result: AVAssetTrack?
         asset.loadTracks(withMediaType: .video) { tracks, _ in
@@ -212,7 +213,7 @@ extension VideoRenderer {
             sem.signal()
         }
         sem.wait()
-        traceLog("  [load] blocking-load DONE \(asset.url.lastPathComponent) track=\(result != nil ? "ok" : "nil")")
+        traceLog("  [load] blocking-load DONE \(LogRedaction.fileLabel(asset.url)) track=\(result != nil ? "ok" : "nil")")
         return result
     }
 
@@ -222,7 +223,7 @@ extension VideoRenderer {
     func stop() {
         queue.sync { [weak self] in
             guard let self else { return }
-            extensionLog("  [stop #\(debugID)] stopping renderer for \(asset.url.lastPathComponent)")
+            extensionLog("  [stop #\(debugID)] stopping renderer for \(LogRedaction.fileLabel(asset.url))")
             cancelRamp()
             cancelDeepPauseTimer()
             cancelRetryTimer()

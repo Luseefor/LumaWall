@@ -42,7 +42,7 @@ func generateThumbnail(from videoURL: URL) async -> URL? {
     do {
         cgImage = try await generator.image(at: .zero).image
     } catch {
-        extensionLog("  Thumbnail generation failed: \(error)")
+        extensionLog("  Thumbnail generation failed: \(LogRedaction.describe(error))")
         return nil
     }
 

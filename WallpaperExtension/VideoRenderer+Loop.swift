@@ -20,7 +20,7 @@ extension VideoRenderer {
             if nextURL != asset.url {
                 let newAsset = AVURLAsset(url: nextURL)
                 guard let track = Self.loadFirstVideoTrackBlocking(newAsset) else {
-                    traceLog("  [Renderer] No video track in variant: \(nextURL.lastPathComponent)")
+                    traceLog("  [Renderer] No video track in variant: \(LogRedaction.fileLabel(nextURL))")
                     return
                 }
                 installNextReader(asset: newAsset, track: track)
@@ -58,12 +58,12 @@ extension VideoRenderer {
 
     private func startedLoopReader(_ built: (AVAssetReader, AVAssetReaderTrackOutput)?, asset: AVURLAsset, label: String) -> LoopReader? {
         guard let (reader, output) = built else {
-            traceLog("  [Renderer] Failed to create \(label) reader for \(asset.url.lastPathComponent)")
+            traceLog("  [Renderer] Failed to create \(label) reader for \(LogRedaction.fileLabel(asset.url))")
             return nil
         }
         guard reader.startReading() else {
             traceLog(
-                "  [Renderer] \(label) reader for \(asset.url.lastPathComponent) won't start: \(reader.error?.localizedDescription ?? "unknown")"
+                "  [Renderer] \(label) reader for \(LogRedaction.fileLabel(asset.url)) won't start: \(reader.error?.localizedDescription ?? "unknown")"
             )
             return nil
         }
@@ -103,14 +103,14 @@ extension VideoRenderer {
         if picked?.source != .preload { preload?.0.cancelReading() }
         if case let .replacement(url) = picked?.source {
             traceLog(
-                "  [Renderer] preload \(preloadAsset?.url.lastPathComponent ?? "none") is for an older tier, looping into \(url.lastPathComponent)"
+                "  [Renderer] preload \(preloadAsset?.url.lastPathComponent ?? "none") is for an older tier, looping into \(LogRedaction.fileLabel(url))"
             )
         }
         if let next = picked?.reader {
             if next.asset.url != asset.url {
                 asset = next.asset
                 videoTrack = next.output.track
-                traceLog("  [Renderer] Switched variant: \(next.asset.url.lastPathComponent)")
+                traceLog("  [Renderer] Switched variant: \(LogRedaction.fileLabel(next.asset.url))")
             }
             currentReader = next.reader
             currentOutput = next.output

@@ -27,7 +27,7 @@ extension VideoRenderer {
         // switch fell back to the original) at an unchanged tier.
         guard policy != lifecycle.policy || playedTier(requested, playing: asset.url) != lifecycle.policy else { return }
         extensionLog(
-            "  [applyPolicy #\(debugID)] \(lifecycle.policy) → \(policy) animated=\(animated) asleep=\(lifecycle.displayAsleep) asset=\(asset.url.lastPathComponent)"
+            "  [applyPolicy #\(debugID)] \(lifecycle.policy) → \(policy) animated=\(animated) asleep=\(lifecycle.displayAsleep) asset=\(LogRedaction.fileLabel(asset.url))"
         )
         // Battery tiers resolve to downscaled siblings via the selector,
         // but the selector is otherwise consulted only at loop boundaries,

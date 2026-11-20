@@ -160,7 +160,7 @@ final class VideoLibrary: Sendable {
             extensionLog("[VideoLibrary] Added: \(id)")
             return id
         } catch {
-            extensionLog("[VideoLibrary] Failed to add video: \(error)")
+            extensionLog("[VideoLibrary] Failed to add video: \(LogRedaction.describe(error))")
             try? fm.removeItem(at: dir)
             return nil
         }
@@ -224,7 +224,7 @@ final class VideoLibrary: Sendable {
         do {
             cgImage = try await generator.image(at: .zero).image
         } catch {
-            extensionLog("[VideoLibrary] Thumbnail failed for \(entry.id): \(error)")
+            extensionLog("[VideoLibrary] Thumbnail failed for \(entry.id): \(LogRedaction.describe(error))")
             return nil
         }
 
@@ -280,7 +280,7 @@ final class VideoLibrary: Sendable {
                 try JSONEncoder().encode(entry).write(to: metadataURL)
                 extensionLog("[VideoLibrary] Migrated legacy wallpaper.\(ext) → \(id)")
             } catch {
-                extensionLog("[VideoLibrary] Migration failed: \(error)")
+                extensionLog("[VideoLibrary] Migration failed: \(LogRedaction.describe(error))")
                 try? fm.removeItem(at: dir)
             }
             break

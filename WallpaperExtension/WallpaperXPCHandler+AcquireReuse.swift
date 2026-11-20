@@ -84,7 +84,7 @@ extension WallpaperXPCHandler {
             return
         }
         extensionLog(
-            "  [acquire] switching to \(videoURL.lastPathComponent) (renderer \(existing.renderer != nil ? "present → switchVideo" : "nil → create"))"
+            "  [acquire] switching to \(LogRedaction.fileLabel(videoURL)) (renderer \(existing.renderer != nil ? "present → switchVideo" : "nil → create"))"
         )
         let selector = makeVariantSelector(choice: renderChoice, fallback: videoURL)
         if let renderer = existing.renderer {
@@ -116,7 +116,7 @@ extension WallpaperXPCHandler {
                         isPreview: isPreview,
                     )
                 } catch {
-                    extensionLog("  [Renderer] swap create failed: \(error)")
+                    extensionLog("  [Renderer] swap create failed: \(LogRedaction.describe(error))")
                     WallpaperState.shared.clearRendererPending(for: key, token: token)
                     return
                 }

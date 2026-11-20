@@ -178,7 +178,7 @@ extension WallpaperXPCHandler {
         }
 
         traceLog(
-            "  destination: \(destSize) @\(scaleFactor)x, isPreview: \(isPreview), pid: \(connectionPID), choice: \(choiceConfiguration ?? "nil"), files: \(choiceFiles.map(\.lastPathComponent))"
+            "  destination: \(destSize) @\(scaleFactor)x, isPreview: \(isPreview), pid: \(connectionPID), choice: \(choiceConfiguration ?? "nil"), files: \(choiceFiles.map(LogRedaction.fileLabel))"
         )
 
         // Native shuffle: adopt the frequency the host sent (optionValues in the

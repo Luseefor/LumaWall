@@ -397,7 +397,7 @@ private func placeholderThumbnailURL() -> URL? {
         try png.write(to: url)
         return url
     } catch {
-        extensionLog("  [Settings] Placeholder thumbnail write failed: \(error)")
+        extensionLog("  [Settings] Placeholder thumbnail write failed: \(LogRedaction.describe(error))")
         return nil
     }
 }
@@ -431,7 +431,7 @@ private func remapToRealXPC(_ viewModels: SettingsViewModels) -> AnyObject? {
     do {
         data = try NSKeyedArchiver.archivedData(withRootObject: shimXPC, requiringSecureCoding: false)
     } catch {
-        extensionLog("  [Remap] Archive failed: \(error)")
+        extensionLog("  [Remap] Archive failed: \(LogRedaction.describe(error))")
         return nil
     }
 
@@ -450,7 +450,7 @@ private func remapToRealXPC(_ viewModels: SettingsViewModels) -> AnyObject? {
 
     let result = unarchiver.decodeObject(forKey: NSKeyedArchiveRootObjectKey)
     if let error = unarchiver.error {
-        extensionLog("  [Remap] Unarchive error: \(error)")
+        extensionLog("  [Remap] Unarchive error: \(LogRedaction.describe(error))")
     }
     unarchiver.finishDecoding()
 
