@@ -146,9 +146,13 @@ cat > "$fixture_dir/.tools/xcodegen/bin/xcodegen" <<'SH'
 #!/bin/bash
 touch "$LUMAWALL_GATE_MARKERS/pinned"
 # A generator that writes a project different from the committed one.
-if [[ -n "${LUMAWALL_FAKE_XCODEGEN_DRIFT:-}" ]]; then
-  printf '/* drift */\n' >> "$LUMAWALL_GATE_MARKERS/LumaWall.xcodeproj/project.pbxproj"
-fi
+case "${LUMAWALL_FAKE_XCODEGEN_DRIFT:-}" in
+  edit) printf '/* drift */\n' >> "$LUMAWALL_GATE_MARKERS/LumaWall.xcodeproj/project.pbxproj" ;;
+  new)
+    mkdir -p "$LUMAWALL_GATE_MARKERS/LumaWall.xcodeproj/xcshareddata/xcschemes"
+    touch "$LUMAWALL_GATE_MARKERS/LumaWall.xcodeproj/xcshareddata/xcschemes/New.xcscheme"
+    ;;
+esac
 SH
 chmod +x "$fixture_dir/.tools/xcodegen/bin/xcodegen"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 expect_exit 0 bash "$fixture_dir/ci/xcodegen.sh" generate
@@ -316,10 +320,17 @@ LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 LUMAWALL_FAKE_CODESIGN_ENTITLEMENTS_EXIT=1
 # A regenerated project that differs from the committed one must refuse
 # release before archiving.
 rm -f "$fixture_dir/xcodebuild.log"
-LUMAWALL_FAKE_XCODEGEN_DRIFT=1 expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
+LUMAWALL_FAKE_XCODEGEN_DRIFT=edit expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
 grep -Fq 'LumaWall.xcodeproj' "$fixture_dir/command.log" || fail "line $LINENO"
 ! grep -Fq ' archive' "$fixture_dir/xcodebuild.log" 2>/dev/null || fail "line $LINENO"
 git -C "$fixture_dir" checkout -q -- LumaWall.xcodeproj
+# A new project file counts too, even where git hides untracked files.
+git -C "$fixture_dir" config status.showUntrackedFiles no
+LUMAWALL_FAKE_XCODEGEN_DRIFT=new expect_exit 3 zsh "$fixture_dir/Packaging/release.sh"
+grep -Fq 'New.xcscheme' "$fixture_dir/command.log" || fail "line $LINENO"
+! grep -Fq ' archive' "$fixture_dir/xcodebuild.log" 2>/dev/null || fail "line $LINENO"
+rm -rf "$fixture_dir/LumaWall.xcodeproj/xcshareddata"
+git -C "$fixture_dir" config --unset status.showUntrackedFiles
 [[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
 
 # An XPC service signed without Hardened Runtime must refuse release.
