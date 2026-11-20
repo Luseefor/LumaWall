@@ -1,0 +1,60 @@
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (Swift)
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned XcodeGen
+        run: ./ci/bootstrap.sh
+      - name: Show selected toolchain
+        run: |
+          test -d "$DEVELOPER_DIR" || { echo "::error::$DEVELOPER_DIR is not on this image"; exit 1; }
+          xcodebuild -version
+          swift --version
+      - name: Generate Xcode project
+        run: ./ci/xcodegen.sh generate
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: swift
+          build-mode: manual
+      - name: Build LumaWall
+        run: |
+          trap './ci/unregister-builds.sh .derived' EXIT
+          xcodebuild \
+            -project LumaWall.xcodeproj \
+            -scheme LumaWall \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath .derived \
+            ARCHS=arm64 \
+            CODE_SIGN_IDENTITY=- \
+            ENABLE_HARDENED_RUNTIME=NO \
+            build
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: "/language:swift"
