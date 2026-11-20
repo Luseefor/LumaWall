@@ -54,6 +54,13 @@ printf 'lsregister %s\n' "$*" >> "$LUMAWALL_GATE_MARKERS/unregistered"
 SH
 chmod +x "$fixture_dir/bin/"* "$fixture_dir/ci/"*.sh
 
+# /bin/bash 3.2 doesn't exit on a failed [[ ]] under set -e, so every
+# check states its own failure.
+fail() {
+    printf 'Failure gate check failed: %s\n' "$1" >&2
+    exit 1
+}
+
 expect_unregistered() {
     grep -Fqx "pluginkit -r $built_app/Contents/Extensions/LumaWallWallpaper.appex" "$fixture_dir/unregistered"
     grep -Fqx "lsregister -u $built_app" "$fixture_dir/unregistered"
@@ -74,12 +81,12 @@ expect_exit() {
 
 # A core-test failure must stop before building the app.
 LUMAWALL_FAKE_SWIFT_EXIT=43 expect_exit 43 bash "$fixture_dir/ci/check.sh"
-[[ ! -e "$fixture_dir/generated" ]]
+[[ ! -e "$fixture_dir/generated" ]] || fail "line $LINENO"
 expect_unregistered
 
 # A playback failure must stop before compiling a release.
 expect_exit 44 bash "$fixture_dir/ci/check.sh"
-[[ -e "$fixture_dir/generated" && ! -e "$fixture_dir/packaged" ]]
+[[ -e "$fixture_dir/generated" && ! -e "$fixture_dir/packaged" ]] || fail "line $LINENO"
 expect_unregistered
 
 # An interrupted run must still unregister the built app.
@@ -94,11 +101,13 @@ printf 'final class RendererLifecycleTests: XCTestCase {}\n' \
     > "$fixture_dir/Tests/WallpaperExtensionTests/RendererLifecycleTests.swift"
 printf 'targets: {}\n' > "$fixture_dir/project.yml"
 printf '/* RendererLifecycleTests.swift */\n' > "$fixture_dir/LumaWall.xcodeproj/project.pbxproj"
+# Fixed times: -nt only compares whole seconds in /bin/bash 3.2.
 touch -t 202001010000 "$fixture_dir/project.yml"
+touch -t 202101010000 "$fixture_dir/LumaWall.xcodeproj/project.pbxproj"
 rm -f "$fixture_dir/swift.log" "$fixture_dir/xcodebuild.log" "$fixture_dir/generated"
 expect_exit 0 bash "$fixture_dir/ci/test.sh" PowerPolicyTests/testBattery
 grep -Fqx 'test --filter LumaWallCoreTests\.PowerPolicyTests/testBattery' "$fixture_dir/swift.log"
-[[ ! -e "$fixture_dir/xcodebuild.log" ]]
+[[ ! -e "$fixture_dir/xcodebuild.log" ]] || fail "line $LINENO"
 
 # ci/test.sh runs an extension test class with -only-testing, keeps the
 # xcodebuild failure, skips xcodegen while the project is current, and
@@ -106,13 +115,22 @@ grep -Fqx 'test --filter LumaWallCoreTests\.PowerPolicyTests/testBattery' "$fixt
 expect_exit 44 bash "$fixture_dir/ci/test.sh" RendererLifecycleTests/testStop
 grep -Fq ' -configuration Testing ' "$fixture_dir/xcodebuild.log"
 grep -Fq ' -only-testing:WallpaperExtensionTests/RendererLifecycleTests/testStop ' "$fixture_dir/xcodebuild.log"
-[[ ! -e "$fixture_dir/generated" ]]
+[[ ! -e "$fixture_dir/generated" ]] || fail "line $LINENO"
 expect_unregistered
 
 # ci/test.sh regenerates the project once project.yml is newer.
-touch "$fixture_dir/project.yml"
+touch -t 202201010000 "$fixture_dir/project.yml"
 expect_exit 44 bash "$fixture_dir/ci/test.sh" WallpaperExtensionTests/RendererLifecycleTests
-[[ -e "$fixture_dir/generated" ]]
+[[ -e "$fixture_dir/generated" ]] || fail "line $LINENO"
+expect_unregistered
+
+# ci/test.sh regenerates the project for a test file it doesn't list yet,
+# also when the name starts with its target.
+touch -t 202001010000 "$fixture_dir/project.yml"
+rm "$fixture_dir/generated"
+printf 'final class NewTests: XCTestCase {}\n' > "$fixture_dir/Tests/WallpaperExtensionTests/NewTests.swift"
+expect_exit 44 bash "$fixture_dir/ci/test.sh" WallpaperExtensionTests/NewTests/testNew
+[[ -e "$fixture_dir/generated" ]] || fail "line $LINENO"
 expect_unregistered
 
 # ci/test.sh refuses a name it can't find.
@@ -127,7 +145,7 @@ mkdir -p "$fixture_dir/.tools/xcodegen/bin"
 printf '#!/bin/bash\ntouch "$LUMAWALL_GATE_MARKERS/pinned"\n' > "$fixture_dir/.tools/xcodegen/bin/xcodegen"
 chmod +x "$fixture_dir/.tools/xcodegen/bin/xcodegen"
 LUMAWALL_FAKE_XCODEGEN_VERSION=2.47.0 expect_exit 0 bash "$fixture_dir/ci/xcodegen.sh" generate
-[[ -e "$fixture_dir/pinned" ]]
+[[ -e "$fixture_dir/pinned" ]] || fail "line $LINENO"
 
 # The local pin and CI's install step name the same XcodeGen release.
 pin_values() {
@@ -154,7 +172,7 @@ export DEVELOPER_ID_APPLICATION='Developer ID Application: Release Gate Fixture'
 export DEVELOPMENT_TEAM='FIXTURE'
 export NOTARY_KEYCHAIN_PROFILE='fixture-profile'
 expect_exit 42 zsh "$fixture_dir/Packaging/release.sh"
-[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]]
-[[ ! -e "$fixture_dir/packaged" ]]
+[[ "$(cat "$fixture_dir/dist/LumaWall.dmg")" == 'previous release' ]] || fail "line $LINENO"
+[[ ! -e "$fixture_dir/packaged" ]] || fail "line $LINENO"
 
 printf 'Core, playback, release, cleanup, and ci/test.sh gates passed.\n'
