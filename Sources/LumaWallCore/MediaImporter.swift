@@ -48,18 +48,7 @@ public actor MediaImporter {
 
     private let store: LibraryStore
 
-    /// Imports stage their copy here. Clear Disk Cache empties `Scratch`, so
-    /// a folder of its own keeps an import's copy from vanishing mid-import.
-    private nonisolated let stagingURL: URL
-
-    public init(store: LibraryStore) {
-        self.store = store
-        stagingURL = store.rootURL.appendingPathComponent("Importing", isDirectory: true)
-        // Copies an interrupted run left behind. No import runs yet.
-        if let staging = try? TrustedDirectory(url: stagingURL) {
-            for item in (try? staging.entries()) ?? [] { try? staging.removeItem(named: item.name) }
-        }
-    }
+    public init(store: LibraryStore) { self.store = store }
 
     /// The URLs a drop or file panel handed over that name local files.
     /// Anything else (a dragged web link) is dropped before AVFoundation can
@@ -112,15 +101,19 @@ public actor MediaImporter {
         )
     }
 
-    /// Copies the source into the library's Importing folder once, then
+    /// Copies the source into a staging folder once, then
     /// inspects, hashes and stores only that copy. A source swapped or
     /// rewritten after the copy can't change what was checked.
     public func importVideo(_ sourceURL: URL, preferredName: String? = nil) async throws -> ImportOutcome {
         guard sourceURL.isFileURL else { throw VerifiedFileCopy.CopyError.notALocalFile }
-        try FileManager.default.createDirectory(at: stagingURL, withIntermediateDirectories: true)
+        // A fresh system folder on the library's volume: outside Scratch,
+        // which Clear Disk Cache empties, and never shared with another
+        // import, so the staged copy can be moved into the library.
+        let staging = try FileManager.default.url(
+            for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: store.rootURL, create: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
         let ext = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension.lowercased()
-        let staged = stagingURL.appendingPathComponent("\(UUID().uuidString).\(ext)")
-        defer { try? FileManager.default.removeItem(at: staged) }
+        let staged = staging.appendingPathComponent("\(UUID().uuidString).\(ext)")
         let copy = try await Task.detached(priority: .userInitiated) {
             try VerifiedFileCopy.copy(from: sourceURL, to: staged)
         }.value
