@@ -51,6 +51,7 @@ targets:
         buildPhase: resources
       - path: NOTICE
         buildPhase: resources
+        optional: true
       - path: THIRD_PARTY_NOTICES.md
         buildPhase: resources
       - path: Packaging/PrivacyInfo.xcprivacy

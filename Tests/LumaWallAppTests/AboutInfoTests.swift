@@ -8,7 +8,9 @@ final class AboutInfoTests: XCTestCase {
     func testAppBundleShipsLicenseNoticesAndPrivacyManifest() throws {
         let bundle = Bundle.main
         XCTAssertNotNil(bundle.url(forResource: "LICENSE", withExtension: nil))
-        XCTAssertNotNil(bundle.url(forResource: "NOTICE", withExtension: nil))
+        if AboutInfo.load(from: bundle).licenseName.contains("Apache") {
+            XCTAssertNotNil(bundle.url(forResource: "NOTICE", withExtension: nil))
+        }
         XCTAssertNotNil(bundle.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md"))
 
         let manifestURL = try XCTUnwrap(bundle.url(forResource: "PrivacyInfo", withExtension: "xcprivacy"))
