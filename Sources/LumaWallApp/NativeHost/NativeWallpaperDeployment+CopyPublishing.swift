@@ -72,6 +72,12 @@ extension NativeWallpaperDeployment {
         Task { await encodeQueue.wake() }
     }
 
+    /// Re-evaluates queued and running copies, for a change no surface
+    /// report carries, such as native mode turning off with nothing playing.
+    static func copyConditionsChanged() {
+        Task { await encodeQueue.wake() }
+    }
+
     /// Stops and forgets every copy encode for a removed entry.
     static func forgetCopies(for entryID: String) async {
         surfacesLock.withLock { surfacesByEntry[entryID] = nil }
@@ -183,7 +189,7 @@ extension NativeWallpaperDeployment {
             }
         },
         prepare: {
-            transcodeSources.removeAll()
+            transcodeSources.removeLeftovers()
             cleanUpAbandonedExports(
                 videosFolderURL: videosFolderURL, stagingFolderURL: stagingFolderURL, trustedAncestor: containerURL)
         },

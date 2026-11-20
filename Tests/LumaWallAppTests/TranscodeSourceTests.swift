@@ -1,5 +1,7 @@
+import AVFoundation
 import CryptoKit
 import Foundation
+import LumaWallCore
 import XCTest
 @testable import LumaWall
 
@@ -112,11 +114,46 @@ final class TranscodeSourceTests: XCTestCase {
         XCTAssertEqual(privateFiles().count, 1)
     }
 
-    func testStartupCleanupRemovesLeftoverCopies() throws {
-        try FileManager.default.createDirectory(at: sources.folderURL, withIntermediateDirectories: true)
+    func testCleanupRemovesLeftoversButNotTheCopyInUse() async throws {
+        // Cleanup runs at launch, maybe while the first encode reads its copy.
+        try bytes.write(to: deployed)
+        let log = SourceLog()
+        _ = await export(job(), log: log)
+        let inUse = try XCTUnwrap(log.sources.first).lastPathComponent
         try Data("left".utf8).write(to: sources.folderURL.appendingPathComponent("old.mov"))
-        sources.removeAll()
-        XCTAssertFalse(FileManager.default.fileExists(atPath: sources.folderURL.path))
+        sources.removeLeftovers()
+        XCTAssertEqual(privateFiles(), [inUse])
+    }
+
+    func testASymlinkedFolderAboveTheEntryIsRefused() async throws {
+        // The extension can swap videos (or Documents) for a link to a folder
+        // holding a file with the published bytes.
+        let container = root.appendingPathComponent("container")
+        let elsewhere = root.appendingPathComponent("elsewhere/E")
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try bytes.write(to: elsewhere.appendingPathComponent("Wallpaper.mov"))
+        try FileManager.default.createSymbolicLink(
+            at: container.appendingPathComponent("videos"), withDestinationURL: elsewhere.deletingLastPathComponent())
+        let sources = Deployment.TranscodeSources(folderURL: root.appendingPathComponent("private")) {
+            try TrustedDirectory(url: $0, below: container)
+        }
+        let source = container.appendingPathComponent("videos/E/Wallpaper.mov")
+        let job = Queue.Job(entryID: "E", sourceURL: source, contentHash: hash(bytes), spec: job().spec)
+        let log = SourceLog()
+        let result = await Deployment.exportCopy(job, sources: sources) { url in
+            log.record(url)
+            return .finished
+        }
+        XCTAssertEqual(result, .failed)
+        XCTAssertEqual(log.sources, [])
+    }
+
+    func testTheEncoderMayNotFollowReferencesToOtherFiles() {
+        // The hash covers only the copied movie; a QuickTime reference movie
+        // could pull samples from any other file the app can read.
+        let asset = Deployment.transcodeAsset(URL(fileURLWithPath: "/tmp/x.mov"))
+        XCTAssertEqual(asset.referenceRestrictions, .forbidAll)
     }
 
     /// The queue wired as the app wires it: encodes go through

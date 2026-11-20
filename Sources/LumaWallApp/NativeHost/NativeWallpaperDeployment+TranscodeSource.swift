@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import LumaWallCore
 
@@ -22,10 +23,16 @@ extension NativeWallpaperDeployment {
         }
 
         let folderURL: URL
+        /// Opens a folder of the extension's container without following a
+        /// symlink on the way down.
+        private let openFolder: @Sendable (URL) throws -> TrustedDirectory
         private let lock = NSLock()
         private var current: (key: String, name: String)?
 
-        init(folderURL: URL) { self.folderURL = folderURL }
+        init(folderURL: URL, openFolder: @escaping @Sendable (URL) throws -> TrustedDirectory = { try trustedFolder($0) }) {
+            self.folderURL = folderURL
+            self.openFolder = openFolder
+        }
 
         /// The private copy of `job`'s source, made on first use and reused
         /// by later jobs for the same source.
@@ -40,7 +47,7 @@ extension NativeWallpaperDeployment {
                 // AVFoundation goes by the extension to pick a reader.
                 let name = UUID().uuidString + "." + (source.pathExtension.isEmpty ? "mov" : source.pathExtension)
                 let destination = folderURL.appendingPathComponent(name)
-                let entry = try trustedFolder(source.deletingLastPathComponent())
+                let entry = try openFolder(source.deletingLastPathComponent())
                 let copied = try VerifiedFileCopy.copy(named: source.lastPathComponent, in: entry, to: destination)
                 guard copied.sha256 == job.contentHash else {
                     try? folder.removeFile(named: name)
@@ -59,12 +66,14 @@ extension NativeWallpaperDeployment {
             }
         }
 
-        /// Deletes every copy, including ones a previous run left behind.
-        func removeAll() {
+        /// Deletes the copies a previous run left behind, keeping the one in
+        /// use, so it is safe to call while an encode runs.
+        func removeLeftovers() {
             lock.withLock {
-                current = nil
-                let parent = try? TrustedDirectory(url: folderURL.deletingLastPathComponent())
-                try? parent?.removeItem(named: folderURL.lastPathComponent)
+                guard let folder = try? TrustedDirectory(url: folderURL) else { return }
+                for item in (try? folder.entries()) ?? [] where item.name != current?.name {
+                    try? folder.removeItem(named: item.name)
+                }
             }
         }
 
@@ -88,6 +97,19 @@ extension NativeWallpaperDeployment {
     }
 
     static let transcodeSources = TranscodeSources(folderURL: transcodeSourcesFolderURL)
+
+    /// Deletes private copies a crash left behind. Run at launch, since a
+    /// later launch may never encode again to clean them up.
+    static func removeLeftoverTranscodeSources() {
+        Task.detached(priority: .utility) { transcodeSources.removeLeftovers() }
+    }
+
+    /// The asset a copy encode reads. A QuickTime movie can refer to media
+    /// in other files, which the source's hash doesn't cover, so references
+    /// are refused.
+    static func transcodeAsset(_ url: URL) -> AVURLAsset {
+        AVURLAsset(url: url, options: [AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue])
+    }
 
     /// Runs `encode` on a private copy of `job`'s source from `sources`. A
     /// source that can't be copied safely, or no longer hashes to the job's

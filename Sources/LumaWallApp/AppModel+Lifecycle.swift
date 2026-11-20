@@ -11,6 +11,7 @@ extension AppModel {
         observeNativeFallback()
         await reload()
         finishPendingRemovals()
+        NativeWallpaperDeployment.removeLeftoverTranscodeSources()
         startDeploymentSweeps()
         playlists = await playlistStore.all()
         await restorePlaylistPlaybackState()
