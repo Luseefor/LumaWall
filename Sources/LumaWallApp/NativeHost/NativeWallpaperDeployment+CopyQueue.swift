@@ -14,8 +14,10 @@ extension NativeWallpaperDeployment {
     /// next request for the copy; nothing is scheduled.
     ///
     /// Jobs that share a source run from one private copy of it.
-    /// `finishedSource` is called with the last job of a source once the
-    /// queue moves to another source or stops, however that job ended.
+    /// `finishedSource` is called with the last job run for a source once
+    /// no ready job for that source waits and the queue picks another
+    /// source's job, or once the queue stops, however that job ended. A
+    /// source another one interrupts keeps its copy for its remaining jobs.
     actor VariantEncodeQueue {
         struct Job: Sendable, Equatable {
             let entryID: String
@@ -53,8 +55,9 @@ extension NativeWallpaperDeployment {
         private let now: @Sendable () -> Date
         private let prepare: @Sendable () -> Void
         private let finishedSource: @Sendable (Job) -> Void
-        /// The last job run, until `finishedSource` is called for its source.
-        private var lastSource: Job?
+        /// The last job run for each source `finishedSource` hasn't been
+        /// called for yet, oldest first.
+        private var liveSources: [Job] = []
         private var prepared = false
         private var pending: [Job] = []
         /// Stopped with `.notNow`; back in `pending` on the next `wake()`.
@@ -191,8 +194,9 @@ extension NativeWallpaperDeployment {
 
         private func drain() async {
             while let job = next() {
-                if let last = lastSource, last.sourceKey != job.sourceKey { finishedSource(last) }
-                lastSource = job
+                releaseSources(except: job.sourceKey)
+                liveSources.removeAll { $0.sourceKey == job.sourceKey }
+                liveSources.append(job)
                 let encode = self.encode
                 let task = Task(priority: .utility) { await encode(job) }
                 let wakesAtStart = wakes
@@ -215,9 +219,24 @@ extension NativeWallpaperDeployment {
                     failures[job.key] = (count, now().addingTimeInterval(delay))
                 }
             }
-            if let last = lastSource { finishedSource(last) }
-            lastSource = nil
+            for job in liveSources { finishedSource(job) }
+            liveSources.removeAll()
             worker = nil
+        }
+
+        /// Calls `finishedSource` for every live source other than `kept`
+        /// with no job waiting that could run now. A held or backing-off job
+        /// doesn't keep a source: it may wait for hours.
+        private func releaseSources(except kept: String) {
+            liveSources.removeAll { last in
+                guard last.sourceKey != kept else { return false }
+                let waiting = pending.contains { job in
+                    guard job.sourceKey == last.sourceKey, !isBackingOff(job), case .ready = readiness(job) else { return false }
+                    return true
+                }
+                if !waiting { finishedSource(last) }
+                return !waiting
+            }
         }
     }
 }

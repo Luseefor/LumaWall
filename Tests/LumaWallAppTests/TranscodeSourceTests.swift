@@ -103,15 +103,23 @@ final class TranscodeSourceTests: XCTestCase {
         XCTAssertEqual(privateFiles(), [])
     }
 
-    func testAnotherSourceReplacesTheKeptCopy() async throws {
+    func testEachSourceKeepsItsCopyUntilReleased() async throws {
+        // The queue can run a, then b, then a again; a's copy must survive b.
         try bytes.write(to: deployed)
         let log = SourceLog()
         _ = await export(job(), log: log)
         let other = Data("other source".utf8)
         try other.write(to: deployed)
         _ = await export(job(hash: hash(other)), log: log)
-        XCTAssertEqual(log.contents, [bytes, other])
-        XCTAssertEqual(privateFiles().count, 1)
+        try bytes.write(to: deployed)
+        _ = await export(job("Wallpaper.reduced.mov"), log: log)
+        XCTAssertEqual(log.contents, [bytes, other, bytes])
+        XCTAssertEqual(log.sources[0], log.sources[2])
+        XCTAssertEqual(privateFiles().count, 2)
+        sources.release(job())
+        XCTAssertEqual(privateFiles(), [log.sources[1].lastPathComponent])
+        sources.release(job(hash: hash(other)))
+        XCTAssertEqual(privateFiles(), [])
     }
 
     func testCleanupRemovesLeftoversButNotTheCopyInUse() async throws {
