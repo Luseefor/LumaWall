@@ -168,21 +168,31 @@ final class VideoLibrary: Sendable {
         }
     }
 
-    /// Remove a video from the library.
-    func removeVideo(id: String) {
+    /// Remove a video from the library. False when nothing was removed: an
+    /// unsafe id, or a folder that couldn't be deleted (the entry stays, so
+    /// the index matches the disk).
+    func removeVideo(id: String) -> Bool {
         let dir = videosDir.appendingPathComponent(id)
         // Only ever delete a valid UUID directory that resolves inside the
         // library. A malformed id must not reach removeItem at all.
         guard PathSafety.isValidEntryID(id), PathSafety.contained(dir, in: videosDir) else {
             extensionLog("[VideoLibrary] Refusing to remove unsafe id: \(id)")
-            return
+            return false
         }
-        try? FileManager.default.removeItem(at: dir)
+        do {
+            try FileManager.default.removeItem(at: dir)
+        } catch CocoaError.fileNoSuchFile {
+            // Already gone; drop the entry.
+        } catch {
+            extensionLog("[VideoLibrary] Couldn't remove \(id): \(LogRedaction.describe(error))")
+            return false
+        }
         lock.withLock { entries in
             entries.removeAll { $0.id == id }
         }
         saveIndex(entries)
         extensionLog("[VideoLibrary] Removed: \(id)")
+        return true
     }
 
     /// Update metadata for a video entry (e.g., after probing duration/fps/resolution).

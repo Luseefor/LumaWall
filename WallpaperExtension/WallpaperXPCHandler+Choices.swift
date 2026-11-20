@@ -35,7 +35,11 @@ extension WallpaperXPCHandler {
         extensionLog("  [Remove] Removing video: \(videoID)")
 
         // Remove from library (deletes files + metadata)
-        VideoLibrary.shared.removeVideo(id: videoID)
+        guard VideoLibrary.shared.removeVideo(id: videoID) else {
+            extensionLog("  [Remove] Refused: \(ChoiceRemoval.Refusal.deleteFailed.reason)")
+            reply(ChoiceRemoval.Refusal.deleteFailed.error)
+            return
+        }
 
         // Tear down only the contexts actually using this video. The video is gone
         // from the library, so these slots are genuinely dead (not a reuse). Other
