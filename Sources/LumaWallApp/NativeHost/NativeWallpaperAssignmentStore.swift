@@ -84,15 +84,20 @@ enum NativeWallpaperAssignmentStore {
         return true
     }
 
+    /// Returns how many Idle surfaces it changed.
+    @discardableResult
     static func updateIdleEverywhere(
         root: NSMutableDictionary,
         choiceID: String,
         videoURL: URL
-    ) {
+    ) -> Int {
+        var count = 0
         func walkDisplays(_ displays: NSMutableDictionary) {
             for value in displays.allValues {
                 guard let display = value as? NSMutableDictionary else { continue }
-                _ = updateSurface(display["Idle"] as? NSMutableDictionary, choiceID: choiceID, videoURL: videoURL)
+                if updateSurface(display["Idle"] as? NSMutableDictionary, choiceID: choiceID, videoURL: videoURL) {
+                    count += 1
+                }
             }
         }
         if let displays = root["Displays"] as? NSMutableDictionary {
@@ -106,12 +111,39 @@ enum NativeWallpaperAssignmentStore {
                 walkDisplays(displays)
             }
         }
+        return count
     }
 }
 
 // MARK: Backup and restore
 
 extension NativeWallpaperAssignmentStore {
+    /// True when every `surfaceKey` surface (Desktop or Idle) of the given
+    /// displays, or of all displays when nil, shows `choiceID`, and each
+    /// given display has at least one. Checks per-display and per-Space
+    /// entries.
+    static func shows(choiceID: String, on surfaceKey: String, of displayUUIDs: Set<String>?, in root: NSDictionary) -> Bool {
+        let expected = Data(choiceID.utf8)
+        var found = Set<String>()
+        var allMatch = true
+        func walk(_ displays: NSDictionary?) {
+            for case let (uuid as String, display as NSDictionary) in displays ?? [:] {
+                guard displayUUIDs?.contains(uuid) ?? true,
+                    let content = (display[surfaceKey] as? NSDictionary)?["Content"] as? NSDictionary
+                else { continue }
+                let first = (content["Choices"] as? [NSDictionary])?.first
+                if first?["Configuration"] as? Data != expected { allMatch = false }
+                found.insert(uuid)
+            }
+        }
+        walk(root["Displays"] as? NSDictionary)
+        for case let space as NSDictionary in (root["Spaces"] as? NSDictionary)?.allValues ?? [] {
+            walk(space["Displays"] as? NSDictionary)
+        }
+        guard allMatch else { return false }
+        return displayUUIDs.map { found.isSuperset(of: $0) } ?? !found.isEmpty
+    }
+
     /// Key paths to every surface in the store: any dictionary whose
     /// `Content` holds `Choices` (Desktop and Idle, per display and per Space).
     static func surfacePaths(in root: NSDictionary) -> [[String]] {
