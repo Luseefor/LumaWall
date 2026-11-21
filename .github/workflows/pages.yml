@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   prepare:
+    if: github.repository == 'Luseefor/LumaWall'
     runs-on: ubuntu-latest
     outputs:
       deployable: ${{ steps.check.outputs.deployable }}
@@ -48,7 +49,7 @@ jobs:
 
   deploy:
     needs: prepare
-    if: needs.prepare.outputs.deployable == 'true'
+    if: github.repository == 'Luseefor/LumaWall' && needs.prepare.outputs.deployable == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: pages
