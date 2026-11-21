@@ -43,6 +43,16 @@ extension AppModel {
         }
     }
 
+    /// Saves the layout and, in native mode, rewrites the store for it.
+    /// With native mode off it is only saved: Safe mode writes nothing.
+    func setNativeSurfaceLayout(_ layout: NativeSurfaceLayout) {
+        guard layout != nativeSurfaceLayout else { return }
+        nativeSurfaceLayout = layout
+        layout.save()
+        syncNativeHealth()
+        if engine.mode == .native { engine.reapplyAssignments() }
+    }
+
     /// The one-time warning for someone who already used native mode.
     func answerNativeModeDisclosure(keepNativeMode: Bool) {
         engine.acknowledgeNativeModeDisclosure()
@@ -122,9 +132,10 @@ extension AppModel {
         syncNativeHealth()
     }
 
-    /// The extension health check runs while native mode is the host.
+    /// The extension health check runs while native mode is the host and
+    /// plays on the desktop: it can only check while the screen is unlocked.
     func syncNativeHealth() {
-        nativeHealth?.setRunning(engine.mode == .native)
+        nativeHealth?.setRunning(engine.mode == .native && nativeSurfaceLayout.playsOnDesktop)
     }
 
     /// Told once per display each time native mode fails there: the engine

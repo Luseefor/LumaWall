@@ -114,7 +114,13 @@ extension AppModel {
         case .night: automations.nightWallpaperID = nil
         case .light: automations.lightWallpaperID = nil
         case .dark: automations.darkWallpaperID = nil
-        case .lock: automations.lockScreenWallpaperID = nil
+        case .lock:
+            automations.lockScreenWallpaperID = nil
+            // Lock screens go back to each display's own video.
+            if NativeWallpaperAssignmentService.lockScreenOverride != nil {
+                NativeWallpaperAssignmentService.lockScreenOverride = nil
+                if engine.mode == .native, !nativeSurfaceLayout.playsOnDesktop { engine.reapplyAssignments() }
+            }
         }
         persistAutomations()
         evaluateAutomations(force: true)
@@ -138,6 +144,7 @@ extension AppModel {
             )
             // A newer pick may have landed while this one deployed.
             guard automations.lockScreenWallpaperID == asset.id else { return }
+            NativeWallpaperAssignmentService.lockScreenOverride = entry
             try NativeWallpaperAssignmentService.applyLockScreen(entry: entry)
         } catch {
             present("Lock Screen", error.localizedDescription)

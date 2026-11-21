@@ -88,6 +88,8 @@ final class AppModel {
     /// Shown as a banner in the main window and the menu bar after native
     /// mode failed on a display.
     var nativeFailureNotice: NativeFailureNotice?
+    /// Where native mode plays the video (ADR 0004).
+    var nativeSurfaceLayout = NativeSurfaceLayout.current
     @ObservationIgnored var nativeHealth: NativeHealthMonitor?
     @ObservationIgnored let nativeFailureNotifier = NativeFailureNotifier()
     /// What each display is doing and why; see `AppModel+PlaybackStatus`.

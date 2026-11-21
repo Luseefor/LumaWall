@@ -81,33 +81,44 @@ struct NativeWallpaperAssignmentService {
         return (text as String).uppercased()
     }
 
+    /// Returns the displays the store has no entry for on the surface the
+    /// layout plays on. Throws `unknownDisplay` when that is all of them.
+    /// `stills` are the displays' first-frame stills, for lock-screen-only.
     @discardableResult
     static func apply(
-        entry: NativeWallpaperDeployment.EntryInfo,
-        to displayIDs: Set<UInt32>
+        assignments: [UInt32: NativeWallpaperDeployment.EntryInfo], stills: [UInt32: URL] = [:]
     ) throws -> Set<UInt32> {
-        try apply(assignments: Dictionary(uniqueKeysWithValues: displayIDs.map { ($0, entry) }))
-    }
-
-    /// Returns the displays the store has no Desktop entry for. Throws
-    /// `unknownDisplay` when that is all of them.
-    @discardableResult
-    static func apply(assignments: [UInt32: NativeWallpaperDeployment.EntryInfo]) throws -> Set<UInt32> {
         guard #available(macOS 26, *) else { throw AssignmentError.unsupportedSystem }
         var uuids: [String: UInt32] = [:]
-        for displayID in assignments.keys {
-            if let uuid = stableUUID(for: displayID) { uuids[uuid] = displayID }
+        var targets: [String: NativeSurfacePlan.Target] = [:]
+        for (displayID, entry) in assignments {
+            guard let uuid = stableUUID(for: displayID) else { continue }
+            uuids[uuid] = displayID
+            targets[uuid] = .init(video: video(for: entry), still: stills[displayID])
         }
-        let stableAssignments = assignments.reduce(into: [String: NativeWallpaperDeployment.EntryInfo]()) {
-            if let uuid = stableUUID(for: $1.key) { $0[uuid] = $1.value }
-        }
-        guard !stableAssignments.isEmpty else {
+        guard !targets.isEmpty else {
             nativeHostLog.error("assignment: CoreGraphics returned no stable display UUID")
             throw AssignmentError.unknownDisplay
         }
-        let missing = try live.apply(assignments: stableAssignments)
+        // A pick removed from the library isn't written back.
+        let pick = lockScreenOverride.flatMap { NativeWallpaperDeployment.removedEntries.contains($0.id) ? nil : $0 }
+        let missing = try live.apply(targets: targets, layout: .current, idleOverride: pick.map(video(for:)))
         let unresolved = Set(assignments.keys).subtracting(uuids.values)
         return unresolved.union(missing.compactMap { uuids[$0] })
+    }
+
+    /// The Lock Screen pick, deployed. With lock-screen-only it goes on
+    /// every lock screen in place of each display's own video.
+    static var lockScreenOverride: NativeWallpaperDeployment.EntryInfo? {
+        didSet { lockScreenOverrideChanges += 1 }
+    }
+
+    /// Counts every set and clear of the pick, including writes the pick
+    /// made on its own, so the engine's skip check sees each change.
+    private(set) static var lockScreenOverrideChanges = 0
+
+    static func video(for entry: NativeWallpaperDeployment.EntryInfo) -> NativeSurfacePlan.Video {
+        .init(choiceID: entry.id, url: NativeWallpaperDeployment.videoURL(for: entry))
     }
 
     static func applyLockScreen(entry: NativeWallpaperDeployment.EntryInfo) throws {
@@ -119,36 +130,53 @@ struct NativeWallpaperAssignmentService {
         try live.restoreOriginalWallpaper()
     }
 
-    /// Points each display (keyed by stable display UUID) at its entry, and
-    /// returns the displays the store has no Desktop entry for. Throws
-    /// `unknownDisplay`, writing nothing, when that is all of them.
+    /// Points each display's Desktop (keyed by stable display UUID) at its
+    /// entry, and returns the displays the store has no Desktop entry for.
+    /// Throws `unknownDisplay`, writing nothing, when that is all of them.
     @discardableResult
     func apply(assignments: [String: NativeWallpaperDeployment.EntryInfo]) throws -> Set<String> {
+        try apply(targets: assignments.mapValues { .init(video: Self.video(for: $0)) }, layout: .init())
+    }
+
+    /// Writes what `NativeSurfacePlan` plans for `layout`, and returns the
+    /// displays the store has no entry for on the surface the layout plays
+    /// on. Throws `unknownDisplay`, writing nothing, when that is all of them.
+    @discardableResult
+    func apply(
+        targets: [String: NativeSurfacePlan.Target], layout: NativeSurfaceLayout,
+        idleOverride: NativeSurfacePlan.Video? = nil
+    ) throws -> Set<String> {
         guard nativeModeEnabled() else { throw AssignmentError.nativeModeOff }
-        nativeHostLog.info("assignment: begin for \(assignments.count) display(s)")
-        var changed = Set<String>()
+        nativeHostLog.info(
+            "assignment: begin for \(targets.count) display(s), layout \(layout.tag, privacy: .public)")
+        var assigned = Set<String>()
         try transact(savingBackup: true) { root in
-            changed = []
-            for (uuid, entry) in assignments {
-                changed.formUnion(
-                    NativeWallpaperAssignmentStore.update(
-                        root: root,
-                        choiceID: entry.id,
-                        videoURL: NativeWallpaperDeployment.videoURL(for: entry),
-                        displayUUIDs: [uuid]
-                    ))
+            // Read on every attempt: a retry sees what the previous attempt
+            // backed up.
+            let backup = try? files.readBackup().flatMap {
+                try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary
             }
-            let missing = Set(assignments.keys).subtracting(changed)
+            let plan = NativeSurfacePlan.changes(
+                root: root, backup: backup ?? nil, layout: layout, targets: targets, idleOverride: idleOverride,
+                ownedFolders: ownedFolders)
+            assigned = plan.assigned
+            let missing = Set(targets.keys).subtracting(assigned)
             if !missing.isEmpty {
                 let names = missing.sorted().joined(separator: ", ")
                 let known = ((root["Displays"] as? NSDictionary)?.allKeys as? [String] ?? []).sorted().joined(separator: ", ")
                 nativeHostLog.error(
-                    "assign: no Desktop surface for display(s) [\(names, privacy: .public)]; store has [\(known, privacy: .public)]")
+                    "assign: no surface for display(s) [\(names, privacy: .public)]; store has [\(known, privacy: .public)]")
             }
-            guard !changed.isEmpty else { throw AssignmentError.unknownDisplay }
+            if !plan.desktopsLeftPlaying.isEmpty {
+                let names = plan.desktopsLeftPlaying.sorted().joined(separator: ", ")
+                nativeHostLog.notice(
+                    "assign: no saved picture or still for the desktop of [\(names, privacy: .public)]; it keeps the video")
+            }
+            guard !assigned.isEmpty else { throw AssignmentError.unknownDisplay }
+            NativeSurfacePlan.apply(plan.changes, to: root)
         }
         nativeHostLog.info("assignment: verified; restarted WallpaperAgent")
-        return Set(assignments.keys).subtracting(changed)
+        return Set(targets.keys).subtracting(assigned)
     }
 
     func applyLockScreen(entry: NativeWallpaperDeployment.EntryInfo) throws {

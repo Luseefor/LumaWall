@@ -13,14 +13,12 @@ final class NativeWallpaperAssignmentStoreTests: XCTestCase {
         let displays = NSMutableDictionary(dictionary: ["DISPLAY-A": display])
         let root = NSMutableDictionary(dictionary: ["Displays": displays])
 
-        let changed = NativeWallpaperAssignmentStore.update(
-            root: root,
-            choiceID: "WALLPAPER-A",
-            videoURL: URL(fileURLWithPath: "/tmp/wallpaper.mov"),
-            displayUUIDs: ["DISPLAY-A"]
-        )
+        let video = NativeSurfacePlan.Video(choiceID: "WALLPAPER-A", url: URL(fileURLWithPath: "/tmp/wallpaper.mov"))
+        let plan = NativeSurfacePlan.changes(
+            root: root, backup: nil, layout: .init(), targets: ["DISPLAY-A": .init(video: video)], ownedFolders: [])
+        NativeSurfacePlan.apply(plan.changes, to: root)
 
-        XCTAssertEqual(changed, ["DISPLAY-A"])
+        XCTAssertEqual(plan.assigned, ["DISPLAY-A"])
         let encoded = try PropertyListSerialization.data(
             fromPropertyList: root,
             format: .binary,
@@ -63,5 +61,21 @@ final class NativeWallpaperAssignmentStoreTests: XCTestCase {
     func testAStoreThatIsAllOursHasNone() {
         let root: NSDictionary = ["Displays": ["A": desktop(provider: WallpaperHostCapabilities.extensionBundleID)]]
         XCTAssertTrue(NativeWallpaperAssignmentStore.displaysShowingOthers(in: root).isEmpty)
+    }
+
+    // MARK: Which surfaces are LumaWall's
+
+    /// `setDesktopImageURL` names the file in `Configuration`, not `Files`.
+    func testAnAppleImageChoiceOfALumaWallPosterIsOurs() throws {
+        let library = URL(fileURLWithPath: "/Users/someone/Library/Application Support/LumaWall", isDirectory: true)
+        func surface(_ url: URL) -> NSDictionary {
+            ["Content": ["Choices": [NativeSurfacePlan.imageChoice(url)]]]
+        }
+        XCTAssertTrue(
+            NativeWallpaperAssignmentStore.isOurs(
+                surface(library.appendingPathComponent("W/Poster.jpg")), ownedFolders: [library]))
+        XCTAssertFalse(
+            NativeWallpaperAssignmentStore.isOurs(
+                surface(URL(fileURLWithPath: "/System/Library/Desktop Pictures/Sequoia.heic")), ownedFolders: [library]))
     }
 }

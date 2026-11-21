@@ -11,7 +11,9 @@ struct NativeModeSettings: View {
             hostMode: model.wallpaperHostMode,
             fallbackDisplayCount: model.nativeFallbackDisplayCount,
             canRestore: model.canRestoreOriginalWallpaper,
+            layout: model.nativeSurfaceLayout,
             setEnabled: { model.setNativeMode(enabled: $0) },
+            setLayout: { model.setNativeSurfaceLayout($0) },
             restore: { model.restoreOriginalWallpaper() }
         )
     }
@@ -22,13 +24,15 @@ struct NativeModeControls: View {
     let hostMode: WallpaperHostMode
     let fallbackDisplayCount: Int
     let canRestore: Bool
+    let layout: NativeSurfaceLayout
     let setEnabled: (Bool) -> Void
+    let setLayout: (NativeSurfaceLayout) -> Void
     let restore: () -> Void
     @State private var confirmsTurningOn = false
 
     var body: some View {
         VStack(spacing: 0) {
-            row(title: AppModel.NativeModeText.title, detail: modeDetail, symbol: "testtube.2") {
+            NativeSettingRow(title: AppModel.NativeModeText.title, detail: modeDetail, symbol: "testtube.2") {
                 Toggle(
                     AppModel.NativeModeText.title,
                     isOn: Binding(
@@ -41,9 +45,13 @@ struct NativeModeControls: View {
                 .labelsHidden()
                 .accessibilityLabel(AppModel.NativeModeText.title)
             }
+            if enabled, hostMode == .native {
+                Divider().overlay(Theme.line)
+                NativeLayoutRows(layout: layout, setLayout: setLayout)
+            }
             if canRestore {
                 Divider().overlay(Theme.line)
-                row(
+                NativeSettingRow(
                     title: "Restore original wallpaper",
                     detail: enabled
                         ? "Turns native mode off, stops LumaWall's wallpapers and puts back the one you had before."
@@ -73,29 +81,62 @@ struct NativeModeControls: View {
         case let count: return "On. \(count) displays use Safe mode after native mode failed there."
         }
     }
+}
 
-    private func row<Trailing: View>(
-        title: String, detail: String, symbol: String, @ViewBuilder trailing: () -> Trailing
-    ) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: symbol)
-                .frame(width: 28, height: 28)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).fontWeight(.semibold)
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textDim)
-                    .fixedSize(horizontal: false, vertical: true)
+/// Where native mode plays the video: everywhere, or the lock screen only
+/// with the desktop on the user's picture or a still of the video.
+struct NativeLayoutRows: View {
+    let layout: NativeSurfaceLayout
+    let setLayout: (NativeSurfaceLayout) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            NativeSettingRow(
+                title: "Play the video on",
+                detail: layout.preset == .everywhere
+                    ? "The desktop. Lock screens keep their own wallpaper unless you pick one in Library."
+                    : "The lock screen. After you unlock, the desktop stays still.",
+                symbol: "lock.display"
+            ) {
+                Picker(
+                    "Play the video on",
+                    selection: Binding(
+                        get: { layout.preset },
+                        set: { setLayout(NativeSurfaceLayout(preset: $0, settlesOnStill: layout.settlesOnStill)) }
+                    )
+                ) {
+                    Text("Desktop").tag(NativeSurfaceLayout.Preset.everywhere)
+                    Text("Lock screen only").tag(NativeSurfaceLayout.Preset.lockScreenOnly)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
             }
-            Spacer()
-            trailing()
+            if layout.preset == .lockScreenOnly {
+                Divider().overlay(Theme.line)
+                NativeSettingRow(
+                    title: "Desktop after unlock",
+                    detail: layout.settlesOnStill
+                        ? "Each display shows the first frame of its own video."
+                        : "Each display keeps the picture you chose in System Settings.",
+                    symbol: "photo"
+                ) {
+                    Picker(
+                        "Desktop after unlock",
+                        selection: Binding(
+                            get: { layout.settlesOnStill },
+                            set: { setLayout(NativeSurfaceLayout(preset: layout.preset, settlesOnStill: $0)) }
+                        )
+                    ) {
+                        Text("Your picture").tag(false)
+                        Text("Still of the video").tag(true)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+            }
         }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(title)
-        .accessibilityHint(detail)
     }
 }
 
@@ -117,5 +158,35 @@ struct NativeModeDisclosure: ViewModifier {
         } message: {
             Text(AppModel.NativeModeText.warning + " You can change this in Settings.")
         }
+    }
+}
+
+/// One row of the native-mode group: icon, title, detail and a control.
+struct NativeSettingRow<Trailing: View>: View {
+    let title: String
+    let detail: String
+    let symbol: String
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .frame(width: 28, height: 28)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).fontWeight(.semibold)
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            trailing()
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
+        .accessibilityHint(detail)
     }
 }

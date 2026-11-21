@@ -2,67 +2,11 @@ import Foundation
 
 enum NativeWallpaperAssignmentStore {
     @discardableResult
-    static func update(
-        root: NSMutableDictionary,
-        choiceID: String,
-        videoURL: URL,
-        displayUUIDs: Set<String>,
-        includeLockScreen: Bool = false
-    ) -> Set<String> {
-        var changed = Set<String>()
-        if let displays = root["Displays"] as? NSMutableDictionary {
-            changed.formUnion(
-                updateDisplays(
-                    displays,
-                    choiceID: choiceID,
-                    videoURL: videoURL,
-                    targets: displayUUIDs,
-                    includeLockScreen: includeLockScreen
-                ))
-        }
-        if let spaces = root["Spaces"] as? NSMutableDictionary {
-            for value in spaces.allValues {
-                guard let space = value as? NSMutableDictionary,
-                    let displays = space["Displays"] as? NSMutableDictionary
-                else { continue }
-                changed.formUnion(
-                    updateDisplays(
-                        displays,
-                        choiceID: choiceID,
-                        videoURL: videoURL,
-                        targets: displayUUIDs,
-                        includeLockScreen: includeLockScreen
-                    ))
-            }
-        }
-        return changed
-    }
-
-    private static func updateDisplays(
-        _ displays: NSMutableDictionary,
-        choiceID: String,
-        videoURL: URL,
-        targets: Set<String>,
-        includeLockScreen: Bool
-    ) -> Set<String> {
-        var changed = Set<String>()
-        for uuid in targets {
-            guard let display = displays[uuid] as? NSMutableDictionary else { continue }
-            if updateSurface(display["Desktop"] as? NSMutableDictionary, choiceID: choiceID, videoURL: videoURL) {
-                changed.insert(uuid)
-            }
-            if includeLockScreen {
-                _ = updateSurface(display["Idle"] as? NSMutableDictionary, choiceID: choiceID, videoURL: videoURL)
-            }
-        }
-        return changed
-    }
-
-    @discardableResult
-    private static func updateSurface(
+    static func updateSurface(
         _ surface: NSMutableDictionary?,
         choiceID: String,
-        videoURL: URL
+        videoURL: URL,
+        now: Date = Date()
     ) -> Bool {
         guard let surface,
             let content = surface["Content"] as? NSMutableDictionary
@@ -78,7 +22,6 @@ enum NativeWallpaperAssignmentStore {
         // not a property-list value and makes PropertyListSerialization fail
         // with the misleading "error in the destination for the data" message.
         content["Shuffle"] = "$null"
-        let now = Date()
         surface["LastSet"] = now
         surface["LastUse"] = now
         return true
@@ -200,11 +143,14 @@ extension NativeWallpaperAssignmentStore {
         let prefixes = ownedFolders.map { $0.standardizedFileURL.path + "/" }
         return choices.contains { choice in
             if choice["Provider"] as? String == WallpaperHostCapabilities.extensionBundleID { return true }
-            let files = choice["Files"] as? [NSDictionary] ?? []
-            return files.contains { file in
-                guard let relative = file["relative"] as? String, let url = URL(string: relative), url.isFileURL else {
-                    return false
-                }
+            // Apple image choices name their file in `Configuration`; older
+            // stores and tests use `Files`.
+            let files = (choice["Files"] as? [NSDictionary] ?? []).compactMap {
+                ($0["relative"] as? String).flatMap(URL.init(string:))
+            }
+            let urls = files + [NativeSurfacePlan.imageURL(of: choice)].compactMap { $0 }
+            return urls.contains { url in
+                guard url.isFileURL else { return false }
                 let path = url.standardizedFileURL.path
                 return prefixes.contains { path.hasPrefix($0) }
             }
@@ -250,7 +196,7 @@ extension NativeWallpaperAssignmentStore {
     }
 
     /// Sets `value` at `path`, creating missing parent dictionaries.
-    private static func set(_ value: Any, at path: [String], in root: NSMutableDictionary) {
+    static func set(_ value: Any, at path: [String], in root: NSMutableDictionary) {
         guard let last = path.last else { return }
         var node = root
         for key in path.dropLast() {
@@ -265,7 +211,7 @@ extension NativeWallpaperAssignmentStore {
         node[last] = value
     }
 
-    private static func deepMutableCopy(_ dictionary: NSDictionary) -> NSMutableDictionary {
+    static func deepMutableCopy(_ dictionary: NSDictionary) -> NSMutableDictionary {
         let copy = CFPropertyListCreateDeepCopy(
             kCFAllocatorDefault, dictionary, CFOptionFlags(CFPropertyListMutabilityOptions.mutableContainersAndLeaves.rawValue))
         return copy as? NSMutableDictionary ?? NSMutableDictionary(dictionary: dictionary)

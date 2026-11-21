@@ -54,9 +54,10 @@ final class WallpaperEngine {
     var hasNativeHost: Bool { native != nil }
 
     /// Displays the system host plays right now: not the overlay's, and not
-    /// fallen back. The extension health check watches these.
+    /// fallen back. The extension health check watches these. With lock
+    /// screen only, the extension draws no desktop, so there are none.
     var nativeServedDisplayIDs: Set<DisplayID> {
-        guard mode == .native, let native else { return [] }
+        guard mode == .native, let native, NativeSurfaceLayout.current.playsOnDesktop else { return [] }
         return native.activeDisplayIDs.subtracting(overlay.activeDisplayIDs).subtracting(nativeFallbackDisplayIDs)
     }
 
