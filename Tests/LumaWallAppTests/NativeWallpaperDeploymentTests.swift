@@ -855,6 +855,25 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
     }
 
+    func testFailedMetadataWriteKeepsThePreviousVariant() throws {
+        try deploy(hash: "aaa")
+        let job = job(hash: "aaa")
+        let previous = try stage(job)
+        let original = Data("previous copy".utf8)
+        try original.write(to: previous)
+        XCTAssertEqual(publish(previous, job: job, resolution: size, videosFolderURL: videos), .published)
+        let metadata = videos.appendingPathComponent(id).appendingPathComponent("metadata.json")
+        let originalMetadata = try Data(contentsOf: metadata)
+
+        let replacement = try stage(job)
+        let failed = publish(
+            replacement, job: job, resolution: CGSize(width: 640, height: 360), videosFolderURL: videos,
+            writeMetadata: { _, _ in throw POSIXError(.ENOSPC) })
+        XCTAssertEqual(failed, .failed)
+        XCTAssertEqual(try? Data(contentsOf: dest), original)
+        XCTAssertEqual(try Data(contentsOf: metadata), originalMetadata)
+    }
+
     func testAFailedMetadataWriteNeverTakesTheFileBackFromTheEntry() throws {
         // The export went back to staging by name, so the extension could
         // swap it inside the entry first and have the app probe its bytes.

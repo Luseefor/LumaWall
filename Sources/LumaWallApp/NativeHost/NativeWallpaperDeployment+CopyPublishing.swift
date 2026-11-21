@@ -260,8 +260,7 @@ extension NativeWallpaperDeployment {
     /// Moves a finished export into its entry and lists it in metadata.json,
     /// re-reading the file so copies other jobs recorded are kept. Discards
     /// the export when the entry no longer holds the source it was made from.
-    /// When metadata.json can't be written the moved copy is deleted, and a
-    /// retry encodes it again.
+    /// If metadata.json can't be written, restore the previous variant.
     ///
     /// The staging and entry folders are opened through `TrustedDirectory`
     /// and every read, move and delete goes through their descriptors, so
@@ -316,20 +315,16 @@ extension NativeWallpaperDeployment {
                     // one left behind.
                     let moving = "\(UUID().uuidString).publishing.partial.mov"
                     do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
+                    var moved = false
                     do {
-                        try staging.publishItem(named: moving, into: folder, as: name)
+                        try staging.publishItem(named: moving, into: folder, as: name) {
+                            moved = true
+                            try writeMetadata(metadata, folder)
+                        }
                     } catch {
-                        // Nothing moved: `moving` still holds the export.
-                        try? staging.renameItem(named: moving, to: stagedName)
-                        return .failed
-                    }
-                    do {
-                        try writeMetadata(metadata, folder)
-                    } catch {
-                        // Not moved back to staging: in the entry the extension
-                        // can have swapped it, and staging only holds bytes the
-                        // app encoded. The retry encodes again.
-                        try? folder.removeFile(named: name)
+                        // Once the export has reached the extension's folder,
+                        // its bytes can no longer be reused by the app.
+                        if !moved { try? staging.renameItem(named: moving, to: stagedName) }
                         return .failed
                     }
                     return .published

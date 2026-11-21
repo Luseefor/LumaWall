@@ -196,29 +196,42 @@ public final class TrustedDirectory {
         guard renameatx_np(fd, name, fd, newName, UInt32(RENAME_EXCL)) == 0 else { throw POSIXError.current }
     }
 
-    /// Moves `name` from this folder into `destination` as `newName` in one
-    /// rename, so a reader of `destination` sees the old item or the new
-    /// one, never neither and never a half-built one. When `newName` exists
-    /// the two are swapped and the old item, now at `name` here, is deleted
-    /// without following symlinks; if that delete fails the publish still
-    /// counts and the leftover stays at `name`. Both folders must be on one
-    /// volume.
-    public func publishItem(named name: String, into destination: TrustedDirectory, as newName: String) throws {
+    /// Moves `name` into `destination` as `newName` in one rename. If
+    /// an item is already there, it is swapped into this folder and kept
+    /// until `commit` succeeds. If `commit` throws, the old item is restored
+    /// and the replacement discarded. Callers must serialize publishers
+    /// when using `commit`. Both folders must be on one volume.
+    public func publishItem(
+        named name: String, into destination: TrustedDirectory, as newName: String,
+        commit: () throws -> Void = {}
+    ) throws {
         try Self.checkName(name)
         try Self.checkName(newName)
-        // Bounded: another process creating and deleting `newName` over and
-        // over must not keep the caller, who may hold a lock, here forever.
-        for _ in 0..<8 {
-            if renameatx_np(fd, name, destination.fd, newName, UInt32(RENAME_EXCL)) == 0 { return }
-            guard errno == EEXIST else { throw POSIXError.current }
-            if renameatx_np(fd, name, destination.fd, newName, UInt32(RENAME_SWAP)) == 0 {
-                // The swap is the commit: the new item is live. An old tree
-                // that won't fully delete stays at `name` for the caller's
-                // next cleanup rather than failing a finished publish.
-                try? Self.removeTree(named: name, in: fd)
-                return
+        let replaced = try moveForPublication(named: name, into: destination, as: newName)
+        do {
+            try commit()
+        } catch {
+            if replaced {
+                let discarded = try moveForPublication(named: name, into: destination, as: newName)
+                if discarded { try? removeItem(named: name) }
+            } else {
+                try? destination.removeFile(named: newName)
             }
-            // The old item vanished between the two renames; try a plain move again.
+            throw error
+        }
+        // If deletion fails, the caller's cleanup can remove the leftover.
+        if replaced { try? removeItem(named: name) }
+    }
+
+    /// Returns whether the old destination was swapped into this folder.
+    private func moveForPublication(named name: String, into destination: TrustedDirectory, as newName: String) throws -> Bool {
+        // Bounded: a destination appearing and disappearing must not
+        // hold the caller here forever.
+        for _ in 0..<8 {
+            if renameatx_np(fd, name, destination.fd, newName, UInt32(RENAME_EXCL)) == 0 { return false }
+            guard errno == EEXIST else { throw POSIXError.current }
+            if renameatx_np(fd, name, destination.fd, newName, UInt32(RENAME_SWAP)) == 0 { return true }
+            // The old item may have vanished between the two renames.
             guard errno == ENOENT else { throw POSIXError.current }
         }
         throw POSIXError(.EBUSY)
