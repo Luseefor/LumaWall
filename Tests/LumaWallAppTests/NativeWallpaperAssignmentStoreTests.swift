@@ -13,14 +13,12 @@ final class NativeWallpaperAssignmentStoreTests: XCTestCase {
         let displays = NSMutableDictionary(dictionary: ["DISPLAY-A": display])
         let root = NSMutableDictionary(dictionary: ["Displays": displays])
 
-        let changed = NativeWallpaperAssignmentStore.update(
-            root: root,
-            choiceID: "WALLPAPER-A",
-            videoURL: URL(fileURLWithPath: "/tmp/wallpaper.mov"),
-            displayUUIDs: ["DISPLAY-A"]
-        )
+        let video = NativeSurfacePlan.Video(choiceID: "WALLPAPER-A", url: URL(fileURLWithPath: "/tmp/wallpaper.mov"))
+        let plan = NativeSurfacePlan.changes(
+            root: root, backup: nil, layout: .init(), targets: ["DISPLAY-A": .init(video: video)], ownedFolders: [])
+        NativeSurfacePlan.apply(plan.changes, to: root)
 
-        XCTAssertEqual(changed, ["DISPLAY-A"])
+        XCTAssertEqual(plan.assigned, ["DISPLAY-A"])
         let encoded = try PropertyListSerialization.data(
             fromPropertyList: root,
             format: .binary,

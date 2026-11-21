@@ -2,63 +2,6 @@ import Foundation
 
 enum NativeWallpaperAssignmentStore {
     @discardableResult
-    static func update(
-        root: NSMutableDictionary,
-        choiceID: String,
-        videoURL: URL,
-        displayUUIDs: Set<String>,
-        includeLockScreen: Bool = false
-    ) -> Set<String> {
-        var changed = Set<String>()
-        if let displays = root["Displays"] as? NSMutableDictionary {
-            changed.formUnion(
-                updateDisplays(
-                    displays,
-                    choiceID: choiceID,
-                    videoURL: videoURL,
-                    targets: displayUUIDs,
-                    includeLockScreen: includeLockScreen
-                ))
-        }
-        if let spaces = root["Spaces"] as? NSMutableDictionary {
-            for value in spaces.allValues {
-                guard let space = value as? NSMutableDictionary,
-                    let displays = space["Displays"] as? NSMutableDictionary
-                else { continue }
-                changed.formUnion(
-                    updateDisplays(
-                        displays,
-                        choiceID: choiceID,
-                        videoURL: videoURL,
-                        targets: displayUUIDs,
-                        includeLockScreen: includeLockScreen
-                    ))
-            }
-        }
-        return changed
-    }
-
-    private static func updateDisplays(
-        _ displays: NSMutableDictionary,
-        choiceID: String,
-        videoURL: URL,
-        targets: Set<String>,
-        includeLockScreen: Bool
-    ) -> Set<String> {
-        var changed = Set<String>()
-        for uuid in targets {
-            guard let display = displays[uuid] as? NSMutableDictionary else { continue }
-            if updateSurface(display["Desktop"] as? NSMutableDictionary, choiceID: choiceID, videoURL: videoURL) {
-                changed.insert(uuid)
-            }
-            if includeLockScreen {
-                _ = updateSurface(display["Idle"] as? NSMutableDictionary, choiceID: choiceID, videoURL: videoURL)
-            }
-        }
-        return changed
-    }
-
-    @discardableResult
     static func updateSurface(
         _ surface: NSMutableDictionary?,
         choiceID: String,
