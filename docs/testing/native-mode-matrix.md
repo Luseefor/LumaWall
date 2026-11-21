@@ -82,3 +82,26 @@ Mac: ______ · Build: ______ · LumaWall: ______ · Date: ______
 | 20 | Restore from Settings → Wallpaper host → Restore | Same as 18 | | |
 
 Notes:
+
+## Lock screen only (issue #109)
+
+Run on macOS 26 and 27 with a landscape laptop panel plus one landscape
+and one portrait external display, each with a different LumaWall
+wallpaper. Before starting, set a different picture of your own on each
+display in System Settings → Wallpaper, then turn native mode on.
+
+| # | Check | Expected | Observed | Result |
+|---|-------|----------|----------|--------|
+| L1 | Settings → Wallpaper host → Play the video on → Lock screen only. Lock | Each lock screen plays its own display's video, portrait included | | |
+| L2 | Unlock | Each desktop shows the picture you chose before, with no frame of video or other image in between; no notice | | |
+| L3 | Lock and unlock 10 times | Same as L1 and L2 every time; no Safe mode fallback | | |
+| L4 | Desktop after unlock → Still of the video. Unlock after locking | Each desktop shows the first frame of its own video, filling the portrait display; no flash of your picture or black | | |
+| L5 | Rotate the portrait display to landscape and back | The still and the lock screen video fill it each way | | |
+| L6 | Disconnect and reconnect an external display | Its lock screen video and desktop picture or still come back | | |
+| L7 | Pick a Lock Screen wallpaper in Library | Every lock screen plays that one; desktops unchanged | | |
+| L8 | Clear the Lock Screen pick | Each lock screen goes back to its display's own video | | |
+| L9 | Play the video on → Desktop | Desktops play again; lock screens keep the video | | |
+| L10 | Lock screen only, then turn native mode off | Nothing in the store changes; Safe mode plays on the desktops | | |
+| L11 | With lock screen only and the still on, Settings → Restore | Desktops and lock screens show your own pictures again; a message says so | | |
+
+Notes:
