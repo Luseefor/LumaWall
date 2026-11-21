@@ -806,6 +806,17 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertEqual(started.wait(timeout: .now() + 5), .success)
         let beforeUnlock = finished.wait(timeout: .now() + 0.5)
         XCTAssertEqual(beforeUnlock, .timedOut)
+        let probeDeadline = ContinuousClock.now + .milliseconds(250)
+        var localLockIsFree = false
+        repeat {
+            localLockIsFree = NativeWallpaperDeployment.entryLock.try()
+            if localLockIsFree {
+                NativeWallpaperDeployment.entryLock.unlock()
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        } while ContinuousClock.now < probeDeadline
+        XCTAssertTrue(localLockIsFree)
 
         let otherMovie = "Wallpaper.reduced.mov"
         var entry = try XCTUnwrap(NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos))
@@ -820,6 +831,33 @@ final class VariantPublicationTests: XCTestCase {
 
         let updated = try XCTUnwrap(NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos))
         XCTAssertEqual(Set(updated.variants?.map(\.filename) ?? []), [otherMovie, minimal.filename])
+    }
+
+    func testPublishDefersAndKeepsTheExportWhenTheEntryLockStaysBusy() throws {
+        try deploy(hash: "aaa")
+        let lockURL = videos.appendingPathComponent(id).appendingPathComponent(".copy-publish.lock")
+        let lock = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
+        guard lock >= 0 else { throw POSIXError(.EIO) }
+        defer { close(lock) }
+        guard flock(lock, LOCK_EX) == 0 else { throw POSIXError(.EIO) }
+
+        let job = job(hash: "aaa")
+        let staged = try stage(job)
+        let videos = self.videos
+        let size = self.size
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            defer { finished.signal() }
+            XCTAssertEqual(
+                NativeWallpaperDeployment.publish(staged, job: job, resolution: size, videosFolderURL: videos, isNativeModeOn: { true }),
+                .deferred)
+        }
+        let wait = finished.wait(timeout: .now() + 5)
+        XCTAssertEqual(wait, .success)
+        XCTAssertEqual(flock(lock, LOCK_UN), 0)
+        if wait == .timedOut { _ = finished.wait(timeout: .now() + 5) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
     }
 
     @MainActor
@@ -909,6 +947,12 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertEqual(result, .deferred)
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: oldURL.appendingPathComponent(minimal.filename).path))
+    }
+
+    func testInvalidMetadataDoesNotLeaveAPublishLockFile() throws {
+        let job = job(hash: "aaa")
+        XCTAssertEqual(publish(try stage(job), job: job, resolution: size, videosFolderURL: videos), .stale)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: videos.appendingPathComponent(id).path), [])
     }
 
     func testAFailedMetadataWriteNeverTakesTheFileBackFromTheEntry() throws {

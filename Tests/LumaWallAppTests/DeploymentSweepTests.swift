@@ -76,11 +76,13 @@ final class DeploymentSweepTests: XCTestCase {
         let thumbnailOnly = try entry(UUID().uuidString, files: ["thumbnail.jpg"])
         let metadataWithoutVideo = try entry(UUID().uuidString, files: ["metadata.json", "thumbnail.jpg"])
 
+        let withLock = try entry(UUID().uuidString, files: ["metadata.json", ".copy-publish.lock"])
+
         let result = sweep()
-        for dir in [empty, thumbnailOnly, metadataWithoutVideo] {
+        for dir in [empty, thumbnailOnly, metadataWithoutVideo, withLock] {
             XCTAssertFalse(exists(dir), dir.lastPathComponent)
         }
-        XCTAssertEqual(result.entries.count, 3)
+        XCTAssertEqual(result.entries.count, 4)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: videos.path), [])
     }
 

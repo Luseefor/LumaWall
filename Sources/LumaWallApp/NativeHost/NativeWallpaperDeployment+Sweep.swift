@@ -130,12 +130,13 @@ extension NativeWallpaperDeployment {
     }
 
     /// True when `folder` lists cleanly and holds nothing but regular files
-    /// named `metadata.json` or `thumbnail.jpg`, or nothing at all. A
+    /// used for metadata, the thumbnail and the publish lock. A
     /// listing that fails, or an item whose type can't be read, counts as
     /// something to keep.
     private static func isBookkeepingOnly(_ folder: TrustedDirectory) -> Bool {
         guard let items = try? folder.entries() else { return false }
-        return items.allSatisfy { $0.kind == .file && ["metadata.json", "thumbnail.jpg"].contains($0.name) }
+        let bookkeeping = ["metadata.json", "thumbnail.jpg", copyPublishLockName]
+        return items.allSatisfy { $0.kind == .file && bookkeeping.contains($0.name) }
     }
 
     private enum SweepOutcome {
