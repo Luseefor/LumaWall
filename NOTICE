@@ -7,3 +7,7 @@ The wallpaper extension's XPC bridge in WallpaperExtension/ is adapted
 from Phosphene (https://github.com/kageroumado/phosphene), copyright (c)
 2026 kageroumado, under the MIT License. See THIRD_PARTY_NOTICES.md and
 WallpaperExtension/LICENSE-Phosphene for the full text.
+
+The video and image files in site/media/ are third-party footage used under
+the Mixkit Stock Video Free License and are not covered by the Apache
+License 2.0. See site/media/CREDITS.md for each clip's source and author.

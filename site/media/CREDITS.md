@@ -1,5 +1,7 @@
 # Wallpaper preview credits
 
+**These video and image files are not covered by LumaWall's Apache License 2.0.** They are third-party footage used on the LumaWall website under the Mixkit licence below. Don't copy or reuse them outside this website; get them from Mixkit under its terms instead.
+
 Each clip was accessed on 2026-11-21 under the [Mixkit Stock Video Free License](https://mixkit.co/license/modal/videoFree/), which permits commercial website use and makes attribution optional. Keep the footage within the website project and out of standalone stock or inventory offerings. Avoid implying endorsement by the creators or by anyone depicted. Other rights, including privacy, publicity and trademark rights, may apply separately. [Mixkit User Terms](https://mixkit.co/terms/)
 
 All videos are silent. The source files contained video only. Each JPEG is a progressive export of its video's first frame.
