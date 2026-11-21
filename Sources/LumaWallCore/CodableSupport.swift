@@ -37,9 +37,13 @@ public enum StorePaths {
 }
 
 public enum StoreIO {
+    /// Store files stay encrypted until the first unlock after boot, then
+    /// readable while the screen is locked. LumaWall runs schedules and
+    /// lock-screen playback while locked; "complete unless open" made an
+    /// existing file unreadable then, so loads came back empty.
     public static func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
         let data = try JSONEncoder.lumaWall.encode(value)
-        try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     /// Writes `value` readable only by the user (0600), for diagnostics. The
@@ -91,10 +95,24 @@ public enum StoreIO {
     ) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         if let decoded = try? JSONDecoder.lumaWall.decode(type, from: data), isValid(decoded) {
+            upgradeProtection(of: data, at: url)
             return decoded
         }
         quarantineCorruptFile(at: url)
         return nil
+    }
+
+    /// Files written before the switch to "until first unlock" keep the old
+    /// class until rewritten; rewrite them with the bytes just read. The
+    /// write is atomic, so a failure leaves the file as it was.
+    private static func upgradeProtection(of data: Data, at url: URL) {
+        // A fresh URL: resource values are cached per URL instance.
+        let fresh = URL(fileURLWithPath: url.path)
+        guard
+            (try? fresh.resourceValues(forKeys: [.fileProtectionKey]).fileProtection)
+                != .completeUntilFirstUserAuthentication
+        else { return }
+        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     private static func quarantineCorruptFile(at url: URL) {
