@@ -20,7 +20,7 @@ node --test 'site/tests/*.test.*'
 
 The site is hosted on Vercel as a static project whose root is `site/`.
 `site/vercel.json` sets the security headers (a strict Content Security
-Policy: no inline scripts or styles, no third-party requests) and caching.
+Policy: no inline scripts or styles, no third-party requests) and caching (scripts and styles revalidate on every load, so a deploy never pairs new HTML with stale JavaScript).
 `site/.vercelignore` keeps the tests and this README out of the deploy.
 
 Deploy from the repo root:
