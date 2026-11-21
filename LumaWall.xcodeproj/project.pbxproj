@@ -33,6 +33,7 @@
 		1A1C9BD60650B07E7EC4F5E1 /* PosterCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671B9908FCE7C5727066DF3E /* PosterCache.swift */; };
 		1A4BBB4364D72A7820895BE6 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26E3B368D5F4F600032F2BB7 /* AppModel.swift */; };
 		1AD7B4046F122A9D54F1FC22 /* BatteryMediaVariant.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F008AE58768A26D058DE69 /* BatteryMediaVariant.swift */; };
+		1E103C7C18A3B749AF81CF81 /* NativeSurfacePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22D0366C7086582F2708984 /* NativeSurfacePlan.swift */; };
 		1ED15E1E38560FCE64A7CEA4 /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1E3923CC90EF89D2215250F /* PathSafety.swift */; };
 		1FEAAE59A1DDC59E38BBF49A /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3003A06974C80F3F61E4A1E0 /* AboutView.swift */; };
 		2005D320EE4DB3C6E61F5DC2 /* NativeWallpaperDeployment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF64A3AE50DDE3102971EF2 /* NativeWallpaperDeployment.swift */; };
@@ -109,6 +110,7 @@
 		6AF2FC83E04CD54D089E835F /* RuntimeLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9510368AC1291AFBF590CD7 /* RuntimeLayoutTests.swift */; };
 		6C5BA8063B4DB3A7AD58A60A /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 1DDC47C398B0AFE7A2B6FABE /* AppIcon.icns */; };
 		6F898A5700FBE9BD29C6F3E4 /* CodableShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A643467ECEEFF2A13F77F82 /* CodableShims.swift */; };
+		7098FAD81B6AD8789E616E45 /* NativeSurfaceLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43CF961682D9700124D1E95 /* NativeSurfaceLayout.swift */; };
 		711792427B0487BB41AD746E /* MediaImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4307418F872C77E79530286 /* MediaImporter.swift */; };
 		727CACA43944BD23656996EC /* StillCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592BC1C66CB8972441CF97D3 /* StillCacheTests.swift */; };
 		740A6ED30480733835D4E43F /* GameModeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59368D7B8218613EA17D09B0 /* GameModeMonitor.swift */; };
@@ -228,6 +230,7 @@
 		E0EE2075427B795E720F418F /* RendererCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3585626DC78EB09766574FAF /* RendererCopy.swift */; };
 		E3044BCCA07E8FAD8FDD28CD /* NotificationGuards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD171DD7F783D3E8C23E226 /* NotificationGuards.swift */; };
 		E350FFDB282125376B0BBD3A /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 2C55D8AD6CA48D20AB2407F0 /* LICENSE */; };
+		E4A46FE80184DA75CEB5DB09 /* NativeSurfacePlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5006EC1BEF619C47E80B9BD /* NativeSurfacePlanTests.swift */; };
 		E4F44AFBF736E9B1D20318CF /* DisplaySleep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E66627F47839B2D3A31C8C3 /* DisplaySleep.swift */; };
 		E590569B9E426EF08CE279E3 /* LumaWallExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BE51D1375BDDE10880196AC /* LumaWallExtension.swift */; };
 		E59E3C262ECE95F59D5C7B0B /* PowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 999FEAF97DBF88998B314AFB /* PowerMonitor.swift */; };
@@ -520,6 +523,7 @@
 		DF77B5569F11B32DEC4DDB6C /* RecentsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsStore.swift; sourceTree = "<group>"; };
 		E1B6D5F11F610CB7CCBC4772 /* LogRedaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogRedaction.swift; sourceTree = "<group>"; };
 		E1E3923CC90EF89D2215250F /* PathSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathSafety.swift; sourceTree = "<group>"; };
+		E22D0366C7086582F2708984 /* NativeSurfacePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSurfacePlan.swift; sourceTree = "<group>"; };
 		E29310CD5FF9A5DCEFFF01BB /* VariantSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariantSelection.swift; sourceTree = "<group>"; };
 		E31616039FE4FACFDE197BD3 /* PowerPollingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerPollingTests.swift; sourceTree = "<group>"; };
 		E615B895EBC9A29191A4CC3C /* NativeWallpaperAssignmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWallpaperAssignmentService.swift; sourceTree = "<group>"; };
@@ -533,7 +537,9 @@
 		EDCB9B96D2A6A4DE581A711D /* LoopingVideoViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopingVideoViewTests.swift; sourceTree = "<group>"; };
 		EE978B3E3944AB95BCDB11E2 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		F4307418F872C77E79530286 /* MediaImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaImporter.swift; sourceTree = "<group>"; };
+		F43CF961682D9700124D1E95 /* NativeSurfaceLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSurfaceLayout.swift; sourceTree = "<group>"; };
 		F4B468ABE4C5DC70CBE6ECC6 /* RendererLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererLifecycle.swift; sourceTree = "<group>"; };
+		F5006EC1BEF619C47E80B9BD /* NativeSurfacePlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSurfacePlanTests.swift; sourceTree = "<group>"; };
 		FBF8BF08C2B580120BF639E0 /* StillFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StillFrame.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -569,6 +575,7 @@
 				54DB4146FB316DBD09E577FC /* MediaServiceClientTests.swift */,
 				BD4499F3700AB6ABE624CB85 /* NativeModeGateTests.swift */,
 				530306DC8CCBF37F8C074112 /* NativeModeSettingTests.swift */,
+				F5006EC1BEF619C47E80B9BD /* NativeSurfacePlanTests.swift */,
 				A806EC941953396F01ADFDB7 /* NativeWallpaperAssignmentServiceTests.swift */,
 				E754FFABC4851272B5B28410 /* NativeWallpaperAssignmentStoreTests.swift */,
 				CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */,
@@ -715,6 +722,8 @@
 				8E305D5DE475877D70D5D1FA /* NativeFailureNotifier.swift */,
 				1DD5BCEE1A5E26A6E8ABC50F /* NativeHealthMonitor.swift */,
 				D35CD0B55EC357EFE75CE44D /* NativeModeSetting.swift */,
+				F43CF961682D9700124D1E95 /* NativeSurfaceLayout.swift */,
+				E22D0366C7086582F2708984 /* NativeSurfacePlan.swift */,
 				E615B895EBC9A29191A4CC3C /* NativeWallpaperAssignmentService.swift */,
 				935605492FBB33F44E0672CF /* NativeWallpaperAssignmentStore.swift */,
 				6AF64A3AE50DDE3102971EF2 /* NativeWallpaperDeployment.swift */,
@@ -1105,6 +1114,8 @@
 				E6B46E9759646707A73C23E1 /* NativeHealthMonitor.swift in Sources */,
 				AF87D1007EFA29B80A62DD3E /* NativeModeSetting.swift in Sources */,
 				203FE5B4BB4563C94BDEC2B7 /* NativeModeSettings.swift in Sources */,
+				7098FAD81B6AD8789E616E45 /* NativeSurfaceLayout.swift in Sources */,
+				1E103C7C18A3B749AF81CF81 /* NativeSurfacePlan.swift in Sources */,
 				4E6E69F79EA05FE8E2DED44A /* NativeWallpaperAssignmentService.swift in Sources */,
 				7E300D9030D6AE9DBA0ADFA7 /* NativeWallpaperAssignmentStore.swift in Sources */,
 				5BAB4D646F01204C9B7E4369 /* NativeWallpaperDeployment+CopyPublishing.swift in Sources */,
@@ -1258,6 +1269,7 @@
 				237418586ED5417493C71697 /* MediaServiceClientTests.swift in Sources */,
 				3F1627267353E30E8618D6C9 /* NativeModeGateTests.swift in Sources */,
 				523F027301B001A2049EFA27 /* NativeModeSettingTests.swift in Sources */,
+				E4A46FE80184DA75CEB5DB09 /* NativeSurfacePlanTests.swift in Sources */,
 				F2974161A216656D463228D9 /* NativeWallpaperAssignmentServiceTests.swift in Sources */,
 				82DA19E480E2E1891F9F6181 /* NativeWallpaperAssignmentStoreTests.swift in Sources */,
 				A0515B2E9CCB91FD497753DC /* NativeWallpaperDeploymentTests.swift in Sources */,

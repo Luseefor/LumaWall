@@ -64,4 +64,20 @@ final class NativeWallpaperAssignmentStoreTests: XCTestCase {
         let root: NSDictionary = ["Displays": ["A": desktop(provider: WallpaperHostCapabilities.extensionBundleID)]]
         XCTAssertTrue(NativeWallpaperAssignmentStore.displaysShowingOthers(in: root).isEmpty)
     }
+
+    // MARK: Which surfaces are LumaWall's
+
+    /// `setDesktopImageURL` names the file in `Configuration`, not `Files`.
+    func testAnAppleImageChoiceOfALumaWallPosterIsOurs() throws {
+        let library = URL(fileURLWithPath: "/Users/someone/Library/Application Support/LumaWall", isDirectory: true)
+        func surface(_ url: URL) -> NSDictionary {
+            ["Content": ["Choices": [NativeSurfacePlan.imageChoice(url)]]]
+        }
+        XCTAssertTrue(
+            NativeWallpaperAssignmentStore.isOurs(
+                surface(library.appendingPathComponent("W/Poster.jpg")), ownedFolders: [library]))
+        XCTAssertFalse(
+            NativeWallpaperAssignmentStore.isOurs(
+                surface(URL(fileURLWithPath: "/System/Library/Desktop Pictures/Sequoia.heic")), ownedFolders: [library]))
+    }
 }
