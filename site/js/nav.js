@@ -15,7 +15,7 @@ function setUpMenu(header) {
   header.classList.add("nav-js");
   toggle.hidden = false;
 
-  const items = () => [toggle, ...menu.querySelectorAll("a")];
+  const items = () => [...nav.querySelectorAll("a, button")].filter((el) => !el.closest("[hidden]"));
   const isOpen = () => toggle.getAttribute("aria-expanded") === "true";
 
   function set(open, { restoreFocus = false } = {}) {
@@ -24,6 +24,7 @@ function setUpMenu(header) {
     menu.hidden = !open && MOBILE.matches;
     if (open) document.addEventListener("pointerdown", outside, true);
     else document.removeEventListener("pointerdown", outside, true);
+    if (open) menu.querySelector("a")?.focus();
     if (!open && restoreFocus) toggle.focus();
   }
 
@@ -68,7 +69,7 @@ function setUpMenu(header) {
 
 /** Switch the bar to its dark variant while a dark section is under it. */
 function setUpTone(header) {
-  const darks = [...document.querySelectorAll(".dark")];
+  const darks = [...document.querySelectorAll("section.dark")];
   if (!darks.length) return;
   let ranges = [];
   let frame = 0;

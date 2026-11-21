@@ -152,6 +152,7 @@ export function setUpVideos(reducedMotion) {
     pauseButton.querySelector("[data-label]").textContent = paused ? "Play wallpapers" : "Pause wallpapers";
   }
 
+  if (pauseButton) pauseButton.disabled = false;
   pauseButton?.addEventListener("click", () => {
     paused = !paused;
     syncButton();

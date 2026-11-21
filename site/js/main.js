@@ -53,6 +53,9 @@ setUpReveal();
 if (navigator.connection?.saveData) {
   document.querySelector("[data-hero-pause]")?.setAttribute("hidden", "");
 } else {
+  // The pause button works once the clips are wired up.
+  const pause = document.querySelector("[data-hero-pause]");
+  if (pause) pause.disabled = true;
   whenIdle(() => setUpVideos(reducedMotion));
 }
 

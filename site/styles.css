@@ -498,6 +498,8 @@ a {
     inset: var(--nav) 0 auto;
     flex-direction: column;
     gap: 0;
+    max-height: calc(100dvh - var(--nav));
+    overflow-y: auto;
     padding: 8px var(--gutter) 16px;
     background: var(--nav-bg);
     border-bottom: 1px solid var(--nav-line);
@@ -564,9 +566,13 @@ a {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .nav,
-  .nav-inner ul {
+  .nav {
     --nav-bg: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .nav-inner ul {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
