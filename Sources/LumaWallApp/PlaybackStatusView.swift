@@ -53,24 +53,29 @@ struct PlaybackStatusSection: View {
 
     var body: some View {
         let rows = rows
-        if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(rows, id: \.display.displayID) { row in
-                    VStack(alignment: .leading, spacing: 1) {
-                        if rows.count > 1 {
-                            Text(row.display.name)
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                                .accessibilityHidden(true)
-                        }
-                        PlaybackStatusLine(status: row.status, displayName: row.display.name)
+        // Always present, so opening the popover re-reads even when no row shows yet.
+        Group {
+            if !rows.isEmpty { list(rows) }
+        }
+        .onAppear { model.refreshNativePlaybackStatus() }
+    }
+
+    private func list(_ rows: [(display: ConnectedDisplay, status: DisplayPlaybackStatus)]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(rows, id: \.display.displayID) { row in
+                VStack(alignment: .leading, spacing: 1) {
+                    if rows.count > 1 {
+                        Text(row.display.name)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .accessibilityHidden(true)
                     }
+                    PlaybackStatusLine(status: row.status, displayName: row.display.name)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
-            .onAppear { model.refreshNativePlaybackStatus() }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
     }
 }

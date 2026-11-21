@@ -2,7 +2,7 @@ import AVFoundation
 import Foundation
 import os
 
-/// Publishes what each display is doing to `Documents/playback-status.json`
+/// Publishes what each display is doing to `Documents/playback-status.<pid>.json`
 /// and posts the Darwin notification the app re-reads on, so the app can show
 /// the state, reason and copy without asking.
 ///
