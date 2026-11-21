@@ -17,6 +17,7 @@ public enum PlaybackStatusReason: String, Codable, Sendable, CaseIterable {
     case screensaver
     case suspended
     case locked
+    case decodeFailed
     case reduceMotion
     // Playing, with a lighter copy or a lower rate.
     case batteryTier
@@ -38,6 +39,7 @@ public enum PlaybackStatusReason: String, Codable, Sendable, CaseIterable {
         case .screensaver: "a screen saver is showing"
         case .suspended: "macOS suspended it"
         case .locked: "screen locked"
+        case .decodeFailed: "can't decode the video, showing a still"
         case .reduceMotion: "Reduce Motion is on"
         case .batteryTier: "on battery"
         case .lowPowerMode: "Low Power Mode"
@@ -154,7 +156,31 @@ public struct DisplayPlaybackStatus: Codable, Equatable, Sendable, Identifiable 
 
 /// The file the extension writes and the app reads.
 public struct PlaybackStatusSnapshot: Codable, Equatable, Sendable {
-    public static let fileName = "playback-status.json"
+    /// Each extension process writes its own file, so one process's empty
+    /// snapshot (a Settings preview) can't erase another's displays.
+    public static let fileNamePrefix = "playback-status."
+    public static let fileNameSuffix = ".json"
+
+    public static func fileName(pid: Int32) -> String { "\(fileNamePrefix)\(pid)\(fileNameSuffix)" }
+
+    /// The process a status file name belongs to, or nil for any other name.
+    public static func pid(fromFileName name: String) -> Int32? {
+        guard name.hasPrefix(fileNamePrefix), name.hasSuffix(fileNameSuffix),
+            name.count > fileNamePrefix.count + fileNameSuffix.count
+        else { return nil }
+        return Int32(name.dropFirst(fileNamePrefix.count).dropLast(fileNameSuffix.count))
+    }
+
+    /// One snapshot from several processes' snapshots. Where two list a
+    /// display, the later in `snapshots` (the higher pid, by the caller's
+    /// order) wins.
+    public static func merged(_ snapshots: [PlaybackStatusSnapshot]) -> PlaybackStatusSnapshot {
+        var byDisplay: [UInt32: DisplayPlaybackStatus] = [:]
+        for snapshot in snapshots {
+            for status in snapshot.statuses { byDisplay[status.displayID] = status }
+        }
+        return PlaybackStatusSnapshot(statuses: Array(byDisplay.values))
+    }
     public static let version = 1
     /// Posted (Darwin) after the file changes; the app re-reads on it.
     public static let notificationName = "app.lumawall.personal.playbackStatusChanged"

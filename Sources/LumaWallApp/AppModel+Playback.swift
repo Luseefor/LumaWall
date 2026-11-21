@@ -249,7 +249,7 @@ extension AppModel {
             decisions[display.displayID] = decision
             engine.apply(tier: decision.tier, to: display.displayID)
         }
-        noteOverlayPlaybackStatus(decisions)
+        noteOverlayPlaybackDecisions(decisions)
         if engine.mode == .native {
             let pausedCG = Set(pausedDisplayIDs.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
             let coveredCG = Set(coveredDisplays.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })

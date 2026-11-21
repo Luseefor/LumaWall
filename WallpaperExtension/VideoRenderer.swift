@@ -50,7 +50,8 @@ final class VideoRenderer: @unchecked Sendable {
     struct StatusInfo: Equatable {
         var displayAsleep: Bool
         var surfaceOpen: Bool
-        var filename: String
+        var url: URL
+        var decodeFailed: Bool
     }
     let statusInfo = OSAllocatedUnfairLock<StatusInfo?>(initialState: nil)
     /// What `PowerMonitor` last heard about this renderer being active.

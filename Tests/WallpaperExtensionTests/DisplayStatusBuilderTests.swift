@@ -3,13 +3,12 @@ import XCTest
 final class DisplayStatusBuilderTests: XCTestCase {
     private func build(
         _ tier: PlaybackPolicy, _ reason: PlaybackStatusReason? = nil, asleep: Bool = false,
-        filename: String = "Wallpaper.mov"
+        filename: String = "Wallpaper.mov", fps: Int = 60, decodeFailed: Bool = false
     ) -> DisplayPlaybackStatus {
         DisplayStatusBuilder.status(
             .init(
                 displayID: 7, decision: .init(tier: tier, reason: reason), displayAsleep: asleep,
-                filename: filename, sourceFPS: 60,
-                variantFPS: ["Wallpaper.reduced.mov": 30, "Wallpaper.minimal.mov": 30]))
+                filename: filename, frameRate: fps, decodeFailed: decodeFailed))
     }
 
     func testFullPlaysTheOriginalAtItsRate() {
@@ -21,7 +20,7 @@ final class DisplayStatusBuilderTests: XCTestCase {
     }
 
     func testABatteryCopyReportsItsOwnRate() {
-        let status = build(.reduced, .batteryTier, filename: "Wallpaper.reduced.mov")
+        let status = build(.reduced, .batteryTier, filename: "Wallpaper.reduced.mov", fps: 30)
         XCTAssertEqual(status.copy, .p1080)
         XCTAssertEqual(status.frameRate, 30)
         XCTAssertEqual(status.reason, .batteryTier)
@@ -45,7 +44,15 @@ final class DisplayStatusBuilderTests: XCTestCase {
         let status = DisplayStatusBuilder.status(
             .init(
                 displayID: 1, decision: .init(tier: .full, reason: nil), displayAsleep: false,
-                filename: "Wallpaper.mov", sourceFPS: 0, variantFPS: [:]))
+                filename: "Wallpaper.mov", frameRate: 0, decodeFailed: false))
         XCTAssertNil(status.frameRate)
+    }
+
+    func testAStillAfterDecoderFailureIsNotPlaying() {
+        let status = build(.full, decodeFailed: true)
+        XCTAssertEqual(status.state, .paused)
+        XCTAssertEqual(status.reason, .decodeFailed)
+        // A pause that already applies keeps its own reason.
+        XCTAssertEqual(build(.paused, .covered, decodeFailed: true).reason, .covered)
     }
 }

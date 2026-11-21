@@ -93,6 +93,8 @@ final class AppModel {
     /// What each display is doing and why; see `AppModel+PlaybackStatus`.
     var playbackStatuses: [DisplayID: DisplayPlaybackStatus] = [:]
     @ObservationIgnored var playbackStatusObserver: PlaybackStatusObserver?
+    @ObservationIgnored var nativePlaybackStatuses = PlaybackStatusSnapshot(statuses: [])
+    @ObservationIgnored var overlayPlaybackDecisions: [DisplayID: (tier: PlaybackTier, reason: PlaybackStatusReason?)] = [:]
 
     let store: LibraryStore
     let importer: MediaImporter

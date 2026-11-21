@@ -71,4 +71,24 @@ struct DisplayPlaybackStatusTests {
         #expect(still.state == .paused)
         #expect(DisplayPlaybackStatus(displayID: 1, overlayTier: .paused, reason: .locked).state == .paused)
     }
+
+    @Test func fileNamesCarryTheProcess() {
+        #expect(PlaybackStatusSnapshot.fileName(pid: 412) == "playback-status.412.json")
+        #expect(PlaybackStatusSnapshot.pid(fromFileName: "playback-status.412.json") == 412)
+        #expect(PlaybackStatusSnapshot.pid(fromFileName: "playback-status.json") == nil)
+        #expect(PlaybackStatusSnapshot.pid(fromFileName: "playback-status.x.json") == nil)
+        #expect(PlaybackStatusSnapshot.pid(fromFileName: "extension.log") == nil)
+    }
+
+    @Test func mergeKeepsEveryDisplayAndTheLaterWins() {
+        let first = PlaybackStatusSnapshot(statuses: [
+            DisplayPlaybackStatus(displayID: 1, state: .paused, reason: .covered),
+            DisplayPlaybackStatus(displayID: 2, state: .playing),
+        ])
+        let second = PlaybackStatusSnapshot(statuses: [DisplayPlaybackStatus(displayID: 1, state: .playing)])
+        let merged = PlaybackStatusSnapshot.merged([first, second])
+        #expect(merged.statuses.map(\.displayID) == [1, 2])
+        #expect(merged.status(forDisplay: 1)?.state == .playing)
+        #expect(PlaybackStatusSnapshot.merged([]).statuses.isEmpty)
+    }
 }

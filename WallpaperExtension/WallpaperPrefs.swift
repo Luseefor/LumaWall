@@ -236,17 +236,17 @@ final class WallpaperPrefs: @unchecked Sendable {
         let state = WallpaperState.shared
         let displayIDs = state.liveDisplayIDs()
 
-        func policy(for displayID: UInt32?) -> PlaybackPolicy {
-            self.policy(for: displayID, presentationMode: presentationMode, activityState: activityState, powerState: powerState)
-        }
-
         // Surfaces without a display ID take the global policy, also beside
         // displays that have one: skipping them left one seeded Paused (a
         // fullscreen app on another display) stuck there. Live surfaces only;
         // previews take their own tier below (see forLiveRenderers).
         let hardPause = RampMath.cutsRampDown(thermalState: powerState.thermalState, activityState: activityState)
+        var decisions: [UInt32: PlaybackPolicy.Decision] = [:]
         for displayID in displayIDs.map(Optional.some) + [nil] {
-            let displayPolicy = policy(for: displayID)
+            let decision = self.decision(
+                for: displayID, presentationMode: presentationMode, activityState: activityState, powerState: powerState)
+            if let displayID { decisions[displayID] = decision }
+            let displayPolicy = decision.tier
             state.forLiveRenderers(displayID: displayID) { renderer in
                 renderer.applyPolicy(
                     displayPolicy, animated: animated, hardPause: hardPause && displayPolicy == .paused, onBattery: powerState.isOnBattery)
@@ -257,6 +257,7 @@ final class WallpaperPrefs: @unchecked Sendable {
             renderer.applyPolicy(
                 previewTier, animated: false, hardPause: hardPause && previewTier == .paused, onBattery: powerState.isOnBattery)
         }
+        DisplayStatusPublisher.shared.record(decisions: decisions)
         DisplayStatusPublisher.shared.markDirty()
     }
 

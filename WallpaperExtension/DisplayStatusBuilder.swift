@@ -9,19 +9,24 @@ enum DisplayStatusBuilder {
         let displayAsleep: Bool
         /// The file the renderer reads, e.g. `Wallpaper.reduced.mov`.
         let filename: String
-        /// The original's frame rate, and each copy's by filename.
-        let sourceFPS: Int
-        let variantFPS: [String: Int]
+        /// The frame rate of that file, 0 when unknown.
+        let frameRate: Int
+        /// The renderer gave up decoding and shows a still.
+        let decodeFailed: Bool
     }
 
     static func status(_ input: Input) -> DisplayPlaybackStatus {
         let copy = PlaybackCopy(filename: input.filename)
-        let fps = input.variantFPS[input.filename] ?? input.sourceFPS
-        let rate = fps > 0 ? fps : nil
+        let rate = input.frameRate > 0 ? input.frameRate : nil
         // A sleeping display holds its frame whatever the tier says.
         if input.displayAsleep {
             return DisplayPlaybackStatus(
                 displayID: input.displayID, state: .paused, reason: .displayAsleep, copy: copy, frameRate: rate)
+        }
+        // A tier that plays still shows a frame when the decoder gave up.
+        if input.decodeFailed, input.decision.tier != .paused {
+            return DisplayPlaybackStatus(
+                displayID: input.displayID, state: .paused, reason: .decodeFailed, copy: copy, frameRate: rate)
         }
         let paused = input.decision.tier == .paused
         return DisplayPlaybackStatus(

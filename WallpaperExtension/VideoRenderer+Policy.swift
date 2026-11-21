@@ -150,7 +150,8 @@ extension VideoRenderer {
         let info = StatusInfo(
             displayAsleep: lifecycle.displayAsleep,
             surfaceOpen: lifecycle.surfaceOpen,
-            filename: asset.url.lastPathComponent
+            url: asset.url,
+            decodeFailed: lifecycle.readers == .failed
         )
         let changed = statusInfo.withLock { current -> Bool in
             guard current != info else { return false }

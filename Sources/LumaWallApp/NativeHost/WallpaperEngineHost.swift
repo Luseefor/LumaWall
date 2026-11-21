@@ -115,6 +115,13 @@ final class WallpaperEngine {
         return mode == .native && !(native?.activeDisplayIDs.isEmpty ?? true)
     }
 
+    /// True when the overlay draws this display: Safe mode, or in native
+    /// mode a spanning or cropped wallpaper, or a display native mode fell
+    /// back on.
+    func isDrawnByOverlay(_ displayID: DisplayID) -> Bool {
+        mode == .overlay || overlay.activeDisplayIDs.contains(displayID)
+    }
+
     func wallpaperID(on displayID: DisplayID) -> WallpaperID? {
         switch mode {
         case .native: overlay.wallpaperID(on: displayID) ?? native?.wallpaperID(on: displayID)
