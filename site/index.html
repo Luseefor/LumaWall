@@ -47,9 +47,9 @@
       <section class="hero" id="top" aria-labelledby="hero-title">
         <canvas class="wall" data-hero-canvas aria-hidden="true"></canvas>
         <div class="hero-copy">
-          <h1 id="hero-title">Your desktop, alive.<br />Paused when covered.</h1>
+          <h1 id="hero-title">Your videos as<br />live Mac wallpapers.</h1>
           <p class="lede">
-            Use your own videos as macOS wallpapers. By default, LumaWall pauses playback on a covered display.
+            Free and open source. Works offline with no account or analytics.
           </p>
           <div class="actions">
             <a class="button primary" href="#demo">See it pause</a>
@@ -60,10 +60,10 @@
 
       <section class="section" id="demo" aria-labelledby="demo-title">
         <header class="section-head">
-          <h2 id="demo-title">Try covering the wallpaper</h2>
+          <h2 id="demo-title">See what pausing saves</h2>
           <p>
-            Drag the window over the wallpaper. The demo stops drawing frames when the window covers 97% of the
-            wallpaper. The app uses its own coverage threshold.
+            Drag the window over the wallpaper and watch the simulated power reading drop. The demo stops drawing
+            frames at 97% coverage. LumaWall uses its own coverage threshold.
           </p>
         </header>
 
@@ -145,16 +145,17 @@
           <li>
             <h3>Safe mode by default</h3>
             <p>
-              A muted video plays in a desktop-level window over a still poster, using documented macOS APIs. It never
-              edits system wallpaper files.
+              On macOS 15 or later, the default Safe mode plays muted video in a desktop overlay above a still poster.
+              It uses documented macOS APIs and leaves system wallpaper files alone.
             </p>
           </li>
           <li>
             <h3>Native mode on macOS 26 or later</h3>
             <p>
-              Experimental native mode adds videos to the macOS wallpaper picker and supports a separate lock screen
-              assignment. It edits system wallpaper settings and restarts WallpaperAgent. The undocumented
-              interfaces it uses may break after a macOS update.
+              Opt in to experimental native mode for desktop and lock screen wallpapers. It uses undocumented
+              interfaces, edits system wallpaper settings and restarts WallpaperAgent. If a native assignment
+              fails, LumaWall automatically falls back to Safe mode. Use Restore original wallpaper to recover
+              your previous settings from a local backup.
             </p>
           </li>
           <li>
@@ -218,7 +219,7 @@
               A signed, notarized download is unavailable. The repository has build instructions.
             </p>
             <div class="actions">
-              <a class="button primary" href="https://github.com/Luseefor/LumaWall/releases">GitHub Releases</a>
+              <a class="button primary" href="https://github.com/Luseefor/LumaWall/releases">Follow releases</a>
               <a class="button" href="https://github.com/Luseefor/LumaWall">Source code</a>
             </div>
           </div>
