@@ -18,11 +18,16 @@ node --test 'site/tests/*.test.*'
 
 ## Deployment
 
-`.github/workflows/pages.yml` deploys `site/` to GitHub Pages on pushes to
-`main` that touch `site/**` or the workflow. It skips until `site/index.html`
-exists. You can also run it by hand, from `main` only.
+The site is hosted on Vercel as a static project whose root is `site/`.
+`site/vercel.json` sets the security headers (a strict Content Security
+Policy: no inline scripts or styles, no third-party requests) and caching.
+`site/.vercelignore` keeps the tests and this README out of the deploy.
 
-The repo owner must set Settings → Pages → Source to **GitHub Actions** once.
+Deploy from the repo root:
+
+```sh
+npx vercel@latest deploy site --prod
+```
 
 ## Rules
 
