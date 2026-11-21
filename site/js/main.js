@@ -1,4 +1,5 @@
 import { setUpNav } from "./nav.js";
+import { setUpThemeSwitch } from "./theme-switch.js";
 import { setUpVideos } from "./videos.js";
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
@@ -47,6 +48,7 @@ function setUpReveal() {
 }
 
 setUpNav();
+setUpThemeSwitch();
 setUpReveal();
 
 // Clips start after load. With Data Saver on, the posters stay.

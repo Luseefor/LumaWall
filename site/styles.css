@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
   --bg: #fff;
   --bg-alt: #f5f5f7;
@@ -8,6 +8,21 @@
   --line: rgb(0 0 0 / 0.12);
   --link: #00695f;
   --focus: #007a6e;
+  --bg-dark: #0a0a0c; /* the intentionally dark sections */
+  --tile: #fff;
+  --tile-dark: #1d1d1f;
+  --tint: #e3f6f3;
+  --tint-ink: #3f4d4b;
+  --chip: #fff;
+  --chip-ink: #1d1d1f;
+  --teal: #0e7d72;
+  --fill: rgb(0 0 0 / 0.06);
+  --fill-hover: rgb(0 0 0 / 0.1);
+  --toggle-off: #d1d1d6;
+  --badge-bg: #fff1cf;
+  --badge-ink: #7a4b00;
+  --line-strong: rgb(0 0 0 / 0.18);
+  --nav-solid: #fff;
   /* The app's accent (Theme.accent in Brand.swift). */
   --accent: #33d1c2;
 
@@ -26,10 +41,69 @@
   --text-lede: clamp(1.125rem, 1rem + 0.55vw, 1.5rem);
 }
 
+/* Dark theme: the system's choice, unless the visitor picked Light. The same values are repeated for an explicit
+   Dark, set on <html> by js/theme.js. Graphite surfaces; the dark sections go to true black so they stay distinct. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141416;
+    --bg-alt: #1d1d20;
+    --ink: #f5f5f7;
+    --ink-2: #a6a6ad;
+    --line: rgb(255 255 255 / 0.14);
+    --link: #5eead9;
+    --focus: #33d1c2;
+    --bg-dark: #000;
+    --tile: #27272b;
+    --tile-dark: #000;
+    --tint: #10312d;
+    --tint-ink: #b9d6d2;
+    --chip: #3a3a3f;
+    --chip-ink: #f5f5f7;
+    --teal: #4fe0d0;
+    --fill: rgb(255 255 255 / 0.1);
+    --fill-hover: rgb(255 255 255 / 0.16);
+    --toggle-off: #56565c;
+    --badge-bg: #3b2d0c;
+    --badge-ink: #ffd98a;
+    --line-strong: rgb(255 255 255 / 0.28);
+    --nav-solid: #141416;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #141416;
+  --bg-alt: #1d1d20;
+  --ink: #f5f5f7;
+  --ink-2: #a6a6ad;
+  --line: rgb(255 255 255 / 0.14);
+  --link: #5eead9;
+  --focus: #33d1c2;
+  --bg-dark: #000;
+  --tile: #27272b;
+  --tile-dark: #000;
+  --tint: #10312d;
+  --tint-ink: #b9d6d2;
+  --chip: #3a3a3f;
+  --chip-ink: #f5f5f7;
+  --teal: #4fe0d0;
+  --fill: rgb(255 255 255 / 0.1);
+  --fill-hover: rgb(255 255 255 / 0.16);
+  --toggle-off: #56565c;
+  --badge-bg: #3b2d0c;
+  --badge-ink: #ffd98a;
+  --line-strong: rgb(255 255 255 / 0.28);
+  --nav-solid: #141416;
+}
+
 /* Dark sections reset the palette; everything inside follows. */
 .dark {
   color-scheme: dark;
-  --bg: #0a0a0c;
+  --bg: var(--bg-dark);
   --ink: #f5f5f7;
   --ink-2: #a8a8ae;
   --line: rgb(255 255 255 / 0.16);
@@ -122,6 +196,8 @@ a {
   --nav-cta-bg: #1d1d1f;
   --nav-cta-ink: #fff;
   --nav-cta-hover: #000;
+  --nav-seg: rgb(0 0 0 / 0.07);
+  --nav-seg-on: #fff;
   position: fixed;
   inset: 0 0 auto;
   z-index: 10;
@@ -145,6 +221,37 @@ a {
   --nav-cta-bg: #f5f5f7;
   --nav-cta-ink: #1d1d1f;
   --nav-cta-hover: #fff;
+  --nav-seg: rgb(255 255 255 / 0.12);
+  --nav-seg-on: rgb(255 255 255 / 0.28);
+}
+
+/* In the dark theme the bar over a normal section is graphite glass with light ink. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .nav[data-tone="light"] {
+    --nav-bg: rgb(20 20 22 / 0.82);
+    --nav-ink: #f5f5f7;
+    --nav-ink-2: #c9c9ce;
+    --nav-ink-hover: #fff;
+    --nav-line: rgb(255 255 255 / 0.12);
+    --nav-cta-bg: #f5f5f7;
+    --nav-cta-ink: #1d1d1f;
+    --nav-cta-hover: #fff;
+    --nav-seg: rgb(255 255 255 / 0.12);
+    --nav-seg-on: rgb(255 255 255 / 0.28);
+  }
+}
+
+:root[data-theme="dark"] .nav[data-tone="light"] {
+  --nav-bg: rgb(20 20 22 / 0.82);
+  --nav-ink: #f5f5f7;
+  --nav-ink-2: #c9c9ce;
+  --nav-ink-hover: #fff;
+  --nav-line: rgb(255 255 255 / 0.12);
+  --nav-cta-bg: #f5f5f7;
+  --nav-cta-ink: #1d1d1f;
+  --nav-cta-hover: #fff;
+  --nav-seg: rgb(255 255 255 / 0.12);
+  --nav-seg-on: rgb(255 255 255 / 0.28);
 }
 
 .nav-inner {
@@ -247,6 +354,77 @@ a {
 
 .nav-toggle[aria-expanded="true"] .l2 {
   transform: translateY(-3.5px) rotate(-45deg);
+}
+
+/* Theme switch: System / Light / Dark. Icons in the bar, labelled buttons in the mobile menu. */
+
+.theme-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--nav-seg);
+}
+
+.theme-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--nav-ink-2);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease-out,
+    color 160ms ease-out;
+}
+
+.theme-switch button:hover {
+  color: var(--nav-ink-hover);
+}
+
+.theme-switch button[aria-pressed="true"] {
+  background: var(--nav-seg-on);
+  color: var(--nav-ink-hover);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.theme-switch svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.theme-switch span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.theme-li[hidden] {
+  display: none;
+}
+
+@media (min-width: 861px) and (max-width: 1060px) {
+  .nav-inner {
+    gap: 16px;
+  }
+
+  .nav-inner ul {
+    gap: 18px;
+  }
 }
 
 /* Buttons */
@@ -520,8 +698,29 @@ a {
     color: var(--nav-ink);
   }
 
-  .nav-js .nav-inner ul li:last-child a {
-    border-bottom: 0;
+  .nav-js .nav-inner ul li.theme-li {
+    padding: 12px 0 4px;
+  }
+
+  .nav-js .theme-switch {
+    display: flex;
+    padding: 3px;
+  }
+
+  .nav-js .theme-switch button {
+    flex: 1;
+    width: auto;
+    height: 44px;
+    font-size: 0.9375rem;
+    font-weight: 500;
+  }
+
+  .nav-js .theme-switch span {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
   }
 }
 
@@ -566,8 +765,9 @@ a {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .nav {
-    --nav-bg: #fff;
+  .nav,
+  :root:root .nav[data-tone="light"] {
+    --nav-bg: var(--nav-solid);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -578,6 +778,6 @@ a {
   }
 
   .nav[data-tone="dark"] {
-    --nav-bg: #0a0a0c;
+    --nav-bg: var(--bg-dark);
   }
 }
