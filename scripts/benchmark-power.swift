@@ -11,7 +11,9 @@ func selfTest() {
     let single = Statistics([7])
     precondition(single?.median == 7 && single?.iqr == 0, "Singleton")
     precondition(Statistics([]) == nil, "Empty sample")
-    print("Statistics self-test passed")
+    let appleSilicon = mach_timebase_info_data_t(numer: 125, denom: 3)
+    precondition(cpuNanoseconds(ticks: 24_000_000, timebase: appleSilicon) == 1_000_000_000, "Mach ticks to nanoseconds")
+    print("Statistics and CPU conversion self-tests passed")
 }
 
 struct Statistics: Encodable {
@@ -121,11 +123,15 @@ struct Machine: Encodable {
 let processNames = ["LumaWall", "LumaWallWallpaper", "LumaWallMediaService"]
 let subjects = processNames + ["Total"]
 
+func cpuNanoseconds(ticks: Double, timebase: mach_timebase_info_data_t) -> Double {
+    ticks * Double(timebase.numer) / Double(timebase.denom)
+}
+
 struct Counters {
     let startTime: UInt64
     let timestamp: UInt64
-    let userNanoseconds: UInt64
-    let systemNanoseconds: UInt64
+    let userTicks: UInt64
+    let systemTicks: UInt64
     let energyNanojoules: UInt64
 
     init?(pid: pid_t) {
@@ -138,20 +144,21 @@ struct Counters {
         guard status == 0, usage.ri_proc_exit_abstime == 0 else { return nil }
         timestamp = DispatchTime.now().uptimeNanoseconds
         startTime = usage.ri_proc_start_abstime
-        userNanoseconds = usage.ri_user_time
-        systemNanoseconds = usage.ri_system_time
+        userTicks = usage.ri_user_time
+        systemTicks = usage.ri_system_time
         energyNanojoules = usage.ri_energy_nj
     }
 
-    func rates(since start: Counters) -> Rates? {
+    func rates(since start: Counters, timebase: mach_timebase_info_data_t) -> Rates? {
         guard startTime == start.startTime, timestamp > start.timestamp,
-            userNanoseconds >= start.userNanoseconds, systemNanoseconds >= start.systemNanoseconds,
+            userTicks >= start.userTicks, systemTicks >= start.systemTicks,
             energyNanojoules >= start.energyNanojoules
         else { return nil }
         let elapsed = Double(timestamp - start.timestamp)
-        let cpu =
-            Double(userNanoseconds - start.userNanoseconds)
-            + Double(systemNanoseconds - start.systemNanoseconds)
+        let ticks =
+            Double(userTicks - start.userTicks)
+            + Double(systemTicks - start.systemTicks)
+        let cpu = cpuNanoseconds(ticks: ticks, timebase: timebase)
         #if arch(arm64)
             let power = Double(energyNanojoules - start.energyNanojoules) / elapsed * 1000
         #else
@@ -209,7 +216,7 @@ struct Reading: Encodable {
     var rates: Rates? = nil
 }
 
-func compare(_ name: String, _ start: Snapshot, _ end: Snapshot) -> Reading {
+func compare(_ name: String, _ start: Snapshot, _ end: Snapshot, timebase: mach_timebase_info_data_t) -> Reading {
     let pids = start.pids.union(end.pids).sorted()
     guard !pids.isEmpty else { return Reading(subject: name, pids: [], status: "absent") }
     guard start.pids == end.pids else {
@@ -221,7 +228,7 @@ func compare(_ name: String, _ start: Snapshot, _ end: Snapshot) -> Reading {
         guard let before = start.counters[pid], let after = end.counters[pid] else {
             return Reading(subject: name, pids: pids, status: "counters unavailable")
         }
-        guard let delta = after.rates(since: before) else {
+        guard let delta = after.rates(since: before, timebase: timebase) else {
             return Reading(subject: name, pids: pids, status: "process or counters changed")
         }
         rates.append(delta)
@@ -278,6 +285,11 @@ func number(_ value: Double?) -> String {
 }
 
 func benchmark(_ options: Options) throws {
+    var timebase = mach_timebase_info_data_t()
+    guard mach_timebase_info(&timebase) == KERN_SUCCESS, timebase.numer > 0, timebase.denom > 0 else {
+        throw BenchmarkError("Could not read the Mach timebase")
+    }
+
     let descriptor = open(options.output, O_WRONLY | O_CREAT | O_APPEND, 0o600)
     guard descriptor >= 0 else {
         throw BenchmarkError("Cannot open \(options.output): \(String(cString: strerror(errno)))")
@@ -309,7 +321,9 @@ func benchmark(_ options: Options) throws {
         let duration = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
         let after = try snapshots()
 
-        var readings = processNames.map { compare($0, before[$0] ?? Snapshot(), after[$0] ?? Snapshot()) }
+        var readings = processNames.map {
+            compare($0, before[$0] ?? Snapshot(), after[$0] ?? Snapshot(), timebase: timebase)
+        }
         let measured = readings.compactMap(\.rates)
         let complete = readings.allSatisfy { $0.status == "ok" || $0.status == "absent" }
         let total = complete && !measured.isEmpty ? Rates.sum(measured) : nil
