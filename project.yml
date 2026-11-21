@@ -186,6 +186,7 @@ targets:
       - path: WallpaperExtension/CompanionLaunch.swift
       - path: WallpaperExtension/CodableShims.swift
       - path: WallpaperExtension/VideoSettingsItem.swift
+      - path: WallpaperExtension/HealthReply.swift
       # Shared with the app tests so both sides check the same rows.
       - path: Tests/LumaWallAppTests/QHDFitFixtures.swift
     settings:
