@@ -58,6 +58,7 @@
 		30115431203486479D82276E /* RampMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A869D1AC50AA925F7CF42F0E /* RampMath.swift */; };
 		329DABF7B808C64482D93140 /* HomePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F4D198CBD4A545E8BB2A2AA /* HomePage.swift */; };
 		3473413C37D9067670800C19 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 4DB1F18CD03CADCB80AFF0F5 /* PrivacyInfo.xcprivacy */; };
+		35DF7E22450BC9C07F8055D1 /* DisplayPlaybackStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20AE8BAFDD128701CF5B3BA /* DisplayPlaybackStatus.swift */; };
 		37939B55B9CE8A9AA2288140 /* WindowVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB936267C6F947A7DAC2C9B /* WindowVisibility.swift */; };
 		38275AB6B76A42BC4649EDFA /* PathSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636191B69905B65C3526F8DB /* PathSafety.swift */; };
 		38285BC10496F12BA313D101 /* VideoRenderer+Start.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96A02118B8854D2C32E7DD64 /* VideoRenderer+Start.swift */; };
@@ -119,6 +120,7 @@
 		76F534D7ECC1C4246F075425 /* AutomationLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 217AB2E4539D5FEB6508DF44 /* AutomationLibrary.swift */; };
 		793B7459B1336EF40654A09B /* RendererLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4B468ABE4C5DC70CBE6ECC6 /* RendererLifecycle.swift */; };
 		79F6E83075995F7121E180A1 /* LogRedactionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47B80077A7143FCFCCAC0718 /* LogRedactionTests.swift */; };
+		7A457B1365F537A438FE17E3 /* DisplayPlaybackStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20AE8BAFDD128701CF5B3BA /* DisplayPlaybackStatus.swift */; };
 		7CC7B930E16195381CAB1B08 /* ChoiceRemoval.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35DFA595224A5FC7796CE793 /* ChoiceRemoval.swift */; };
 		7CC8989BDF1C43F6009B07EB /* AppModel+Assignment.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED5A5E5D56C16592448825FD /* AppModel+Assignment.swift */; };
 		7D8EE4E7F7A7FBEFACA044D6 /* WallpaperXPCHandler+Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47B6248A2ECCFB7B13929F50 /* WallpaperXPCHandler+Surfaces.swift */; };
@@ -156,6 +158,7 @@
 		9EDD282EBFF18FB2890B9FC8 /* AppModel+NativeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75CD3790CC45E71CD967BF08 /* AppModel+NativeMode.swift */; };
 		A021F8CEE02D169DD27B7771 /* SurfaceSlotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25998C816C697DD62EB2C898 /* SurfaceSlotTests.swift */; };
 		A0515B2E9CCB91FD497753DC /* NativeWallpaperDeploymentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CADCC46BC0B4DFF513648B1A /* NativeWallpaperDeploymentTests.swift */; };
+		A1B7D19436EC9BF34AA0BF2B /* DisplayPlaybackStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20AE8BAFDD128701CF5B3BA /* DisplayPlaybackStatus.swift */; };
 		A1F36111D42A6D1C69393839 /* PlaybackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C82E4B5715D67331F66B3 /* PlaybackPolicy.swift */; };
 		A2C0AF588475CFAED60E1E09 /* DisplayCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 580BF5B18E21C3C2F1E7A962 /* DisplayCoordinator.swift */; };
 		A3D42D4545A0B76FE8BD3B75 /* StillCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB14BA4E3A2A682C926AA33C /* StillCache.swift */; };
@@ -476,6 +479,7 @@
 		ABDCE412E62E7FE35E60E348 /* PlaybackFrameRate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackFrameRate.swift; sourceTree = "<group>"; };
 		AD81E985B85F9C197EEEADEF /* VariantSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariantSelectionTests.swift; sourceTree = "<group>"; };
 		B0E94C6C771774B4920DA1C1 /* ScreenGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenGeometry.swift; sourceTree = "<group>"; };
+		B20AE8BAFDD128701CF5B3BA /* DisplayPlaybackStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayPlaybackStatus.swift; sourceTree = "<group>"; };
 		B2C03CB431C1C89AABAA80DF /* DisplaysPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaysPage.swift; sourceTree = "<group>"; };
 		B392584FC143C837C3708118 /* AppModel+Displays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Displays.swift"; sourceTree = "<group>"; };
 		B5B1F8A1BAB00B4E3496E6B2 /* WallpaperEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperEngineTests.swift; sourceTree = "<group>"; };
@@ -666,6 +670,7 @@
 				8678A3384385BBD349B0722E /* DiagnosticsVisibility.swift */,
 				580BF5B18E21C3C2F1E7A962 /* DisplayCoordinator.swift */,
 				D6DBB8701C014457564B3EB5 /* DisplayOcclusion.swift */,
+				B20AE8BAFDD128701CF5B3BA /* DisplayPlaybackStatus.swift */,
 				7EDF5508DD0224D382183D97 /* DisplayTopology.swift */,
 				0B19454371AFEB8BC36A88B6 /* EnergyLogStore.swift */,
 				5AA750EF2355745243960FE9 /* ExtensionHealth.swift */,
@@ -1156,6 +1161,7 @@
 				14230E25C9F528EAA354A7D3 /* CodableShims.swift in Sources */,
 				463A375D41F2E2B5D88E9EC2 /* CompanionLaunch.swift in Sources */,
 				54CAF4125033ED34DC9BAC19 /* CompanionLaunchTests.swift in Sources */,
+				7A457B1365F537A438FE17E3 /* DisplayPlaybackStatus.swift in Sources */,
 				E4F44AFBF736E9B1D20318CF /* DisplaySleep.swift in Sources */,
 				3B85579BC4EC8944233BCA90 /* DisplaySleepTests.swift in Sources */,
 				C87FFF6164932B487CAEF3E0 /* HealthReply.swift in Sources */,
@@ -1219,6 +1225,7 @@
 				F30ECB95D30CEE5981367B97 /* DiagnosticsVisibility.swift in Sources */,
 				A2C0AF588475CFAED60E1E09 /* DisplayCoordinator.swift in Sources */,
 				B0C3C26B2C3C7EE160D6223E /* DisplayOcclusion.swift in Sources */,
+				A1B7D19436EC9BF34AA0BF2B /* DisplayPlaybackStatus.swift in Sources */,
 				D6353F23179201E47B645E16 /* DisplayTopology.swift in Sources */,
 				F7327F9028585F0432488052 /* EnergyLogStore.swift in Sources */,
 				CFF74D71033830D6A5FA27DF /* ExtensionHealth.swift in Sources */,
@@ -1284,6 +1291,7 @@
 				6F898A5700FBE9BD29C6F3E4 /* CodableShims.swift in Sources */,
 				5E4E2E458C7CEC1E174924CB /* ColorDiag.swift in Sources */,
 				BE087A5581099FFE4659C3CF /* CompanionLaunch.swift in Sources */,
+				35DF7E22450BC9C07F8055D1 /* DisplayPlaybackStatus.swift in Sources */,
 				CA5C8657C88E249E8C9C54A7 /* DisplaySleep.swift in Sources */,
 				CA6CF799E122527173B92949 /* HealthReply.swift in Sources */,
 				743DD06C802D0D2D20E1D5BC /* LibraryEntryScan.swift in Sources */,

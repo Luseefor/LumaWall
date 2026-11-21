@@ -282,7 +282,17 @@ final class WallpaperPrefs: @unchecked Sendable {
         activityState: String,
         powerState: PowerMonitor.PowerState,
     ) -> PlaybackPolicy {
-        PlaybackPolicy.compute(
+        decision(for: displayID, presentationMode: presentationMode, activityState: activityState, powerState: powerState).tier
+    }
+
+    /// `policy(for:)` with the reason behind the tier.
+    func decision(
+        for displayID: UInt32?,
+        presentationMode: String,
+        activityState: String,
+        powerState: PowerMonitor.PowerState,
+    ) -> PlaybackPolicy.Decision {
+        PlaybackPolicy.decide(
             presentationMode: presentationMode,
             activityState: activityState,
             userPaused: userPaused || displayID.map { pausedDisplays.contains($0) } ?? false,

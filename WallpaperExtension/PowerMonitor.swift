@@ -368,7 +368,7 @@ final class PowerMonitor: Sendable {
 
 extension PlaybackPolicy {
     /// Convenience overload that unpacks a `PowerMonitor.PowerState`.
-    static func compute(
+    static func decide(
         presentationMode: String,
         activityState: String,
         userPaused: Bool,
@@ -379,8 +379,8 @@ extension PlaybackPolicy {
         screenSaverIsOurs: Bool,
         powerState: PowerMonitor.PowerState,
         powerProfile: String = "automatic",
-    ) -> PlaybackPolicy {
-        compute(
+    ) -> Decision {
+        decide(
             presentationMode: presentationMode,
             activityState: activityState,
             userPaused: userPaused,
@@ -397,5 +397,32 @@ extension PlaybackPolicy {
             displayBrightness: powerState.displayBrightness,
             powerProfile: powerProfile,
         )
+    }
+
+    /// `decide(powerState:)` without the reason.
+    static func compute(
+        presentationMode: String,
+        activityState: String,
+        userPaused: Bool,
+        alwaysPauseDesktop: Bool,
+        pauseWhenOccluded: Bool,
+        desktopOccluded: Bool,
+        displayHasFullscreenApp: Bool = false,
+        screenSaverIsOurs: Bool,
+        powerState: PowerMonitor.PowerState,
+        powerProfile: String = "automatic",
+    ) -> PlaybackPolicy {
+        decide(
+            presentationMode: presentationMode,
+            activityState: activityState,
+            userPaused: userPaused,
+            alwaysPauseDesktop: alwaysPauseDesktop,
+            pauseWhenOccluded: pauseWhenOccluded,
+            desktopOccluded: desktopOccluded,
+            displayHasFullscreenApp: displayHasFullscreenApp,
+            screenSaverIsOurs: screenSaverIsOurs,
+            powerState: powerState,
+            powerProfile: powerProfile,
+        ).tier
     }
 }
