@@ -41,9 +41,27 @@ public enum StoreIO {
     /// readable while the screen is locked. LumaWall runs schedules and
     /// lock-screen playback while locked; "complete unless open" made an
     /// existing file unreadable then, so loads came back empty.
+    ///
+    /// A store that exists but can't be read is never replaced: its owner
+    /// loaded it as empty, so saving would erase the real data.
     public static func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
         let data = try JSONEncoder.lumaWall.encode(value)
+        if let error = unreadableExistingFile(at: url) { throw error }
         try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    /// The error opening an existing store for reading, or nil when it's
+    /// readable or absent. Doesn't follow a symlink (ELOOP counts as
+    /// readable here: the atomic write replaces the link, as before).
+    private static func unreadableExistingFile(at url: URL) -> POSIXError? {
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        if fd >= 0 {
+            close(fd)
+            return nil
+        }
+        let code = errno
+        guard code == EPERM || code == EACCES else { return nil }
+        return POSIXError(POSIXErrorCode(rawValue: code) ?? .EACCES)
     }
 
     /// Writes `value` readable only by the user (0600), for diagnostics. The
@@ -95,7 +113,7 @@ public enum StoreIO {
     ) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         if let decoded = try? JSONDecoder.lumaWall.decode(type, from: data), isValid(decoded) {
-            upgradeProtection(of: data, at: url)
+            upgradeProtection(at: url)
             return decoded
         }
         quarantineCorruptFile(at: url)
@@ -103,16 +121,20 @@ public enum StoreIO {
     }
 
     /// Files written before the switch to "until first unlock" keep the old
-    /// class until rewritten; rewrite them with the bytes just read. The
-    /// write is atomic, so a failure leaves the file as it was.
-    private static func upgradeProtection(of data: Data, at url: URL) {
-        // A fresh URL: resource values are cached per URL instance.
-        let fresh = URL(fileURLWithPath: url.path)
-        guard
-            (try? fresh.resourceValues(forKeys: [.fileProtectionKey]).fileProtection)
-                != .completeUntilFirstUserAuthentication
-        else { return }
-        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    /// class until rewritten. Change the class in place on the open file, so
+    /// no bytes are rewritten (a second instance's newer save can't be
+    /// replaced with stale data) and a symlink is never followed.
+    private static func upgradeProtection(at url: URL) {
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { return }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return }
+        // Darwin's PROTECTION_CLASS_C (until first user authentication); the
+        // constant isn't imported into Swift.
+        let classC: Int32 = 3
+        guard fcntl(fd, F_GETPROTECTIONCLASS) != classC else { return }
+        _ = fcntl(fd, F_SETPROTECTIONCLASS, classC)
     }
 
     private static func quarantineCorruptFile(at url: URL) {
