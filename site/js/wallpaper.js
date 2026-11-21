@@ -164,11 +164,52 @@ export class Wallpaper {
 }
 
 /**
+ * Decides which display frames to draw so `cap` fps holds evenly. It banks
+ * elapsed time instead of comparing against the last draw, so a 144 Hz
+ * display gets 60 draws a second, not the 48 that "wait one whole interval"
+ * would give.
+ */
+export function createPacer(cap = 60) {
+  let bank = 0;
+  let last = 0;
+  return {
+    setCap(value) {
+      cap = value;
+    },
+    reset() {
+      bank = 0;
+      last = 0;
+    },
+    /** True when the frame at `now` (ms) should be drawn. */
+    accept(now) {
+      if (!last) {
+        last = now;
+        return true;
+      }
+      const interval = 1000 / cap;
+      const gap = now - last;
+      last = now;
+      // A stall is not owed back as extra frames: draw once and start over.
+      if (gap > interval * 1.5) {
+        bank = 0;
+        return true;
+      }
+      bank += gap;
+      // 1.5 ms of slack keeps a 60 Hz display on a 60 fps cap despite jitter.
+      if (bank < interval - 1.5) return false;
+      bank -= interval;
+      return true;
+    },
+  };
+}
+
+/**
  * A requestAnimationFrame loop capped at `fps` that is cancelled outright
  * when stopped. `onStats` gets the frames drawn in the last second.
  */
 export function createLoop(draw, { fps = 60, startTime = 40, onStats = () => {} } = {}) {
   let raf = 0;
+  const pacer = createPacer(fps);
   let lastDraw = 0;
   let sceneTime = startTime;
   let speed = 1;
@@ -178,8 +219,7 @@ export function createLoop(draw, { fps = 60, startTime = 40, onStats = () => {} 
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
-    // 1.5 ms of slack lets a 60 Hz display hit a 30 fps cap on every other frame.
-    if (lastDraw && now - lastDraw < 1000 / cap - 1.5) return;
+    if (!pacer.accept(now)) return;
     const dt = lastDraw ? Math.min(now - lastDraw, 100) / 1000 : 0;
     lastDraw = now;
     sceneTime += dt * speed;
@@ -203,6 +243,7 @@ export function createLoop(draw, { fps = 60, startTime = 40, onStats = () => {} 
     start() {
       if (raf) return;
       lastDraw = 0;
+      pacer.reset();
       raf = requestAnimationFrame(frame);
     },
     stop() {
@@ -214,6 +255,7 @@ export function createLoop(draw, { fps = 60, startTime = 40, onStats = () => {} 
     },
     setFps(value) {
       cap = value;
+      pacer.setCap(value);
     },
     setSpeed(value) {
       speed = value;

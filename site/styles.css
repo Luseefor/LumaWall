@@ -730,3 +730,18 @@ a {
 .hud-pause:hover {
   color: var(--ink);
 }
+
+.hud-pause:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.hud-pause:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Playing or paused is also a shape, not just a colour. */
+.hud-dot:not(.on) {
+  border-radius: 1px;
+}

@@ -32,7 +32,6 @@ function svgNode(name, attributes = {}, label = "") {
 
 function buildTable() {
   const table = document.createElement("table");
-  table.className = "visually-hidden";
   table.createCaption().textContent = "Approximate LumaWall power use";
   const headings = table.createTHead().insertRow();
   for (const label of ["State", "Power (mW)"]) {
@@ -51,7 +50,10 @@ function buildTable() {
     row.append(heading);
     row.insertCell().textContent = value;
   }
-  return table;
+  const wrap = document.createElement("div");
+  wrap.className = "visually-hidden";
+  wrap.append(table);
+  return wrap;
 }
 
 export function mountEnergyChart(element) {

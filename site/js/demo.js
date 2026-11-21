@@ -64,7 +64,7 @@ export function setUpDemo(root, reducedMotion) {
       wall.draw(time);
       if (dt > 0) dispatch({ type: "tick", seconds: dt });
     },
-    { startTime: 120, onStats: (fps) => live() && showFps(fps) },
+    { startTime: 120, onStats: (fps) => live() && readout(state).running && showFps(fps) },
   );
 
   function dispatch(event) {
@@ -81,11 +81,14 @@ export function setUpDemo(root, reducedMotion) {
     loop.setFps(r.fps || 60);
     loop.setSpeed(r.speed);
     showMw(r.milliwatts);
-    if (!live()) showFps(r.fps);
+    // A running live loop reports its own frame count; otherwise the model decides.
+    if (!live() || !r.running) showFps(r.fps);
     if (status.textContent !== r.status) status.textContent = r.status;
     stillNote.hidden = live();
     if (r.running && inView && !document.hidden && live()) loop.start();
     else loop.stop();
+    // Off screen or hidden while "playing": nothing is drawing, so say 0.
+    if (live() && r.running && !loop.running) showFps(0);
   }
 
   function place() {
