@@ -73,7 +73,7 @@ struct EnergyLogStoreTests {
         try await store.record(stale, now: now)
         try await store.record(fresh, now: now)
         let snapshot = await store.current()
-        #expect(snapshot.samples.count == 1)
+        try #require(snapshot.samples.count == 1)
         #expect(snapshot.samples[0].processCPUPercent == 2)
         let report = await store.report(now: now)
         #expect(report?.sampleCount == 1)
@@ -115,7 +115,7 @@ struct EnergyLogStoreTests {
         try await first.flush()
         let second = try EnergyLogStore(rootURL: root)
         let snapshot = await second.current()
-        #expect(snapshot.samples.count == 1)
+        try #require(snapshot.samples.count == 1)
         #expect(snapshot.samples[0].processCPUPercent == 2)
     }
 
