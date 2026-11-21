@@ -16,6 +16,8 @@ public enum PlaybackStatusReason: String, Codable, Sendable, CaseIterable {
     case desktopPaused
     case screensaver
     case suspended
+    case locked
+    case reduceMotion
     // Playing, with a lighter copy or a lower rate.
     case batteryTier
     case lowPowerMode
@@ -35,6 +37,8 @@ public enum PlaybackStatusReason: String, Codable, Sendable, CaseIterable {
         case .desktopPaused: "plays on the lock screen only"
         case .screensaver: "a screen saver is showing"
         case .suspended: "macOS suspended it"
+        case .locked: "screen locked"
+        case .reduceMotion: "Reduce Motion is on"
         case .batteryTier: "on battery"
         case .lowPowerMode: "Low Power Mode"
         case .thermal: "Mac is running hot"

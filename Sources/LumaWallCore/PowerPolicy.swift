@@ -113,21 +113,29 @@ public struct PlaybackConditions: Sendable {
 
 public enum PlaybackPolicy: PlaybackPolicyDeciding {
     public static func resolve(_ state: PlaybackConditions) -> PlaybackTier {
-        if state.userPaused || state.displayIsAsleep || state.displayIsObscured || state.gameModeActive {
-            return .paused
-        }
-        if state.reduceMotion { return .staticFrame }
+        decide(state).tier
+    }
+
+    /// The tier and the condition behind it: nil at Full, else the first
+    /// condition that set it. The status UI shows it.
+    public static func decide(_ state: PlaybackConditions) -> (tier: PlaybackTier, reason: PlaybackStatusReason?) {
+        if state.userPaused { return (.paused, .userPause) }
+        if state.displayIsAsleep { return (.paused, .displayAsleep) }
+        if state.displayIsObscured { return (.paused, .covered) }
+        if state.gameModeActive { return (.paused, .gameMode) }
+        if state.reduceMotion { return (.staticFrame, .reduceMotion) }
         if state.sessionIsLocked {
-            if state.allowLiveOnLock, state.hideDesktopVideo { return .full }
-            return .paused
+            if state.allowLiveOnLock, state.hideDesktopVideo { return (.full, nil) }
+            return (.paused, .locked)
         }
-        if state.hideDesktopVideo { return .staticFrame }
-        if state.thermalState == .critical || state.batteryPercent < PlaybackPolicyThresholds.batteryCritical { return .paused }
+        if state.hideDesktopVideo { return (.staticFrame, .desktopPaused) }
+        if state.thermalState == .critical { return (.paused, .thermal) }
+        if state.batteryPercent < PlaybackPolicyThresholds.batteryCritical { return (.paused, .batteryCritical) }
         // A still frame is cheaper than even the minimal decode budget, so the
         // Static profile wins over serious thermal too, matching the extension
         // host, where staticOnBattery accumulates to `.paused` past `.minimal`.
-        if state.profile == .staticOnBattery { return .staticFrame }
-        if state.thermalState == .serious { return .minimal }
+        if state.profile == .staticOnBattery { return (.staticFrame, .batteryStatic) }
+        if state.thermalState == .serious { return (.minimal, .thermal) }
         // Power profiles are manual overrides, so they apply on any power
         // source, not just on battery. Otherwise the menu is dead on AC power
         // (and on desktops without a battery, permanently): Automatic and Full
@@ -138,18 +146,19 @@ public enum PlaybackPolicy: PlaybackPolicyDeciding {
             // Prefer source fidelity: skip the battery-level, Low Power Mode,
             // and fair-thermal downgrades below. Hard protections above
             // (pauses, lock, serious/critical thermal) still win.
-            return .full
-        case .batterySaver: return .minimal
-        case .staticOnBattery: return .staticFrame
+            return (.full, nil)
+        case .batterySaver: return (.minimal, .batteryTier)
+        case .staticOnBattery: return (.staticFrame, .batteryStatic)
         case .automatic:
             if state.isOnBattery {
-                if state.lowPowerMode || state.batteryPercent < PlaybackPolicyThresholds.batteryLow { return .minimal }
-                return .reduced
+                if state.lowPowerMode { return (.minimal, .lowPowerMode) }
+                if state.batteryPercent < PlaybackPolicyThresholds.batteryLow { return (.minimal, .batteryTier) }
+                return (.reduced, .batteryTier)
             }
         }
-        if state.lowPowerMode { return .minimal }
-        if state.thermalState == .fair { return .reduced }
-        return .full
+        if state.lowPowerMode { return (.minimal, .lowPowerMode) }
+        if state.thermalState == .fair { return (.reduced, .thermal) }
+        return (.full, nil)
     }
 }
 
