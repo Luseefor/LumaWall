@@ -41,4 +41,27 @@ final class NativeWallpaperAssignmentStoreTests: XCTestCase {
         XCTAssertEqual(decodedContent["Shuffle"] as? String, "$null")
         XCTAssertNil(decodedContent["Shuffle"] as? NSNull)
     }
+
+    // MARK: Displays another Space shows something else on
+
+    private func desktop(provider: String) -> NSDictionary {
+        ["Desktop": ["Content": ["Choices": [["Provider": provider]]]]]
+    }
+
+    func testFindsADisplayWhoseOtherSpaceShowsAnotherWallpaper() {
+        let ours = WallpaperHostCapabilities.extensionBundleID
+        let root: NSDictionary = [
+            "Displays": ["A": desktop(provider: ours), "B": desktop(provider: ours)],
+            "Spaces": [
+                "SPACE-1": ["Displays": ["A": desktop(provider: "com.apple.wallpaper.choice.image")]],
+                "SPACE-2": ["Displays": ["B": desktop(provider: ours)]],
+            ],
+        ]
+        XCTAssertEqual(NativeWallpaperAssignmentStore.displaysShowingOthers(in: root), ["A"])
+    }
+
+    func testAStoreThatIsAllOursHasNone() {
+        let root: NSDictionary = ["Displays": ["A": desktop(provider: WallpaperHostCapabilities.extensionBundleID)]]
+        XCTAssertTrue(NativeWallpaperAssignmentStore.displaysShowingOthers(in: root).isEmpty)
+    }
 }

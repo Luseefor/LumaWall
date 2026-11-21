@@ -70,15 +70,19 @@ public struct ExtensionHealth: Sendable, Equatable {
     public private(set) var quietUntil: TimeInterval
     /// When each watched display was first missing from a fresh answer.
     public private(set) var missingSince: [UInt32: TimeInterval] = [:]
-    /// Set once the extension has answered. An extension that never
-    /// answers is likely an older build still running after an update, so
-    /// silence alone doesn't fall anything back until then.
+    /// Set once the extension has answered, this session or (`heardBefore`)
+    /// an earlier one of the same build. An extension that never answered
+    /// is likely an older build still running after an update, so silence
+    /// alone doesn't fall anything back until then.
     public private(set) var hasHeardReply = false
     private var pendingSentAt: TimeInterval?
     private var pendingPrevious: Reply?
 
-    public init(now: TimeInterval) {
+    /// `heardBefore`: this build's extension answered in an earlier session,
+    /// so silence counts from the start.
+    public init(now: TimeInterval, heardBefore: Bool = false) {
         quietUntil = now + Self.grace
+        hasHeardReply = heardBefore
     }
 
     public mutating func disturb(at now: TimeInterval) {

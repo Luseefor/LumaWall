@@ -109,6 +109,19 @@ struct ExtensionHealthTests {
         }
     }
 
+    @Test func silenceCountsFromTheStartWhenThisBuildAnsweredBefore() {
+        // The extension never starts after launch.
+        var health = ExtensionHealth(now: 0, heardBefore: true)
+        var now = ExtensionHealth.grace
+        var fellBack: Set<UInt32> = []
+        for _ in 0..<10 where fellBack.isEmpty {
+            health.probeSent(at: now, previous: nil)
+            fellBack = health.probeFinished(reply: nil, watching: [1], at: now + 3)
+            now += 7
+        }
+        #expect(fellBack == [1])
+    }
+
     @Test func aRelaunchedExtensionCountsAsFresh() {
         var health = settled(watching: [1])
         let now = settledAt

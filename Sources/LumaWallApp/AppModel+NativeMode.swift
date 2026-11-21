@@ -49,17 +49,24 @@ extension AppModel {
         if !keepNativeMode { setNativeMode(enabled: false) }
     }
 
-    /// Turns native mode off if it is on, then puts back the user's own
-    /// wallpaper from the backup.
+    /// Turns native mode off if it is on, stops LumaWall's wallpapers so
+    /// nothing covers the desktop, then puts back the user's own wallpaper
+    /// from the backup.
     func restoreOriginalWallpaper() {
         Task {
             let wasNative = nativeModeEnabled
             if wasNative { await switchNativeMode(enabled: false) }
             nativeFailureNotice = nil
+            // Safe mode's windows would cover the restored wallpaper.
+            if activePlaylistID != nil { stopPlaylistRotation() }
+            try? await engine.clearAll()
+            refreshActive()
+            applyPlaybackPolicy()
             do {
                 let result = try NativeWallpaperAssignmentService.restoreOriginalWallpaper()
                 var message = Self.restoreMessage(result)
-                if wasNative { message += " Native mode is off now; wallpapers play in Safe mode." }
+                message += wasNative ? " Native mode is off now, and " : " "
+                message += "LumaWall stopped playing. Pick a wallpaper in the Library to start again."
                 present("Restore original wallpaper", message)
             } catch {
                 present("Restore original wallpaper", error.localizedDescription)
@@ -98,7 +105,11 @@ extension AppModel {
             },
             onUnserved: { [weak self] ids in
                 guard let self else { return }
+                let writes = LiveSystemWallpaperFiles.storeChangeCount
                 Task {
+                    // A store write since the verdict restarted the agent:
+                    // the next probes decide after their grace.
+                    guard LiveSystemWallpaperFiles.storeChangeCount == writes else { return }
                     await self.engine.fallBackUnserved(ids)
                     self.refreshActive()
                     self.applyPlaybackPolicy()

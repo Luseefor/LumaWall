@@ -30,8 +30,9 @@ and every WallpaperAgent restart the app causes by writing the store.
 
 - The app posts `app.lumawall.personal.healthPing`. The extension answers by
   writing `lumawall-health.json` (`pid`, an in-memory `sequence` that goes up
-  on every answer, and the CoreGraphics IDs of displays with a live,
-  non-preview surface). Answers are throttled to one a second.
+  on every answer, and the CoreGraphics IDs of displays it holds a surface
+  for, previews included, since a preview surface can be handed to the
+  desktop). Answers are throttled to one a second.
 - The app reads the file before the ping and 3 seconds after. A changed
   `pid` or `sequence` is a fresh answer. A display the app plays natively that
   is missing from fresh answers, or from all answers once the extension
@@ -43,10 +44,19 @@ and every WallpaperAgent restart the app causes by writing the store.
   own or mirror another display aren't watched.
 - Launch, wake, unlock, a display change, a Space switch, the screen saver
   ending, the session becoming unlocked or awake, and any store write by the
-  app start a 30-second grace period and clear earlier misses.
-- An extension that has never answered this session isn't blamed for
-  silence. It is likely an older build still running after an update. A
-  fresh answer that leaves a display out still counts.
+  app start a 30-second grace period and clear earlier misses. A verdict is
+  dropped if the store was written between the probe and the fallback.
+- A display that some Space shows a non-LumaWall wallpaper on isn't fallen
+  back: the extension doesn't run there, so a miss proves nothing. The store
+  is read only when a display is about to fall back; if it can't be read,
+  nothing falls back.
+- Silence alone counts only once this app build's extension has answered,
+  this session or an earlier one (remembered in user defaults by build
+  number). An extension that never answered is likely an older build still
+  running after an update. A fresh answer that leaves a display out always
+  counts.
+- Displays that fall back are released from the native engine, and native
+  work already running doesn't write them back to the store.
 - The rules live in `ExtensionHealth` (LumaWallCore), a pure type with tests.
 
 ## Alternatives considered
@@ -69,9 +79,9 @@ and every WallpaperAgent restart the app causes by writing the store.
   small reads in the app every 10 seconds while native mode is visible.
   Nothing runs while the Mac is locked, asleep or showing the screen saver.
 - A failure is noticed 20 to about 35 seconds after it starts.
-- A Space whose wallpaper isn't LumaWall's makes the agent drop the surface
-  there; if that lasts past the grace period, the display moves to Safe mode.
-- If the extension is already broken when the app launches and never
-  answers, the ping can't catch it. Assignment and verification failures
-  still do.
+- A display with a non-LumaWall wallpaper on any Space isn't covered by the
+  check until that Space shows LumaWall again.
+- On the first launch of a new build, an extension that is already broken
+  and never answers isn't caught by the ping. Assignment and verification
+  failures still are.
 - The live checks are in `docs/testing/native-mode-matrix.md`.

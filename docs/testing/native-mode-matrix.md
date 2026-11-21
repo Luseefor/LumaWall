@@ -41,12 +41,13 @@ Mac: ______ · Build: ______ · LumaWall: ______ · Date: ______
 | 10 | Rotate back to landscape | Wallpaper fills the display; no notice | | |
 | 11 | Close and open the lid with an external display (clamshell) | Plays on the remaining displays; no notice | | |
 | 12 | Switch Spaces 20 times (Control-arrow) on each display | Plays on every Space; no notice | | |
+| 12a | Set an Apple wallpaper on one Space in System Settings, stay on that Space 2 minutes, switch back | No notice; the LumaWall Space still plays natively |
 | 13 | Enter and leave a full-screen app | Pauses in full screen, plays after; no notice | | |
 | 14 | Mission Control in and out | Plays; no notice | | |
 | 15 | Start the screen saver (hot corner), stop it after 1 minute | Plays after; no notice | | |
 | 16 | Screen saver until the screen locks, then unlock | Plays after unlock; no notice | | |
-| 17 | Forced failure: quit LumaWallWallpaper in Activity Monitor and watch for 60 s | If macOS restarts it, wallpapers come back and no notice. If not, within about 35 s each display shows the notice once (macOS notification and banner, naming the display) and plays in Safe mode | | |
-| 18 | Restore from the notice: click Restore Original Wallpaper in the macOS notification | Native mode turns off; your previous wallpaper is back; a message says so | | |
+| 17 | Forced failure, on a test Mac only: once `native-host` logs show no health errors for a minute, quit LumaWallWallpaper in Activity Monitor and watch for 60 s | If macOS restarts it, wallpapers come back and no notice. If not, within about 35 s each display shows the notice once (macOS notification and banner, naming the display) and plays in Safe mode | | |
+| 18 | Restore from the notice: click Restore Original Wallpaper in the macOS notification | Native mode turns off; LumaWall stops playing; your previous wallpaper is back; a message says so | | |
 | 19 | Restore from the menu bar: open the popover, click the restore button (↩) | Same as 18, in two clicks | | |
 | 20 | Restore from Settings → Wallpaper host → Restore | Same as 18 | | |
 
@@ -70,12 +71,13 @@ Mac: ______ · Build: ______ · LumaWall: ______ · Date: ______
 | 10 | Rotate back to landscape | Wallpaper fills the display; no notice | | |
 | 11 | Close and open the lid with an external display (clamshell) | Plays on the remaining displays; no notice | | |
 | 12 | Switch Spaces 20 times (Control-arrow) on each display | Plays on every Space; no notice | | |
+| 12a | Set an Apple wallpaper on one Space in System Settings, stay on that Space 2 minutes, switch back | No notice; the LumaWall Space still plays natively |
 | 13 | Enter and leave a full-screen app | Pauses in full screen, plays after; no notice | | |
 | 14 | Mission Control in and out | Plays; no notice | | |
 | 15 | Start the screen saver (hot corner), stop it after 1 minute | Plays after; no notice | | |
 | 16 | Screen saver until the screen locks, then unlock | Plays after unlock; no notice | | |
-| 17 | Forced failure: quit LumaWallWallpaper in Activity Monitor and watch for 60 s | If macOS restarts it, wallpapers come back and no notice. If not, within about 35 s each display shows the notice once (macOS notification and banner, naming the display) and plays in Safe mode | | |
-| 18 | Restore from the notice: click Restore Original Wallpaper in the macOS notification | Native mode turns off; your previous wallpaper is back; a message says so | | |
+| 17 | Forced failure, on a test Mac only: once `native-host` logs show no health errors for a minute, quit LumaWallWallpaper in Activity Monitor and watch for 60 s | If macOS restarts it, wallpapers come back and no notice. If not, within about 35 s each display shows the notice once (macOS notification and banner, naming the display) and plays in Safe mode | | |
+| 18 | Restore from the notice: click Restore Original Wallpaper in the macOS notification | Native mode turns off; LumaWall stops playing; your previous wallpaper is back; a message says so | | |
 | 19 | Restore from the menu bar: open the popover, click the restore button (↩) | Same as 18, in two clicks | | |
 | 20 | Restore from Settings → Wallpaper host → Restore | Same as 18 | | |
 

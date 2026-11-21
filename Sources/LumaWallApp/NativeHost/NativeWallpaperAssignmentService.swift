@@ -361,6 +361,7 @@ struct LiveSystemWallpaperFiles: SystemWallpaperFiles {
     /// fail while the agent is observing the directory, so this writes in
     /// place. Call it inside `coordinateStore`.
     func writeStore(_ data: Data, to url: URL) throws {
+        Self.storeChangeCount += 1
         try data.write(to: url, options: [])
     }
 
@@ -374,12 +375,12 @@ struct LiveSystemWallpaperFiles: SystemWallpaperFiles {
         try data.write(to: Self.backupURL, options: .atomic)
     }
 
-    /// Bumped on every restart. The extension health check (ADR 0003)
-    /// waits out the re-acquire that follows.
-    static var restartCount = 0
+    /// Bumped on every store write and agent restart. The extension health
+    /// check (ADR 0003) waits out the re-acquire that follows.
+    static var storeChangeCount = 0
 
     func restartWallpaperAgent() {
-        Self.restartCount += 1
+        Self.storeChangeCount += 1
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
         process.arguments = ["WallpaperAgent"]

@@ -115,6 +115,30 @@ enum NativeWallpaperAssignmentStore {
     }
 }
 
+// MARK: Displays with another wallpaper
+
+extension NativeWallpaperAssignmentStore {
+    /// Display UUIDs with a Desktop surface, on any Space, that isn't
+    /// LumaWall's. macOS doesn't run the extension for such a Space, so the
+    /// health check can't tell a failure there from the user's own choice.
+    static func displaysShowingOthers(in root: NSDictionary) -> Set<String> {
+        var found = Set<String>()
+        func walk(_ displays: NSDictionary?) {
+            for case let (uuid as String, display as NSDictionary) in displays ?? [:] {
+                guard let desktop = display["Desktop"] as? NSDictionary,
+                    (desktop["Content"] as? NSDictionary)?["Choices"] != nil
+                else { continue }
+                if !isOurs(desktop) { found.insert(uuid) }
+            }
+        }
+        walk(root["Displays"] as? NSDictionary)
+        for case let space as NSDictionary in (root["Spaces"] as? NSDictionary)?.allValues ?? [] {
+            walk(space["Displays"] as? NSDictionary)
+        }
+        return found
+    }
+}
+
 // MARK: Backup and restore
 
 extension NativeWallpaperAssignmentStore {

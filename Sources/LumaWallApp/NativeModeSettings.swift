@@ -46,8 +46,8 @@ struct NativeModeControls: View {
                 row(
                     title: "Restore original wallpaper",
                     detail: enabled
-                        ? "Turns native mode off and puts back the wallpaper you had before LumaWall set it."
-                        : "Puts back the wallpaper you had before LumaWall set it.",
+                        ? "Turns native mode off, stops LumaWall's wallpapers and puts back the one you had before."
+                        : "Stops LumaWall's wallpapers and puts back the one you had before LumaWall set it.",
                     symbol: "arrow.uturn.backward"
                 ) {
                     GhostButton("Restore", symbol: "arrow.uturn.backward", action: restore)
