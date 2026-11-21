@@ -257,6 +257,7 @@ final class WallpaperPrefs: @unchecked Sendable {
             renderer.applyPolicy(
                 previewTier, animated: false, hardPause: hardPause && previewTier == .paused, onBattery: powerState.isOnBattery)
         }
+        DisplayStatusPublisher.shared.markDirty()
     }
 
     /// The tier `applyPolicies` gives preview renderers: the hard pauses and

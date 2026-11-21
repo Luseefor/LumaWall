@@ -45,6 +45,14 @@ final class VideoRenderer: @unchecked Sendable {
     /// so each event's effects run against the state that produced them.
     var pendingEvents: [RendererLifecycle.Event] = []
     var isDispatching = false
+    /// What the status file needs from this renderer: written on the queue
+    /// by `send`, read from any thread.
+    struct StatusInfo: Equatable {
+        var displayAsleep: Bool
+        var surfaceOpen: Bool
+        var filename: String
+    }
+    let statusInfo = OSAllocatedUnfairLock<StatusInfo?>(initialState: nil)
     /// What `PowerMonitor` last heard about this renderer being active.
     var reportedPlayback = false
     var rampTimer: (any DispatchSourceTimer)?

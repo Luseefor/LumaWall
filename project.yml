@@ -165,6 +165,7 @@ targets:
       # The extension can't host a test bundle; compile its pure sources here.
       - path: WallpaperExtension/VariantSelection.swift
       - path: WallpaperExtension/PlaybackPolicy.swift
+      - path: WallpaperExtension/DisplayStatusBuilder.swift
       - path: Sources/LumaWallCore/DisplayPlaybackStatus.swift
       - path: WallpaperExtension/ThermalHold.swift
       - path: WallpaperExtension/RendererLifecycle.swift
