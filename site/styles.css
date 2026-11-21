@@ -272,6 +272,7 @@ a {
 
 .nav-inner ul {
   display: flex;
+  align-items: center;
   gap: 28px;
   margin-inline: auto;
 }
@@ -679,6 +680,7 @@ a {
     position: fixed;
     inset: var(--nav) 0 auto;
     flex-direction: column;
+    align-items: stretch;
     gap: 0;
     max-height: calc(100dvh - var(--nav));
     overflow-y: auto;
