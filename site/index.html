@@ -38,7 +38,7 @@
       >
         <span class="hud-dot" data-hud-dot aria-hidden="true"></span>
         <span><span class="num" data-hud-fps>0</span> fps</span>
-        <span><span class="num" data-hud-mw>1</span> mW</span>
+        <span><span class="num" data-hud-mw>1</span> mW (simulated)</span>
         <button type="button" class="hud-pause" data-hero-pause aria-pressed="false">Pause</button>
       </p>
     </header>
@@ -47,10 +47,9 @@
       <section class="hero" id="top" aria-labelledby="hero-title">
         <canvas class="wall" data-hero-canvas aria-hidden="true"></canvas>
         <div class="hero-copy">
-          <h1 id="hero-title">Your desktop, alive.<br />Your battery, untouched.</h1>
+          <h1 id="hero-title">Your videos as<br />live Mac wallpapers.</h1>
           <p class="lede">
-            LumaWall plays your own videos as macOS wallpapers, on every display. When a window covers the
-            desktop, it stops drawing.
+            Free and open source. Works offline with no account or analytics.
           </p>
           <div class="actions">
             <a class="button primary" href="#demo">See it pause</a>
@@ -61,10 +60,10 @@
 
       <section class="section" id="demo" aria-labelledby="demo-title">
         <header class="section-head">
-          <h2 id="demo-title">Cover it.</h2>
+          <h2 id="demo-title">See what pausing saves</h2>
           <p>
-            Drag the window over the wallpaper. Once it hides 97% of it, this page stops drawing frames. LumaWall pauses
-            the same way on your desktop, with its own threshold.
+            Drag the window over the wallpaper and watch the simulated power reading drop. The demo stops drawing
+            frames at 97% coverage. LumaWall uses its own coverage threshold.
           </p>
         </header>
 
@@ -100,7 +99,7 @@
                 <dd class="num" data-fps>60</dd>
               </div>
               <div>
-                <dt>LumaWall power</dt>
+                <dt>Simulated LumaWall power</dt>
                 <dd><span class="num" data-mw>12</span><span class="unit"> mW</span></dd>
               </div>
               <div>
@@ -122,7 +121,7 @@
             </div>
             <p class="hint" id="window-hint">Drag the window, or focus it and use the arrow keys.</p>
             <p class="hint" data-still-note hidden>
-              Reduced motion is on, so the wallpaper shows a still frame. The readouts show what LumaWall would do.
+              Reduced motion is on. The wallpaper stays still while the demo simulates playback.
             </p>
           </div>
         </div>
@@ -130,8 +129,9 @@
 
       <section class="section" id="energy" aria-labelledby="energy-title">
         <header class="section-head">
-          <h2 id="energy-title">About 1 mW when nobody's looking.</h2>
-          <p>Power used by LumaWall's own processes on an M-series MacBook, playing one wallpaper.</p>
+          <h2 id="energy-title">About 1 mW paused</h2>
+          <p>Approximate power for LumaWall's own processes on one M-series MacBook with one video wallpaper.
+            Playback used about 7 to 12 mW.</p>
         </header>
 
         <div data-energy-chart></div>
@@ -139,65 +139,69 @@
 
       <section class="section" id="features" aria-labelledby="features-title">
         <header class="section-head">
-          <h2 id="features-title">What it does.</h2>
+          <h2 id="features-title">Wallpaper features</h2>
         </header>
         <ul class="grid">
           <li>
             <h3>Safe mode by default</h3>
             <p>
-              A muted video plays in a desktop-level window over a still poster, using documented macOS APIs. It never
-              edits system wallpaper files.
+              On macOS 15 or later, the default Safe mode plays muted video in a desktop overlay above a still poster.
+              It uses documented macOS APIs and leaves system wallpaper files alone.
             </p>
           </li>
           <li>
-            <h3>Native mode on macOS 26</h3>
+            <h3>Native mode on macOS 26 or later</h3>
             <p>
-              Opt in to play on the desktop and the lock screen through the system wallpaper. It's experimental, uses
-              undocumented interfaces and may break after a macOS update, so you use it at your own risk.
+              Opt in to experimental native mode for desktop and lock screen wallpapers. It uses undocumented
+              interfaces, edits system wallpaper settings and restarts WallpaperAgent. If a native assignment
+              fails, LumaWall automatically falls back to Safe mode. Use Restore original wallpaper to recover
+              your previous settings from a local backup.
             </p>
           </li>
           <li>
             <h3>Every display</h3>
-            <p>Give each display its own video, portrait screens included, or send one video to all of them.</p>
+            <p>Use the same video everywhere or set one per display, including portrait displays.</p>
           </li>
           <li>
             <h3>Playlists and schedules</h3>
-            <p>Rotate a playlist. Pair videos for day and night, or light and dark, and LumaWall switches them for you.</p>
+            <p>Schedule a playlist or switch between two videos by time of day or macOS appearance.</p>
           </li>
           <li>
-            <h3>Lighter copies on battery</h3>
+            <h3>720p playback on battery</h3>
             <p>
-              On battery, a 720p copy of your video can replace the full file, so the decoder has less to do.</p>
+              On battery, LumaWall can switch to a 720p copy of your video.
+            </p>
           </li>
           <li>
-            <h3>Stops when it's hidden</h3>
-            <p>Playback pauses when a window covers the display, when the Mac locks, when displays sleep and in Game Mode. What pauses follows your settings.</p>
+            <h3>Playback rules</h3>
+            <p>
+              Playback pauses when displays sleep or Game Mode is active. Settings also let you pause on covered
+              displays or when your Mac locks. Reduce Motion shows a still frame.
+            </p>
           </li>
         </ul>
       </section>
 
       <section class="section" id="privacy" aria-labelledby="privacy-title">
         <header class="section-head">
-          <h2 id="privacy-title">Private by design.</h2>
+          <h2 id="privacy-title">Privacy</h2>
         </header>
         <ul class="grid">
           <li>
             <h3>Nothing leaves your Mac</h3>
             <p>
-              The app has no network code and no analytics. It opens GitHub Releases in your browser only when you check
-              for updates.
+              The app and wallpaper extension send no data. Checking for updates opens GitHub Releases in your browser.
             </p>
           </li>
           <li>
-            <h3>Imports open in a sandbox</h3>
+            <h3>Sandboxed video inspection</h3>
             <p>
-              A sandboxed helper with no file access inspects each video you import, reading it through a handle the
-              app passes in.
+              A sandboxed helper inspects imported videos through read-only file handles opened by the app.
             </p>
           </li>
           <li>
             <h3>Open source</h3>
-            <p>Apache 2.0. Read every line, or build it yourself from the repository.</p>
+            <p>The source is available under the Apache 2.0 license.</p>
           </li>
         </ul>
         <p class="links">
@@ -210,13 +214,12 @@
       <section class="section" id="get" aria-labelledby="get-title">
         <div class="get">
           <div>
-            <h2 id="get-title">Download coming soon.</h2>
+            <h2 id="get-title">Build from source</h2>
             <p>
-              There's no signed, notarized build yet. Watch GitHub Releases for the first one, or build LumaWall from
-              source today.
+              A signed, notarized download is unavailable. The repository has build instructions.
             </p>
             <div class="actions">
-              <a class="button primary" href="https://github.com/Luseefor/LumaWall/releases">GitHub Releases</a>
+              <a class="button primary" href="https://github.com/Luseefor/LumaWall/releases">Follow releases</a>
               <a class="button" href="https://github.com/Luseefor/LumaWall">Source code</a>
             </div>
           </div>
