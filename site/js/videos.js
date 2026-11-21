@@ -3,7 +3,16 @@ import { cardPlays, nextIndex, shouldPlay } from "./video-model.js";
 const CYCLE_MS = 5200;
 const FADE_MS = 1300; // a little longer than the CSS crossfade
 
+/** Clips carry data-src so nothing downloads until one is about to play. */
+function attach(video) {
+  const { src } = video.dataset;
+  if (!src) return;
+  video.src = src;
+  delete video.dataset.src;
+}
+
 function play(video) {
+  attach(video);
   video.play()?.catch(() => {});
 }
 
@@ -43,6 +52,10 @@ export function setUpVideos(reducedMotion) {
       previous.classList.remove("on");
       layers[index].classList.add("on");
       play(layers[index]);
+      // Fetch the clip after this one now, so its crossfade starts on a frame.
+      const upcoming = layers[nextIndex(index, layers.length)];
+      upcoming.preload = "auto";
+      attach(upcoming);
       setTimeout(() => {
         if (previous !== layers[index]) previous.pause();
       }, FADE_MS);
@@ -139,6 +152,7 @@ export function setUpVideos(reducedMotion) {
     pauseButton.querySelector("[data-label]").textContent = paused ? "Play wallpapers" : "Pause wallpapers";
   }
 
+  if (pauseButton) pauseButton.disabled = false;
   pauseButton?.addEventListener("click", () => {
     paused = !paused;
     syncButton();

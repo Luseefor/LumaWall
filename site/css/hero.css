@@ -57,6 +57,20 @@
   filter: blur(6px);
 }
 
+/* The poster is a real image so it can load first; the clip fades in over it. */
+.poster {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .layer {
   position: absolute;
   inset: 0;
