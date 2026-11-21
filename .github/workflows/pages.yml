@@ -1,6 +1,6 @@
 name: Pages
 
-# Manual runs deploy only from main; other refs skip the deploy.
+# Manual runs deploy only from main.
 on:
   push:
     branches: [main]
@@ -17,21 +17,27 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       deployable: ${{ steps.check.outputs.deployable }}
+      # Tree SHA of site at the commit this run prepared, so deploy can tell
+      # whether main has moved on before it publishes.
+      site_tree: ${{ steps.check.outputs.site_tree }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: check
         run: |
-          # Case-sensitive on purpose: expression string compares ignore case.
+          # Bash is used because GitHub Actions compares strings without regard to case.
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
             echo "deployable=false" >> "$GITHUB_OUTPUT"
-            echo "Not refs/heads/main; skipping deploy."
+            echo "site_tree=" >> "$GITHUB_OUTPUT"
+            echo "Skipping deploy. Not on main."
           elif [ -d site ] && [ -f site/index.html ]; then
             echo "deployable=true" >> "$GITHUB_OUTPUT"
+            echo "site_tree=$(git rev-parse HEAD:site)" >> "$GITHUB_OUTPUT"
           else
             echo "deployable=false" >> "$GITHUB_OUTPUT"
-            echo "No site/index.html yet; skipping deploy."
+            echo "site_tree=" >> "$GITHUB_OUTPUT"
+            echo "Skipping deploy. No site/index.html yet."
           fi
       - if: steps.check.outputs.deployable == 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
@@ -47,12 +53,35 @@ jobs:
     concurrency:
       group: pages
       cancel-in-progress: false
+      # Keep a queued run instead of evicting it when a new one arrives, so a
+      # valid pending deploy isn't dropped. GitHub documents queue: max.
+      queue: max
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Fail on an API error, skip when main's site is gone or has moved past
+      # the commit this run prepared.
+      - id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_TREE: ${{ needs.prepare.outputs.site_tree }}
+        run: |
+          set -euo pipefail
+          current_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/trees/main" --jq '.tree[] | select(.path == "site" and .type == "tree") | .sha')"
+          if [ -z "$current_tree" ]; then
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping deploy. main has no site tree."
+          elif [ "$current_tree" != "$EXPECTED_TREE" ]; then
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping deploy. main's site tree changed since this run prepared."
+          else
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          fi
       - id: deployment
+        if: steps.freshness.outputs.fresh == 'true'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

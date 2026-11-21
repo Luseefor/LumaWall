@@ -15,5 +15,5 @@ and no build step.
 
 - No dependencies to audit or update.
 - Fast pages, free hosting on a public repo, no third-party requests.
-- No templating: shared markup (header, footer) is copied by hand across
-  pages.
+- Without templates, contributors copy shared markup such as headers and
+  footers by hand.
