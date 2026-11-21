@@ -52,7 +52,7 @@ struct BenchmarkError: Error, CustomStringConvertible {
 
 let usage = """
     Usage: swift scripts/benchmark-power.swift --label <name> [--duration 60] [--runs 5]
-           [--output /tmp/lumawall-power.jsonl]
+           [--app-path /Applications/LumaWall.app] [--output /tmp/lumawall-power.jsonl]
            swift scripts/benchmark-power.swift --self-test
     """
 
@@ -60,6 +60,7 @@ struct Options {
     let label: String
     var duration = 60.0
     var runs = 5
+    var appPath = "/Applications/LumaWall.app"
     var output = "/tmp/lumawall-power.jsonl"
 
     init(_ arguments: [String]) throws {
@@ -83,6 +84,9 @@ struct Options {
                     throw BenchmarkError("Runs must be a positive integer")
                 }
                 runs = count
+            case "--app-path":
+                guard !value.isEmpty else { throw BenchmarkError("App path must be nonempty") }
+                appPath = URL(fileURLWithPath: value).standardizedFileURL.resolvingSymlinksInPath().path
             case "--output":
                 output = value
             default:
@@ -173,7 +177,7 @@ struct Snapshot {
     var counters: [pid_t: Counters] = [:]
 }
 
-func snapshots() throws -> [String: Snapshot] {
+func snapshots(appPrefix: String) throws -> [String: Snapshot] {
     let count = proc_listallpids(nil, 0)
     guard count > 0 else { throw BenchmarkError("Could not enumerate processes") }
 
@@ -184,12 +188,17 @@ func snapshots() throws -> [String: Snapshot] {
     }
 
     var result: [String: Snapshot] = [:]
+    var pathBuffer = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
     var nameBuffer = [CChar](repeating: 0, count: 64)
     for pid in pids.prefix(Int(found)) where pid > 0 {
         let length = proc_name(pid, &nameBuffer, UInt32(nameBuffer.count))
         guard length > 0 else { continue }
         let name = String(decoding: nameBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-        guard processNames.contains(name) else { continue }
+        guard processNames.contains(name),
+            proc_pidpath(pid, &pathBuffer, UInt32(pathBuffer.count)) > 0
+        else { continue }
+        let path = String(decoding: pathBuffer.prefix { $0 != 0 }, as: UTF8.self)
+        guard path.hasPrefix(appPrefix), path.hasSuffix("/" + name) else { continue }
         result[name, default: Snapshot()].pids.insert(pid)
         result[name, default: Snapshot()].counters[pid] = Counters(pid: pid)
     }
@@ -240,6 +249,7 @@ struct Run: Encodable {
     let type = "run"
     let sessionID: UUID
     let label: String
+    let appPath: String
     let run: Int
     let timestamp: Date
     let durationSeconds: Double
@@ -262,6 +272,7 @@ struct SummaryRecord: Encodable {
     let type = "summary"
     let sessionID: UUID
     let label: String
+    let appPath: String
     let timestamp: Date
     let machine: Machine
     let statistics: [Summary]
@@ -299,6 +310,7 @@ func benchmark(_ options: Options) throws {
     encoder.dateEncodingStrategy = .iso8601
     encoder.outputFormatting = [.sortedKeys]
     let machine = Machine()
+    let appPrefix = options.appPath + "/"
     let sessionStart = Date()
     let sessionID = UUID()
     let initialDisplays = Machine.displayCount()
@@ -306,6 +318,7 @@ func benchmark(_ options: Options) throws {
 
     print("\(options.label) | \(machine.model) | \(machine.chip) | macOS \(machine.macOS)")
     print("Displays \(initialDisplays.map(String.init) ?? "unknown") | \(initialPower)")
+    print("Installation \(options.appPath)")
     let runWidths = [4, 21, 12, 12, 0]
     row(["Run", "Process", "mW", "CPU %", "Status"], widths: runWidths)
     fflush(nil)
@@ -315,11 +328,11 @@ func benchmark(_ options: Options) throws {
         let displayCount = Machine.displayCount()
         let powerSource = Machine.powerSource()
         let timestamp = Date()
-        let before = try snapshots()
+        let before = try snapshots(appPrefix: appPrefix)
         let started = DispatchTime.now().uptimeNanoseconds
         Thread.sleep(forTimeInterval: options.duration)
         let duration = Double(DispatchTime.now().uptimeNanoseconds - started) / 1e9
-        let after = try snapshots()
+        let after = try snapshots(appPrefix: appPrefix)
 
         var readings = processNames.map {
             compare($0, before[$0] ?? Snapshot(), after[$0] ?? Snapshot(), timebase: timebase)
@@ -336,7 +349,7 @@ func benchmark(_ options: Options) throws {
             displayCount == initialDisplays && endDisplays == initialDisplays
             && powerSource == initialPower && endPower == initialPower
         let run = Run(
-            sessionID: sessionID, label: options.label, run: index, timestamp: timestamp,
+            sessionID: sessionID, label: options.label, appPath: options.appPath, run: index, timestamp: timestamp,
             durationSeconds: duration, machine: machine, displayCount: displayCount, powerSource: powerSource,
             endDisplayCount: endDisplays, endPowerSource: endPower,
             environmentMatchesSession: include, readings: readings
@@ -382,7 +395,9 @@ func benchmark(_ options: Options) throws {
     }
 
     try append(
-        SummaryRecord(sessionID: sessionID, label: options.label, timestamp: sessionStart, machine: machine, statistics: summaries),
+        SummaryRecord(
+            sessionID: sessionID, label: options.label, appPath: options.appPath, timestamp: sessionStart, machine: machine,
+            statistics: summaries),
         to: file, with: encoder
     )
     print("\nResults appended to \(options.output)")
