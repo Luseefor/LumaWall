@@ -31,6 +31,9 @@ final class NativeWallpaperEngine {
     /// compare equal after a topology change and skip a rewrite the new
     /// topology actually needs.
     private var lastWrittenMap: [String: String] = [:]
+    /// The layout and Lock Screen pick `lastWrittenMap` was written with. A
+    /// change to either rewrites the store even for the same wallpapers.
+    private var lastWrittenTag: String?
     /// Set when native mode turns off. Work already running stops before its
     /// next copy or store write.
     private var isDetached = false
@@ -72,7 +75,8 @@ final class NativeWallpaperEngine {
             nativeHostLog.info("apply: deployment ready id=\(entry.id, privacy: .public)")
             guard !isDetached else { throw NativeWallpaperAssignmentService.AssignmentError.nativeModeOff }
             guard !released.contains(displayID) else { throw HealthError.stoppedServing }
-            try NativeWallpaperAssignmentService.apply(entry: entry, to: [connected.cgDisplayID])
+            try NativeWallpaperAssignmentService.apply(
+                assignments: [connected.cgDisplayID: entry], stills: Self.stills(of: asset, on: [connected.cgDisplayID]))
         } catch {
             let cocoa = error as NSError
             nativeHostLog.error(
@@ -108,10 +112,9 @@ final class NativeWallpaperEngine {
         // Released while it deployed: the overlay has them now.
         all.removeAll { released.contains($0.displayID) }
         guard !all.isEmpty else { throw HealthError.stoppedServing }
+        let ids = Set(all.map(\.cgDisplayID))
         let unassigned = try NativeWallpaperAssignmentService.apply(
-            entry: entry,
-            to: Set(all.map(\.cgDisplayID))
-        )
+            assignments: Dictionary(uniqueKeysWithValues: ids.map { ($0, entry) }), stills: Self.stills(of: asset, on: ids))
         let connected = all.filter { !unassigned.contains($0.cgDisplayID) }
         let previous = Set(active.values.map(\.0))
         defer { reportSurfaces(ofAll: previous) }
@@ -147,6 +150,7 @@ final class NativeWallpaperEngine {
         reportSurfaces(ofAll: removed)
         tiers.removeAll()
         lastWrittenMap.removeAll()
+        lastWrittenTag = nil
         try await assignments.clearAll()
     }
 
@@ -220,6 +224,7 @@ final class NativeWallpaperEngine {
         let enabled = snapshot.assignments.filter(\.isEnabled)
         nativeHostLog.info("restore: \(enabled.count) enabled assignment(s), \(connected.count) display(s)")
         var map: [UInt32: NativeWallpaperDeployment.EntryInfo] = [:]
+        var stills: [UInt32: URL] = [:]
         let skipped: (DisplayAssignment) -> Bool = {
             Self.leavesToOverlay($0, onlyDefaultCrop: onlyDefaultCrop) || skipping.contains($0.displayID)
         }
@@ -255,6 +260,7 @@ final class NativeWallpaperEngine {
                 let surfaces = (targets[wallpaperID] ?? [display]).map(surface(on:))
                 let entry = try await NativeWallpaperDeployment.ensureDeployed(asset: asset, surfaces: surfaces)
                 map[display.cgDisplayID] = entry
+                stills[display.cgDisplayID] = asset.posterURL
                 active[assignment.displayID] = (asset.id, assignment.composition)
             } catch NativeWallpaperDeployment.DeploymentError.removed {
                 // Removed while it deployed: nothing to play here, and not
@@ -303,13 +309,16 @@ final class NativeWallpaperEngine {
                 stableUUID(for: cg).map { ($0, entry.id) }
             }
         )
-        if fingerprint == lastWrittenMap {
+        let tag = Self.writeTag
+        if fingerprint == lastWrittenMap, tag == lastWrittenTag {
             nativeHostLog.info("restore: assignments unchanged, skipping Index.plist rewrite + agent restart")
             return failed
         }
         guard !isDetached else { return failed }
         do {
-            let unassigned = try NativeWallpaperAssignmentService.apply(assignments: map)
+            let unassigned = try NativeWallpaperAssignmentService.apply(
+                assignments: map, stills: stills.filter { map[$0.key] != nil })
+            lastWrittenTag = tag
             lastWrittenMap = fingerprint.filter { uuid, _ in
                 !unassigned.contains { stableUUID(for: $0) == uuid }
             }
@@ -327,6 +336,17 @@ final class NativeWallpaperEngine {
             for displayID in failed { active.removeValue(forKey: displayID) }
         }
         return failed
+    }
+
+    /// What, besides the wallpapers, decides what a write puts in the store.
+    private static var writeTag: String {
+        NativeSurfaceLayout.current.tag + "|" + (NativeWallpaperAssignmentService.lockScreenOverride?.id ?? "")
+    }
+
+    /// The asset's first-frame still for each display, when it has one.
+    nonisolated static func stills(of asset: WallpaperAsset, on displayIDs: Set<UInt32>) -> [UInt32: URL] {
+        guard let poster = asset.posterURL else { return [:] }
+        return Dictionary(uniqueKeysWithValues: displayIDs.map { ($0, poster) })
     }
 
     /// `map` without the entries in `removed`, and the displays they were
@@ -381,6 +401,7 @@ final class NativeWallpaperEngine {
         let previous = Set(active.values.map(\.0))
         active.removeAll()
         lastWrittenMap.removeAll()
+        lastWrittenTag = nil
         reportSurfaces(ofAll: previous)
         // An encode can run with nothing on the desktop (a Lock Screen
         // deploy); it has to stop too.

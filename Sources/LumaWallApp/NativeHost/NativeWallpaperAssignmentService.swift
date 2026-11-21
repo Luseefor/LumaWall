@@ -81,14 +81,6 @@ struct NativeWallpaperAssignmentService {
         return (text as String).uppercased()
     }
 
-    @discardableResult
-    static func apply(
-        entry: NativeWallpaperDeployment.EntryInfo,
-        to displayIDs: Set<UInt32>
-    ) throws -> Set<UInt32> {
-        try apply(assignments: Dictionary(uniqueKeysWithValues: displayIDs.map { ($0, entry) }))
-    }
-
     /// Returns the displays the store has no entry for on the surface the
     /// layout plays on. Throws `unknownDisplay` when that is all of them.
     /// `stills` are the displays' first-frame stills, for lock-screen-only.
