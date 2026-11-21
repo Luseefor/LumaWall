@@ -9,7 +9,8 @@
   inset: 0;
   z-index: 0;
   border-radius: clamp(20px, 3vw, 36px);
-  background: #3a2c5a url("../media/wall-3.jpg") center / cover;
+  background: #3a2c5a url("../media/wall-3-800.jpg") center / cover;
+  background-image: image-set(url("../media/wall-3-800.avif") type("image/avif"), url("../media/wall-3-800.jpg") type("image/jpeg"));
 }
 
 .appwin {
@@ -108,7 +109,8 @@
   background: #16171b;
 }
 
-.preview video {
+.preview video,
+.preview .poster {
   position: absolute;
   inset: 0;
   width: 100%;

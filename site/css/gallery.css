@@ -20,7 +20,8 @@
   transition: transform 500ms var(--ease);
 }
 
-.card-video {
+.card-video,
+.card .poster {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -37,7 +38,9 @@
 }
 
 .card:hover .card-video,
-.card.is-playing .card-video {
+.card:hover .poster,
+.card.is-playing .card-video,
+.card.is-playing .poster {
   transform: scale(1.04);
 }
 

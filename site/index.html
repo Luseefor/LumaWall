@@ -41,10 +41,10 @@
   <body>
     <a class="skip" href="#main">Skip to content</a>
 
-    <header class="nav">
-      <nav class="nav-inner" aria-label="Sections">
+    <header class="nav" data-tone="light">
+      <nav class="nav-inner" aria-label="Sections" data-nav>
         <a class="brand" href="#top"><img src="icon.png" alt="" width="22" height="22" />LumaWall</a>
-        <ul>
+        <ul id="nav-menu" data-nav-menu>
           <li><a href="#gallery">Gallery</a></li>
           <li><a href="#app">App</a></li>
           <li><a href="#features">Features</a></li>
@@ -52,6 +52,9 @@
           <li><a href="#privacy">Privacy</a></li>
         </ul>
         <a class="nav-cta" href="https://github.com/Luseefor/LumaWall/releases">Follow releases</a>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="nav-menu" aria-label="Menu" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><line class="l1" x1="3" y1="6.5" x2="17" y2="6.5" /><line class="l2" x1="3" y1="13.5" x2="17" y2="13.5" /></svg>
+        </button>
       </nav>
     </header>
 
@@ -71,9 +74,10 @@
             <div class="mac">
               <div class="mac-lid">
                 <div class="mac-screen" data-cycle="5200">
-                  <video class="layer on" data-layer src="media/wall-3.mp4" poster="media/wall-3.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
-                  <video class="layer" data-layer src="media/wall-2.mp4" poster="media/wall-2.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
-                  <video class="layer" data-layer src="media/wall-1.mp4" poster="media/wall-1.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <picture class="poster"><source type="image/avif" srcset="media/wall-3-800.avif 800w, media/wall-3-1600.avif 1600w" sizes="(min-width: 1200px) 760px, 68vw" /><source type="image/webp" srcset="media/wall-3-800.webp 800w, media/wall-3-1600.webp 1600w" sizes="(min-width: 1200px) 760px, 68vw" /><img src="media/wall-3-800.jpg" srcset="media/wall-3-800.jpg 800w, media/wall-3-1600.jpg 1600w" sizes="(min-width: 1200px) 760px, 68vw" width="1600" height="900" alt="" decoding="async" fetchpriority="high" /></picture>
+                  <video class="layer on" data-layer data-src="media/wall-3.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <video class="layer" data-layer data-src="media/wall-2.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <video class="layer" data-layer data-src="media/wall-1.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
                   <div class="osbar" aria-hidden="true">
                     <img src="icon.png" alt="" width="64" height="64" />
                     <b>LumaWall</b><span>File</span><span>Edit</span><span>View</span><span>Window</span>
@@ -95,8 +99,9 @@
             <div class="display">
               <div class="display-frame">
                 <div class="display-screen" data-cycle="5200">
-                  <video class="layer on" data-layer src="media/wall-portrait.mp4" poster="media/wall-portrait.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
-                  <video class="layer" data-layer src="media/wall-2.mp4" poster="media/wall-2.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <picture class="poster"><source type="image/avif" srcset="media/wall-portrait-360.avif 360w, media/wall-portrait-720.avif 720w" sizes="(min-width: 1200px) 210px, 20vw" /><source type="image/webp" srcset="media/wall-portrait-360.webp 360w, media/wall-portrait-720.webp 720w" sizes="(min-width: 1200px) 210px, 20vw" /><img src="media/wall-portrait-360.jpg" srcset="media/wall-portrait-360.jpg 360w, media/wall-portrait-720.jpg 720w" sizes="(min-width: 1200px) 210px, 20vw" width="720" height="1280" alt="" decoding="async" /></picture>
+                  <video class="layer on" data-layer data-src="media/wall-portrait.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <video class="layer" data-layer data-src="media/wall-2.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
                   <div class="osbar" aria-hidden="true">
                     <i class="osbar-gap"></i><span class="osbar-clock">Fri 9:41</span>
                   </div>
@@ -122,37 +127,43 @@
           <ul class="cards" data-reveal>
           <li>
             <button class="card" type="button" data-card aria-pressed="false" aria-label="Play sunset surf">
-              <video class="card-video" src="media/wall-1.mp4" poster="media/wall-1.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <picture class="poster"><source type="image/avif" srcset="media/wall-1-800.avif 800w, media/wall-1-1600.avif 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><source type="image/webp" srcset="media/wall-1-800.webp 800w, media/wall-1-1600.webp 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><img src="media/wall-1-800.jpg" srcset="media/wall-1-800.jpg 800w, media/wall-1-1600.jpg 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" width="1600" height="900" alt="" decoding="async" loading="lazy" /></picture>
+              <video class="card-video" data-src="media/wall-1.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
               <span class="card-cap"><span>Sunset surf</span><span class="card-state" aria-hidden="true"></span></span>
             </button>
           </li>
           <li>
             <button class="card" type="button" data-card aria-pressed="false" aria-label="Play milky way">
-              <video class="card-video" src="media/wall-2.mp4" poster="media/wall-2.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <picture class="poster"><source type="image/avif" srcset="media/wall-2-800.avif 800w, media/wall-2-1600.avif 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><source type="image/webp" srcset="media/wall-2-800.webp 800w, media/wall-2-1600.webp 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><img src="media/wall-2-800.jpg" srcset="media/wall-2-800.jpg 800w, media/wall-2-1600.jpg 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" width="1600" height="900" alt="" decoding="async" loading="lazy" /></picture>
+              <video class="card-video" data-src="media/wall-2.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
               <span class="card-cap"><span>Milky Way</span><span class="card-state" aria-hidden="true"></span></span>
             </button>
           </li>
           <li>
             <button class="card" type="button" data-card aria-pressed="false" aria-label="Play woodland waterfall">
-              <video class="card-video" src="media/wall-3.mp4" poster="media/wall-3.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <picture class="poster"><source type="image/avif" srcset="media/wall-3-800.avif 800w, media/wall-3-1600.avif 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><source type="image/webp" srcset="media/wall-3-800.webp 800w, media/wall-3-1600.webp 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><img src="media/wall-3-800.jpg" srcset="media/wall-3-800.jpg 800w, media/wall-3-1600.jpg 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" width="1600" height="900" alt="" decoding="async" loading="lazy" /></picture>
+              <video class="card-video" data-src="media/wall-3.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
               <span class="card-cap"><span>Woodland waterfall</span><span class="card-state" aria-hidden="true"></span></span>
             </button>
           </li>
           <li>
             <button class="card" type="button" data-card aria-pressed="false" aria-label="Play city lights from above">
-              <video class="card-video" src="media/wall-4.mp4" poster="media/wall-4.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <picture class="poster"><source type="image/avif" srcset="media/wall-4-800.avif 800w, media/wall-4-1600.avif 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><source type="image/webp" srcset="media/wall-4-800.webp 800w, media/wall-4-1600.webp 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><img src="media/wall-4-800.jpg" srcset="media/wall-4-800.jpg 800w, media/wall-4-1600.jpg 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" width="1600" height="900" alt="" decoding="async" loading="lazy" /></picture>
+              <video class="card-video" data-src="media/wall-4.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
               <span class="card-cap"><span>City lights from above</span><span class="card-state" aria-hidden="true"></span></span>
             </button>
           </li>
           <li>
             <button class="card" type="button" data-card aria-pressed="false" aria-label="Play blue ink">
-              <video class="card-video" src="media/wall-5.mp4" poster="media/wall-5.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <picture class="poster"><source type="image/avif" srcset="media/wall-5-800.avif 800w, media/wall-5-1600.avif 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><source type="image/webp" srcset="media/wall-5-800.webp 800w, media/wall-5-1600.webp 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><img src="media/wall-5-800.jpg" srcset="media/wall-5-800.jpg 800w, media/wall-5-1600.jpg 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" width="1600" height="900" alt="" decoding="async" loading="lazy" /></picture>
+              <video class="card-video" data-src="media/wall-5.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
               <span class="card-cap"><span>Blue ink</span><span class="card-state" aria-hidden="true"></span></span>
             </button>
           </li>
           <li>
             <button class="card" type="button" data-card aria-pressed="false" aria-label="Play Sahara dunes">
-              <video class="card-video" src="media/wall-6.mp4" poster="media/wall-6.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <picture class="poster"><source type="image/avif" srcset="media/wall-6-800.avif 800w, media/wall-6-1600.avif 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><source type="image/webp" srcset="media/wall-6-800.webp 800w, media/wall-6-1600.webp 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" /><img src="media/wall-6-800.jpg" srcset="media/wall-6-800.jpg 800w, media/wall-6-1600.jpg 1600w" sizes="(min-width: 1200px) 380px, (min-width: 901px) 31vw, (min-width: 601px) 45vw, 82vw" width="1600" height="900" alt="" decoding="async" loading="lazy" /></picture>
+              <video class="card-video" data-src="media/wall-6.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
               <span class="card-cap"><span>Sahara dunes</span><span class="card-state" aria-hidden="true"></span></span>
             </button>
           </li>
@@ -180,7 +191,8 @@
                 </ul>
                 <div class="main">
                   <div class="preview">
-                    <video data-autoplay src="media/wall-1.mp4" poster="media/wall-1.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                    <picture class="poster"><source type="image/avif" srcset="media/wall-1-800.avif 800w, media/wall-1-1600.avif 1600w" sizes="(min-width: 900px) 520px, 90vw" /><source type="image/webp" srcset="media/wall-1-800.webp 800w, media/wall-1-1600.webp 1600w" sizes="(min-width: 900px) 520px, 90vw" /><img src="media/wall-1-800.jpg" srcset="media/wall-1-800.jpg 800w, media/wall-1-1600.jpg 1600w" sizes="(min-width: 900px) 520px, 90vw" width="1600" height="900" alt="" decoding="async" loading="lazy" /></picture>
+                    <video data-autoplay data-src="media/wall-1.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
                     <div class="preview-meta">
                       <span class="eyebrow">Now playing</span>
                       <strong>Sunset surf</strong>
@@ -189,12 +201,12 @@
                   </div>
                   <h3 class="main-title">Library</h3>
                   <ul class="thumbs">
-                  <li><img src="media/wall-2.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Milky Way</span></li>
-                  <li><img src="media/wall-3.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Woodland waterfall</span></li>
-                  <li><img src="media/wall-4.jpg" alt="" loading="lazy" width="1600" height="900" /><span>City lights from above</span></li>
-                  <li><img src="media/wall-5.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Blue ink</span></li>
-                  <li><img src="media/wall-6.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Sahara dunes</span></li>
-                  <li><img src="media/wall-1.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Sunset surf</span></li>
+                  <li><img src="media/wall-2-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Milky Way</span></li>
+                  <li><img src="media/wall-3-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Woodland waterfall</span></li>
+                  <li><img src="media/wall-4-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>City lights from above</span></li>
+                  <li><img src="media/wall-5-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Blue ink</span></li>
+                  <li><img src="media/wall-6-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Sahara dunes</span></li>
+                  <li><img src="media/wall-1-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Sunset surf</span></li>
                   </ul>
                 </div>
               </div>
@@ -211,7 +223,7 @@
           </header>
           <ul class="bento">
             <li class="tile t-safe" data-reveal>
-              <img class="tile-bg" src="media/wall-2.jpg" alt="" loading="lazy" width="1600" height="900" />
+              <img class="tile-bg" src="media/wall-2-800.jpg" alt="" loading="lazy" width="1600" height="900" />
               <div class="layers" aria-hidden="true">
                 <span class="layer-card l1">Muted video overlay</span>
                 <span class="layer-card l2">Still poster</span>
@@ -242,8 +254,8 @@
             </li>
             <li class="tile t-displays" data-reveal>
               <div class="mini-displays" aria-hidden="true">
-                <span class="md wide"><img src="media/wall-4.jpg" alt="" loading="lazy" width="1600" height="900" /></span>
-                <span class="md tall"><img src="media/wall-portrait.jpg" alt="" loading="lazy" width="720" height="1280" /></span>
+                <span class="md wide"><img src="media/wall-4-800.jpg" alt="" loading="lazy" width="1600" height="900" /></span>
+                <span class="md tall"><img src="media/wall-portrait-360.jpg" alt="" loading="lazy" width="720" height="1280" /></span>
               </div>
               <div class="tile-text">
                 <h3>Every display</h3>
@@ -252,8 +264,8 @@
             </li>
             <li class="tile t-time dark" data-reveal>
               <div class="day-night" aria-hidden="true">
-                <span class="dn day"><img src="media/wall-1.jpg" alt="" loading="lazy" width="1600" height="900" /><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.6" /><path d="M10 2v2.4M10 15.6V18M2 10h2.4M15.6 10H18M4.3 4.3 6 6M14 14l1.7 1.7M15.7 4.3 14 6M6 14l-1.7 1.7" /></svg></span>
-                <span class="dn night"><img src="media/wall-3.jpg" alt="" loading="lazy" width="1600" height="900" /><svg viewBox="0 0 20 20"><path d="M16.5 12.2A7 7 0 0 1 7.8 3.5a7 7 0 1 0 8.7 8.7z" /></svg></span>
+                <span class="dn day"><img src="media/wall-1-800.jpg" alt="" loading="lazy" width="1600" height="900" /><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.6" /><path d="M10 2v2.4M10 15.6V18M2 10h2.4M15.6 10H18M4.3 4.3 6 6M14 14l1.7 1.7M15.7 4.3 14 6M6 14l-1.7 1.7" /></svg></span>
+                <span class="dn night"><img src="media/wall-3-800.jpg" alt="" loading="lazy" width="1600" height="900" /><svg viewBox="0 0 20 20"><path d="M16.5 12.2A7 7 0 0 1 7.8 3.5a7 7 0 1 0 8.7 8.7z" /></svg></span>
               </div>
               <div class="tile-text">
                 <h3>Playlists and schedules</h3>
