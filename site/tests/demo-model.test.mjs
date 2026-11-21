@@ -104,3 +104,12 @@ test("ignores events it does not know", () => {
   const state = initialState();
   assert.equal(reduce(state, { type: "nope" }), state);
 });
+
+test("a covered wallpaper skips the lock ramp because nobody sees it", () => {
+  const covered = after({ type: "coverage", fraction: 1 }, { type: "lock", on: true });
+  const uncovered = reduce(covered, { type: "coverage", fraction: 0 });
+  assert.equal(readout(uncovered).status, "Paused: locked");
+
+  const unlocked = reduce(covered, { type: "lock", on: false });
+  assert.equal(readout(reduce(unlocked, { type: "coverage", fraction: 0 })).status, "Playing");
+});

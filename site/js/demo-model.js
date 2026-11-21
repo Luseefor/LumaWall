@@ -37,8 +37,12 @@ export function reduce(state, event) {
     }
     case "battery":
       return { ...state, battery: Boolean(event.on) };
-    case "lock":
-      return { ...state, locked: Boolean(event.on) };
+    case "lock": {
+      const locked = Boolean(event.on);
+      // Nobody sees a covered wallpaper ease, so it jumps to the end.
+      const progress = state.covered ? (locked ? 0 : 1) : state.progress;
+      return { ...state, locked, progress };
+    }
     case "tick": {
       const step = Math.max(0, event.seconds) / RAMP_SECONDS;
       const target = state.locked ? 0 : 1;
