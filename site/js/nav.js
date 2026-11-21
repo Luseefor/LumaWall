@@ -5,6 +5,17 @@ export function toneAt(y, darkRanges) {
   return darkRanges.some(({ top, bottom }) => y >= top && y < bottom) ? "dark" : "light";
 }
 
+/**
+ * Where focus should go when the window crosses the menu breakpoint, so it is
+ * never left on something that just stopped being shown. `active` is where it
+ * is now: "menu" (a link or the theme switch in the list), "toggle" or "other".
+ */
+export function focusAfterBreakpoint({ mobile, active }) {
+  if (mobile && active === "menu") return "toggle"; // the list is about to be hidden
+  if (!mobile && active === "toggle") return "menu"; // the button is about to disappear
+  return null;
+}
+
 /** The mobile menu: a button that opens the section links as a dropdown. */
 function setUpMenu(header) {
   const nav = header.querySelector("[data-nav]");
@@ -59,9 +70,14 @@ function setUpMenu(header) {
   });
 
   const sync = () => {
+    const active = menu.contains(document.activeElement) ? "menu" : document.activeElement === toggle ? "toggle" : "other";
+    const move = focusAfterBreakpoint({ mobile: MOBILE.matches, active });
     // Wide screens show the links in the bar; narrow ones hide them until asked.
     if (!MOBILE.matches) set(false);
     else menu.hidden = !isOpen();
+    // Hand focus over once the layout has changed, but only if it would otherwise be dropped.
+    if (move === "toggle" && !isOpen()) toggle.focus();
+    else if (move === "menu") menu.querySelector("a")?.focus();
   };
   MOBILE.addEventListener("change", sync);
   sync();
