@@ -73,4 +73,36 @@ final class NativeModeGateTests: XCTestCase {
         XCTAssertFalse(engine.hasNativeHost)
         XCTAssertFalse(setting.isEnabled)
     }
+
+    func testHealthFallbackDoesNothingWithoutANativeHost() async throws {
+        let setting = NativeModeSetting(defaults: defaults) { false }
+        let engine = WallpaperEngine(
+            displays: DisplayCoordinator(),
+            assignments: try AssignmentStore(rootURL: root),
+            nativeSetting: setting
+        )
+        var reported = false
+        engine.onNativeFallback = { _ in reported = true }
+        XCTAssertTrue(engine.nativeServedDisplayIDs.isEmpty)
+        await engine.fallBackUnserved([DisplayID(rawValue: "display-1")])
+        XCTAssertFalse(reported)
+        XCTAssertTrue(engine.nativeFallbackDisplayIDs.isEmpty)
+    }
+
+    // MARK: Failure notice
+
+    func testNoticeNamesTheDisplayAndSafeMode() {
+        let notice = NativeFailureNotice(displayNames: ["Studio Display"])
+        XCTAssertEqual(notice.title, "Native mode stopped working on Studio Display")
+        XCTAssertTrue(notice.message.hasPrefix("It moved to Safe mode"))
+        XCTAssertTrue(notice.message.contains("Restore Original Wallpaper"))
+    }
+
+    func testNoticeListsSeveralDisplays() {
+        XCTAssertEqual(
+            NativeFailureNotice.title(for: ["Left", "Right"]), "Native mode stopped working on Left and Right")
+        XCTAssertEqual(
+            NativeFailureNotice.title(for: ["A", "B", "C"]), "Native mode stopped working on A, B and C")
+        XCTAssertTrue(NativeFailureNotice.message(for: ["A", "B"]).hasPrefix("They moved to Safe mode"))
+    }
 }

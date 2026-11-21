@@ -53,6 +53,25 @@ final class WallpaperEngine {
 
     var hasNativeHost: Bool { native != nil }
 
+    /// Displays the system host plays right now: not the overlay's, and not
+    /// fallen back. The extension health check watches these.
+    var nativeServedDisplayIDs: Set<DisplayID> {
+        guard mode == .native, let native else { return [] }
+        return native.activeDisplayIDs.subtracting(overlay.activeDisplayIDs).subtracting(nativeFallbackDisplayIDs)
+    }
+
+    /// The extension stopped serving these displays (ADR 0003): Safe mode
+    /// takes them until native mode is turned off and on again.
+    func fallBackUnserved(_ displayIDs: Set<DisplayID>) async {
+        guard mode == .native, let native else { return }
+        let added = displayIDs.intersection(nativeServedDisplayIDs)
+        guard !added.isEmpty else { return }
+        native.release(added)
+        fallBack(added, after: NativeWallpaperEngine.HealthError.stoppedServing)
+        await overlay.restore(
+            using: Array(libraryByID.values), nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
+    }
+
     /// Turns native mode on (after the user confirmed the warning) or off,
     /// and moves playback to the new host.
     func setNativeMode(enabled: Bool, library: [WallpaperAsset]) async {

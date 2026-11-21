@@ -45,7 +45,9 @@ struct NativeModeControls: View {
                 Divider().overlay(Theme.line)
                 row(
                     title: "Restore original wallpaper",
-                    detail: "Puts back the wallpaper you had before LumaWall set it.",
+                    detail: enabled
+                        ? "Turns native mode off and puts back the wallpaper you had before LumaWall set it."
+                        : "Puts back the wallpaper you had before LumaWall set it.",
                     symbol: "arrow.uturn.backward"
                 ) {
                     GhostButton("Restore", symbol: "arrow.uturn.backward", action: restore)
@@ -67,8 +69,8 @@ struct NativeModeControls: View {
         }
         switch fallbackDisplayCount {
         case 0: return "On. Wallpapers play through the macOS wallpaper system."
-        case 1: return "On. One display uses the overlay after native mode failed there."
-        case let count: return "On. \(count) displays use the overlay after native mode failed there."
+        case 1: return "On. One display uses Safe mode after native mode failed there."
+        case let count: return "On. \(count) displays use Safe mode after native mode failed there."
         }
     }
 

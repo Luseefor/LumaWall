@@ -338,6 +338,29 @@ final class NativeWallpaperEngine {
         Set(assignments.filter { $0.isEnabled && leavesToOverlay($0, onlyDefaultCrop: onlyDefaultCrop) }.map(\.displayID))
     }
 
+    enum HealthError: LocalizedError {
+        case stoppedServing
+
+        var errorDescription: String? {
+            "The macOS wallpaper system stopped showing LumaWall's wallpaper there."
+        }
+    }
+
+    /// Stops tracking `displayIDs` as native, for the overlay to take them.
+    /// Their stored assignments stay. Dropping them from the last written map
+    /// keeps the next restore, which skips them, from rewriting the store
+    /// for the other displays.
+    func release(_ displayIDs: Set<DisplayID>) {
+        let previous = Set(active.values.map(\.0))
+        for id in displayIDs {
+            active.removeValue(forKey: id)
+            if let cg = displays.display(id: id)?.cgDisplayID, let uuid = stableUUID(for: cg) {
+                lastWrittenMap.removeValue(forKey: uuid)
+            }
+        }
+        reportSurfaces(ofAll: previous)
+    }
+
     /// Forgets what plays natively without touching stored assignments, so
     /// the copy queue drops this host's jobs when native mode turns off.
     func detach() {

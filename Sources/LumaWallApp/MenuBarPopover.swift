@@ -36,6 +36,15 @@ struct MenuBarPopover: View {
         VStack(spacing: 10) {
             headerSection
 
+            if let notice = model.nativeFailureNotice {
+                NativeFailureBanner(
+                    notice: notice,
+                    compact: true,
+                    restore: model.restoreOriginalWallpaper,
+                    dismiss: model.dismissNativeFailureNotice
+                )
+            }
+
             if slides.isEmpty {
                 emptyStateSection
             } else {
@@ -358,6 +367,15 @@ struct MenuBarPopover: View {
                     Image(systemName: "forward.end.fill")
                 }
                 .buttonStyle(MenuBarRoundIconButtonStyle())
+            }
+
+            if model.canRestoreOriginalWallpaper {
+                Button(action: model.restoreOriginalWallpaper) {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .buttonStyle(MenuBarRoundIconButtonStyle())
+                .help("Restore original wallpaper")
+                .accessibilityLabel("Restore original wallpaper")
             }
 
             Button(action: model.reapplyActive) {

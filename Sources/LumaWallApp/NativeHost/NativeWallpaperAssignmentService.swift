@@ -374,7 +374,12 @@ struct LiveSystemWallpaperFiles: SystemWallpaperFiles {
         try data.write(to: Self.backupURL, options: .atomic)
     }
 
+    /// Bumped on every restart. The extension health check (ADR 0003)
+    /// waits out the re-acquire that follows.
+    static var restartCount = 0
+
     func restartWallpaperAgent() {
+        Self.restartCount += 1
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
         process.arguments = ["WallpaperAgent"]

@@ -85,6 +85,11 @@ final class AppModel {
     var lockAutomationExpanded = true
     var favoriteIDs: Set<WallpaperID> = []
     var activeByDisplay: [DisplayID: WallpaperID] = [:]
+    /// Shown as a banner in the main window and the menu bar after native
+    /// mode failed on a display.
+    var nativeFailureNotice: NativeFailureNotice?
+    @ObservationIgnored var nativeHealth: NativeHealthMonitor?
+    @ObservationIgnored let nativeFailureNotifier = NativeFailureNotifier()
 
     let store: LibraryStore
     let importer: MediaImporter
