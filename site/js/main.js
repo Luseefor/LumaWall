@@ -1,8 +1,28 @@
-import { setUpDemo } from "./demo.js";
-import { mountEnergyChart } from "./energy-chart.js";
+import { setUpNav } from "./nav.js";
 import { setUpVideos } from "./videos.js";
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+/** Run once the page has loaded and the browser has nothing better to do. */
+function whenIdle(task) {
+  const run = () => (window.requestIdleCallback ? requestIdleCallback(task, { timeout: 2500 }) : setTimeout(task, 200));
+  if (document.readyState === "complete") run();
+  else addEventListener("load", run, { once: true });
+}
+
+/** Run `task` when `element` is near the viewport, and only once. */
+function whenNear(element, task, margin = "600px") {
+  if (!element) return;
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      task(element);
+    },
+    { rootMargin: margin },
+  );
+  observer.observe(element);
+}
 
 // Fade sections in as they scroll into view. Only when motion is welcome, and
 // only for what starts below the fold, so nothing is ever left hidden.
@@ -26,11 +46,22 @@ function setUpReveal() {
   }
 }
 
-setUpVideos(reducedMotion);
+setUpNav();
 setUpReveal();
 
-const demo = document.querySelector("[data-demo]");
-if (demo) setUpDemo(demo, reducedMotion);
+// Clips start after load. With Data Saver on, the posters stay.
+if (navigator.connection?.saveData) {
+  document.querySelector("[data-hero-pause]")?.setAttribute("hidden", "");
+} else {
+  whenIdle(() => setUpVideos(reducedMotion));
+}
 
-const energy = document.querySelector("[data-energy-chart]");
-if (energy) mountEnergyChart(energy);
+// The demo draws with WebGL and the chart builds an SVG; neither is needed until the reader gets near.
+whenNear(document.querySelector("[data-demo]"), async (demo) => {
+  const { setUpDemo } = await import("./demo.js");
+  setUpDemo(demo, reducedMotion);
+});
+whenNear(document.querySelector("[data-energy-chart]"), async (chart) => {
+  const { mountEnergyChart } = await import("./energy-chart.js");
+  mountEnergyChart(chart);
+});
