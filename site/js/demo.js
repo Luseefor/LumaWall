@@ -87,6 +87,8 @@ export function setUpDemo(root, reducedMotion) {
     stillNote.hidden = live();
     if (r.running && inView && !document.hidden && live()) loop.start();
     else loop.stop();
+    // Off screen or hidden while "playing": nothing is drawing, so say 0.
+    if (live() && r.running && !loop.running) showFps(0);
   }
 
   function place() {

@@ -139,3 +139,16 @@ test("a stall does not cause a burst of frames", () => {
   assert.equal(pacer.accept(2000), true);
   assert.equal(pacer.accept(2007), false);
 });
+
+test("short stalls on a fast display do not cause a burst", () => {
+  for (const cap of [60, 30]) {
+    const pacer = createPacer(cap);
+    const step = 1000 / 144;
+    let t = step;
+    pacer.accept(t);
+    t += (1000 / cap) * 1.9; // a stall of nearly two intervals
+    pacer.accept(t);
+    t += step;
+    assert.equal(pacer.accept(t), false, `cap ${cap}`);
+  }
+});

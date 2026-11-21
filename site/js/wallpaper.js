@@ -187,13 +187,17 @@ export function createPacer(cap = 60) {
         return true;
       }
       const interval = 1000 / cap;
-      bank += now - last;
+      const gap = now - last;
       last = now;
+      // A stall is not owed back as extra frames: draw once and start over.
+      if (gap > interval * 1.5) {
+        bank = 0;
+        return true;
+      }
+      bank += gap;
       // 1.5 ms of slack keeps a 60 Hz display on a 60 fps cap despite jitter.
       if (bank < interval - 1.5) return false;
-      // Keep the remainder, but drop it after a stall so no burst follows.
       bank -= interval;
-      if (bank > interval) bank = 0;
       return true;
     },
   };
