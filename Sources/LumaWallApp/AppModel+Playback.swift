@@ -225,6 +225,7 @@ extension AppModel {
         let coveredDisplays = occlusionLatch.covered
         let fullscreenDisplays = occlusionLatch.fullscreen
         let allowLiveOnLock = engine.mode == .native
+        var decisions: [DisplayID: (tier: PlaybackTier, reason: PlaybackStatusReason?)] = [:]
         for display in displays {
             let obscured =
                 (pauseWhenObscured && coveredDisplays.contains(display.displayID))
@@ -244,8 +245,11 @@ extension AppModel {
                 gameModeActive: gameModeMonitor.isActive,
                 reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             )
-            engine.apply(tier: PlaybackPolicy.resolve(conditions), to: display.displayID)
+            let decision = PlaybackPolicy.decide(conditions)
+            decisions[display.displayID] = decision
+            engine.apply(tier: decision.tier, to: display.displayID)
         }
+        noteOverlayPlaybackStatus(decisions)
         if engine.mode == .native {
             let pausedCG = Set(pausedDisplayIDs.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })
             let coveredCG = Set(coveredDisplays.compactMap { id in displays.first(where: { $0.displayID == id })?.cgDisplayID })

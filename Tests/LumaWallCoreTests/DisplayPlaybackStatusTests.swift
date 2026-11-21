@@ -60,4 +60,15 @@ struct DisplayPlaybackStatusTests {
     @Test func everyReasonHasAPhrase() {
         for reason in PlaybackStatusReason.allCases { #expect(!reason.phrase.isEmpty) }
     }
+
+    @Test func overlayTiersMapToStateAndEngine() {
+        let full = DisplayPlaybackStatus(displayID: 1, overlayTier: .full, reason: nil)
+        #expect(full.state == .playing && full.engine == .overlay && full.copy == .full)
+        let battery = DisplayPlaybackStatus(displayID: 1, overlayTier: .reduced, reason: .batteryTier)
+        #expect(battery.state == .playing && battery.copy == nil)
+        #expect(battery.summary == "Playing · on battery · Safe mode")
+        let still = DisplayPlaybackStatus(displayID: 1, overlayTier: .staticFrame, reason: .batteryStatic)
+        #expect(still.state == .paused)
+        #expect(DisplayPlaybackStatus(displayID: 1, overlayTier: .paused, reason: .locked).state == .paused)
+    }
 }

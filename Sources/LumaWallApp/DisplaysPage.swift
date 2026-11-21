@@ -125,6 +125,10 @@ struct DisplayCard: View {
                         .font(.subheadline)
                         .foregroundStyle(asset == nil ? Theme.textDim : .primary)
                         .lineLimit(1)
+                    if let status = model.playbackStatus(for: display) {
+                        PlaybackStatusLine(status: status, displayName: display.name)
+                            .padding(.top, 2)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -142,5 +146,6 @@ struct DisplayCard: View {
         .padding(18)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.line))
+        .onAppear { model.refreshNativePlaybackStatus() }
     }
 }
