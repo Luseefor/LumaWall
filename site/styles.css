@@ -745,3 +745,17 @@ a {
 .hud-dot:not(.on) {
   border-radius: 1px;
 }
+
+/* The dot's shape and colour also show the state; say it in words too. */
+.hud-state {
+  color: inherit;
+  font-weight: 500;
+}
+
+@media (max-width: 480px) {
+  /* No room on phones; the dot's shape still differs between states. */
+  .hud-state,
+  .hud-note {
+    display: none;
+  }
+}
