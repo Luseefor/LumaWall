@@ -1,0 +1,303 @@
+.hero {
+  padding: calc(var(--nav) + clamp(32px, 5vw, 72px)) 0 clamp(56px, 7vw, 96px);
+  background: var(--bg);
+  text-align: center;
+  overflow: hidden;
+}
+
+.hero-copy {
+  width: var(--page);
+  margin: 0 auto;
+}
+
+.hero h1 {
+  max-width: 14em;
+  margin: 0 auto;
+  font-size: var(--text-hero);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.038em;
+  text-wrap: balance;
+}
+
+.hero .lede {
+  max-width: 40rem;
+  margin: 22px auto 0;
+  color: var(--ink-2);
+  font-size: var(--text-lede);
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+
+.hero .actions {
+  justify-content: center;
+}
+
+/* The desk: a MacBook and a portrait display, drawn with CSS and sized in container units. */
+
+.rig-wrap {
+  width: min(1120px, 100% - 2 * var(--gutter) + 40px);
+  margin: clamp(32px, 4vw, 52px) auto 0;
+}
+
+.rig {
+  position: relative;
+  aspect-ratio: 2 / 1;
+  container-type: inline-size;
+  isolation: isolate;
+}
+
+.rig::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 1cqw;
+  z-index: -1;
+  height: 3.4cqw;
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.3), transparent);
+  filter: blur(6px);
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  pointer-events: none;
+}
+
+.layer.on {
+  opacity: 1;
+}
+
+.mac {
+  position: absolute;
+  bottom: 2cqw;
+  left: 3cqw;
+  width: 68cqw;
+}
+
+.mac-lid {
+  padding: 0.9cqw 0.9cqw 0.5cqw;
+  border-radius: 2cqw 2cqw 0.3cqw 0.3cqw;
+  background: #0a0a0c;
+  box-shadow:
+    inset 0 0 0 0.14cqw #55565c,
+    0 1cqw 3cqw rgb(0 0 0 / 0.18);
+}
+
+.mac-screen,
+.display-screen {
+  position: relative;
+  overflow: hidden;
+  background: #16171b;
+  container-type: inline-size;
+}
+
+.mac-screen {
+  aspect-ratio: 16 / 10;
+  border-radius: 1.2cqw 1.2cqw 0 0;
+}
+
+.mac-screen::after,
+.display-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, rgb(255 255 255 / 0.14), transparent 34%);
+  pointer-events: none;
+}
+
+.mac-base {
+  position: relative;
+  width: calc(100% + 6cqw);
+  height: 1.5cqw;
+  margin-left: -3cqw;
+  border-radius: 0 0 2.4cqw 2.4cqw / 0 0 1.4cqw 1.4cqw;
+  background: linear-gradient(#e6e7ea, #b9bac0);
+  box-shadow: 0 0.4cqw 1.4cqw rgb(0 0 0 / 0.22);
+}
+
+.mac-base::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 11cqw;
+  height: 0.55cqw;
+  border-radius: 0 0 1cqw 1cqw;
+  background: #a2a3a9;
+  transform: translateX(-50%);
+}
+
+/* The menu bar and Dock are sized from their own screen. */
+
+.osbar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 2.2cqw;
+  height: var(--bar, 3cqw);
+  padding: 0 1.6cqw;
+  background: rgb(255 255 255 / 0.2);
+  color: #fff;
+  font-size: calc(var(--bar, 3cqw) * 0.46);
+  line-height: 1;
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(12px) saturate(1.5);
+  backdrop-filter: blur(12px) saturate(1.5);
+  text-shadow: 0 0 3px rgb(0 0 0 / 0.35);
+}
+
+.osbar img {
+  width: calc(var(--bar, 3cqw) * 0.62);
+  height: calc(var(--bar, 3cqw) * 0.62);
+  margin-right: -1cqw;
+  border-radius: 22%;
+}
+
+.osbar b {
+  font-weight: 700;
+}
+
+.osbar-gap {
+  flex: 1;
+}
+
+.notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 2;
+  width: 10cqw;
+  height: 3cqw;
+  border-radius: 0 0 1.3cqw 1.3cqw;
+  background: #000;
+  transform: translateX(-50%);
+}
+
+.dock {
+  position: absolute;
+  bottom: 1.3cqw;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  gap: 0.7cqw;
+  padding: 0.7cqw;
+  border: 0.1cqw solid rgb(255 255 255 / 0.32);
+  border-radius: 2cqw;
+  background: rgb(255 255 255 / 0.24);
+  transform: translateX(-50%);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  backdrop-filter: blur(16px) saturate(1.6);
+}
+
+.dock i,
+.dock img {
+  display: block;
+  width: 4.6cqw;
+  height: 4.6cqw;
+  border-radius: 1.2cqw;
+  background: linear-gradient(var(--a), var(--b));
+  box-shadow: inset 0 0 0 0.08cqw rgb(255 255 255 / 0.28);
+}
+
+.dock img {
+  background: none;
+  box-shadow: none;
+}
+
+/* The portrait display. */
+
+.display {
+  position: absolute;
+  right: 0;
+  bottom: 2cqw;
+  width: 22cqw;
+}
+
+.display-frame {
+  padding: 0.7cqw;
+  border-radius: 1.5cqw;
+  background: #0a0a0c;
+  box-shadow:
+    inset 0 0 0 0.14cqw #55565c,
+    0 1cqw 3cqw rgb(0 0 0 / 0.18);
+}
+
+.display-screen {
+  --bar: 7cqw;
+  aspect-ratio: 9 / 16;
+  border-radius: 0.9cqw;
+}
+
+.display-screen .osbar {
+  padding: 0 3cqw;
+}
+
+.display-neck {
+  width: 4cqw;
+  height: 5cqw;
+  margin: -0.2cqw auto 0;
+  background: linear-gradient(90deg, #b3b4ba, #e9eaed 45%, #a9aab0);
+  clip-path: polygon(8% 0, 92% 0, 100% 100%, 0 100%);
+}
+
+.display-foot {
+  width: 11cqw;
+  height: 0.9cqw;
+  margin: 0 auto;
+  border-radius: 1cqw 1cqw 0.4cqw 0.4cqw;
+  background: linear-gradient(#e6e7ea, #adaeb4);
+  box-shadow: 0 0.4cqw 1cqw rgb(0 0 0 / 0.2);
+}
+
+@container (max-width: 380px) {
+  .osbar span,
+  .osbar b,
+  .osbar img {
+    display: none;
+  }
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-top: 24px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.06);
+  color: var(--ink);
+  font: 500 0.9375rem / 1 var(--font);
+  cursor: pointer;
+  transition: background-color 160ms ease-out;
+}
+
+.pill:hover {
+  background: rgb(0 0 0 / 0.1);
+}
+
+.pill[hidden] {
+  display: none;
+}
+
+.pill[aria-pressed="true"] svg path {
+  d: path("M5 3l8 5-8 5z");
+}
+
+.rig-wrap {
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .rig-wrap {
+    width: calc(100% - 16px);
+  }
+}

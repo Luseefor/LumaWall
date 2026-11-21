@@ -1,0 +1,251 @@
+
+.demo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.stage {
+  position: relative;
+  min-height: 340px;
+  overflow: hidden;
+  border-radius: 24px;
+  background: #050507;
+  isolation: isolate;
+}
+
+.wall {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Shown when WebGL is missing: a still version of the scene. */
+.no-webgl {
+  background:
+    radial-gradient(60% 40% at 30% 55%, rgb(51 209 194 / 0.35), transparent 70%),
+    radial-gradient(50% 35% at 70% 40%, rgb(80 90 230 / 0.3), transparent 70%),
+    linear-gradient(#0b0c12, #050507);
+}
+
+.no-webgl > canvas {
+  visibility: hidden;
+}
+
+.window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 106%;
+  height: 106%;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 12px;
+  background: rgb(24 25 29 / 0.82);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.55);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
+  backdrop-filter: blur(30px) saturate(1.5);
+}
+
+.window.dragging {
+  cursor: grabbing;
+}
+
+.stage:has(.window:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -3px;
+}
+
+.window:focus-visible {
+  outline: none;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  color: #c4c4ca;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.window-body {
+  padding: 16px 24px;
+  color: #c4c4ca;
+  font-size: 0.875rem;
+  line-height: 2;
+}
+
+.window-body li::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 12px;
+  border: 1.5px solid #8b8f99;
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+
+.panel {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  padding: 24px;
+  border-radius: 24px;
+  background: #151518;
+}
+
+.readouts {
+  display: grid;
+  gap: 14px;
+}
+
+.readouts dt {
+  color: var(--ink-2);
+  font-size: 0.875rem;
+}
+
+.readouts dd {
+  font-size: clamp(2rem, 1.6rem + 1.2vw, 2.5rem);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.readouts .unit {
+  color: var(--ink-2);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.status {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.controls {
+  display: grid;
+  gap: 8px;
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switch::after {
+  content: "";
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 13px 13px, #fff 10px, transparent 10.5px) no-repeat,
+    rgb(255 255 255 / 0.2);
+  transition:
+    background-position 240ms var(--ease),
+    background-color 240ms var(--ease);
+}
+
+.switch[aria-checked="true"]::after {
+  background-color: #1fb5a6;
+  background-position: 18px 0, 0 0;
+}
+
+.hint {
+  color: var(--ink-2);
+  font-size: 0.875rem;
+}
+
+/* The energy chart. */
+
+.energy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: clamp(24px, 5vw, 64px);
+  align-items: center;
+  margin-top: clamp(40px, 6vw, 72px);
+  --lw-muted: #a8a8ae;
+}
+
+.energy h3 {
+  font-size: clamp(1.75rem, 1.3rem + 1.6vw, 2.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+.energy p {
+  margin-top: 12px;
+  color: var(--ink-2);
+}
+
+@media (max-width: 960px) {
+  .stage {
+    aspect-ratio: 4 / 3;
+    min-height: 0;
+  }
+
+  .demo,
+  .energy {
+    grid-template-columns: 1fr;
+  }
+
+  .readouts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .readouts {
+    grid-template-columns: 1fr;
+  }
+
+  .window-body {
+    padding: 12px 16px;
+    line-height: 1.8;
+  }
+
+  .titlebar {
+    height: 30px;
+  }
+
+  .lights i {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+@media (forced-colors: active) {
+  .switch[aria-checked="true"]::after {
+    background-color: Highlight;
+  }
+}
