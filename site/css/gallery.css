@@ -94,7 +94,7 @@
     display: flex;
     gap: 12px;
     margin-inline: calc(-1 * var(--gutter));
-    padding: 0 var(--gutter);
+    padding: 6px var(--gutter);
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     scroll-padding-inline: var(--gutter);

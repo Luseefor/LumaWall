@@ -206,6 +206,36 @@
   box-shadow: inset 0 0 0 0.08cqw rgb(255 255 255 / 0.28);
 }
 
+.dock :nth-child(1) {
+  --a: #6fd3ff;
+  --b: #2f7dff;
+}
+
+.dock :nth-child(2) {
+  --a: #8af0a8;
+  --b: #1ea34f;
+}
+
+.dock :nth-child(3) {
+  --a: #ffd36f;
+  --b: #ff8a1f;
+}
+
+.dock :nth-child(5) {
+  --a: #ff9ab8;
+  --b: #e23b6c;
+}
+
+.dock :nth-child(6) {
+  --a: #c9b6ff;
+  --b: #7a4dff;
+}
+
+.dock :nth-child(7) {
+  --a: #e4e6ea;
+  --b: #9aa0aa;
+}
+
 .dock img {
   background: none;
   box-shadow: none;
