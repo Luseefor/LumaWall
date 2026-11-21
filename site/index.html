@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>LumaWall: live video wallpapers for macOS</title>
+    <meta
+      name="description"
+      content="LumaWall plays your own videos as macOS wallpapers and stops drawing when nothing can see them. Open source, with nothing sent off your Mac."
+    />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#08090b" />
+    <meta property="og:title" content="LumaWall" />
+    <meta property="og:description" content="The macOS video wallpaper that knows when you can't see it." />
+    <link rel="icon" href="icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="css/energy.css" />
+    <script type="module" src="js/main.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="menubar">
+      <nav class="menubar-nav" aria-label="Sections">
+        <a class="brand" href="#top"><img src="icon.png" alt="" width="20" height="20" />LumaWall</a>
+        <ul>
+          <li><a href="#demo">Demo</a></li>
+          <li><a href="#energy">Energy</a></li>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#privacy">Privacy</a></li>
+          <li><a href="#get">Get it</a></li>
+        </ul>
+      </nav>
+      <p
+        class="hud"
+        title="Frames the wallpaper above drew in the last second, and LumaWall's measured power for the same state"
+      >
+        <span class="hud-dot" data-hud-dot aria-hidden="true"></span>
+        <span><span class="num" data-hud-fps>0</span> fps</span>
+        <span><span class="num" data-hud-mw>1</span> mW</span>
+        <button type="button" class="hud-pause" data-hero-pause aria-pressed="false">Pause</button>
+      </p>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <canvas class="wall" data-hero-canvas aria-hidden="true"></canvas>
+        <div class="hero-copy">
+          <h1 id="hero-title">Your desktop, alive.<br />Your battery, untouched.</h1>
+          <p class="lede">
+            LumaWall plays your own videos as macOS wallpapers, on every display. When a window covers the
+            desktop, it stops drawing.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="#demo">See it pause</a>
+            <a class="button" href="https://github.com/Luseefor/LumaWall">View on GitHub</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="demo" aria-labelledby="demo-title">
+        <header class="section-head">
+          <h2 id="demo-title">Cover it.</h2>
+          <p>
+            Drag the window over the wallpaper. Once it hides 97% of it, this page stops drawing frames. LumaWall pauses
+            the same way on your desktop, with its own threshold.
+          </p>
+        </header>
+
+        <div class="demo" data-demo>
+          <div class="stage" data-stage>
+            <canvas class="wall" aria-hidden="true"></canvas>
+            <div
+              class="window"
+              data-window
+              tabindex="0"
+              role="group"
+              aria-label="todo.txt window"
+              aria-describedby="window-hint"
+            >
+              <div class="titlebar">
+                <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span class="title">todo.txt</span>
+              </div>
+              <ul class="window-body" aria-hidden="true">
+                <li>Renew passport</li>
+                <li>Book the train to Lyon</li>
+                <li>Ask the landlord about the heater</li>
+                <li>Return library books</li>
+                <li>Back up the photo library</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="panel">
+            <dl class="readouts">
+              <div>
+                <dt>Frames per second</dt>
+                <dd class="num" data-fps>60</dd>
+              </div>
+              <div>
+                <dt>LumaWall power</dt>
+                <dd><span class="num" data-mw>12</span><span class="unit"> mW</span></dd>
+              </div>
+              <div>
+                <dt>Covered</dt>
+                <dd><span class="num" data-cover>0</span><span class="unit">%</span></dd>
+              </div>
+            </dl>
+            <p class="status" data-status role="status" aria-live="polite">Playing</p>
+
+            <div class="controls">
+              <div class="pair">
+                <button type="button" class="button small" data-cover-button>Cover</button>
+                <button type="button" class="button small" data-uncover-button>Uncover</button>
+              </div>
+              <button type="button" class="switch" role="switch" aria-checked="false" data-battery>
+                On battery
+              </button>
+              <button type="button" class="switch" role="switch" aria-checked="false" data-lock>Lock screen</button>
+            </div>
+            <p class="hint" id="window-hint">Drag the window, or focus it and use the arrow keys.</p>
+            <p class="hint" data-still-note hidden>
+              Reduced motion is on, so the wallpaper shows a still frame. The readouts show what LumaWall would do.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="energy" aria-labelledby="energy-title">
+        <header class="section-head">
+          <h2 id="energy-title">About 1 mW when nobody's looking.</h2>
+          <p>Power used by LumaWall's own processes on an M-series MacBook, playing one wallpaper.</p>
+        </header>
+
+        <div data-energy-chart></div>
+      </section>
+
+      <section class="section" id="features" aria-labelledby="features-title">
+        <header class="section-head">
+          <h2 id="features-title">What it does.</h2>
+        </header>
+        <ul class="grid">
+          <li>
+            <h3>Safe mode by default</h3>
+            <p>
+              A muted video plays in a desktop-level window over a still poster, using documented macOS APIs. It never
+              edits system wallpaper files.
+            </p>
+          </li>
+          <li>
+            <h3>Native mode on macOS 26</h3>
+            <p>
+              Opt in to play on the desktop and the lock screen through the system wallpaper. It's experimental, uses
+              undocumented interfaces and may break after a macOS update, so you use it at your own risk.
+            </p>
+          </li>
+          <li>
+            <h3>Every display</h3>
+            <p>Give each display its own video, portrait screens included, or send one video to all of them.</p>
+          </li>
+          <li>
+            <h3>Playlists and schedules</h3>
+            <p>Rotate a playlist. Pair videos for day and night, or light and dark, and LumaWall switches them for you.</p>
+          </li>
+          <li>
+            <h3>Lighter copies on battery</h3>
+            <p>
+              On battery, a 720p copy of your video can replace the full file, so the decoder has less to do.</p>
+          </li>
+          <li>
+            <h3>Stops when it's hidden</h3>
+            <p>Playback pauses when a window covers the display, when the Mac locks, when displays sleep and in Game Mode. What pauses follows your settings.</p>
+          </li>
+        </ul>
+      </section>
+
+      <section class="section" id="privacy" aria-labelledby="privacy-title">
+        <header class="section-head">
+          <h2 id="privacy-title">Private by design.</h2>
+        </header>
+        <ul class="grid">
+          <li>
+            <h3>Nothing leaves your Mac</h3>
+            <p>
+              The app has no network code and no analytics. It opens GitHub Releases in your browser only when you check
+              for updates.
+            </p>
+          </li>
+          <li>
+            <h3>Imports open in a sandbox</h3>
+            <p>
+              A sandboxed helper with no file access inspects each video you import, reading it through a handle the
+              app passes in.
+            </p>
+          </li>
+          <li>
+            <h3>Open source</h3>
+            <p>Apache 2.0. Read every line, or build it yourself from the repository.</p>
+          </li>
+        </ul>
+        <p class="links">
+          <a href="https://github.com/Luseefor/LumaWall/blob/main/PRIVACY.md">Privacy policy</a>
+          <a href="https://github.com/Luseefor/LumaWall/blob/main/TERMS.md">Terms of use</a>
+          <a href="https://github.com/Luseefor/LumaWall/blob/main/SECURITY.md">Security policy</a>
+        </p>
+      </section>
+
+      <section class="section" id="get" aria-labelledby="get-title">
+        <div class="get">
+          <div>
+            <h2 id="get-title">Download coming soon.</h2>
+            <p>
+              There's no signed, notarized build yet. Watch GitHub Releases for the first one, or build LumaWall from
+              source today.
+            </p>
+            <div class="actions">
+              <a class="button primary" href="https://github.com/Luseefor/LumaWall/releases">GitHub Releases</a>
+              <a class="button" href="https://github.com/Luseefor/LumaWall">Source code</a>
+            </div>
+          </div>
+          <dl class="requirements">
+            <div>
+              <dt>Safe mode</dt>
+              <dd>macOS 15 or later</dd>
+            </div>
+            <div>
+              <dt>Native mode</dt>
+              <dd>macOS 26 or later</dd>
+            </div>
+            <div>
+              <dt>Videos</dt>
+              <dd>MP4 or MOV, audio removed on import</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p class="links">
+        <a href="https://github.com/Luseefor/LumaWall/blob/main/LICENSE">Apache 2.0</a>
+        <a href="https://github.com/Luseefor/LumaWall/blob/main/PRIVACY.md">Privacy</a>
+        <a href="https://github.com/Luseefor/LumaWall/blob/main/TERMS.md">Terms</a>
+        <a href="https://github.com/Luseefor/LumaWall/blob/main/SECURITY.md">Security</a>
+        <a href="mailto:contact@rijan.sh">Conduct reports: contact@rijan.sh</a>
+      </p>
+      <p class="fine">LumaWall is not affiliated with Apple. macOS is a trademark of Apple Inc.</p>
+    </footer>
+  </body>
+</html>
