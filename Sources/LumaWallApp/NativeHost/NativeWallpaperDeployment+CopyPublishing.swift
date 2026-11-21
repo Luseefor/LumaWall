@@ -308,12 +308,10 @@ extension NativeWallpaperDeployment {
                     updated.variants = merging(listed, with: [variant])
                     let metadata = try JSONEncoder().encode(updated)
                     guard isNativeModeOn() else { return .nativeModeOff }
-                    // Moved from a name of its own: replacing an existing copy
-                    // swaps the old file into staging for a moment, and under the
-                    // staged name another LumaWall could take it for a finished
-                    // export. A `.partial.mov` is never read, and cleanup deletes
-                    // one left behind.
-                    let moving = "\(UUID().uuidString).publishing.partial.mov"
+                    // The swap can move the previous movie into staging.
+                    // Give it a private name that retries won't reuse and
+                    // that cleanup skips while this process is alive.
+                    let moving = "\(getpid()).\(UUID().uuidString).publishing.partial.mov"
                     do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
                     var moved = false
                     do {
@@ -353,6 +351,7 @@ extension NativeWallpaperDeployment {
         guard let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) else { return }
         if let staging = try? TrustedDirectory(url: stagingFolderURL, below: stagingAncestor ?? stagingFolderURL) {
             for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasSuffix(".mov") {
+                if isLivePublishingPartial(file.name) { continue }
                 let parts = file.name.split(separator: ".", maxSplits: 2).map(String.init)
                 let keep =
                     !file.name.hasSuffix(".partial.mov")
@@ -379,6 +378,14 @@ extension NativeWallpaperDeployment {
                 }
             }
         }
+    }
+
+    private static func isLivePublishingPartial(_ name: String) -> Bool {
+        guard name.hasSuffix(".publishing.partial.mov"),
+            let prefix = name.split(separator: ".", maxSplits: 1).first,
+            let owner = pid_t(prefix), owner > 0
+        else { return false }
+        return kill(owner, 0) == 0 || errno == EPERM
     }
 
     /// Whether entry `id` still holds the source hashed `hash`: false when

@@ -1074,6 +1074,17 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: videos.appendingPathComponent(id).appendingPathComponent("metadata.json").path))
     }
 
+    func testStartupCleanupKeepsOnlyPublishingPartialsOwnedByLiveProcesses() throws {
+        let live = staging.appendingPathComponent("\(getpid()).\(UUID().uuidString).publishing.partial.mov")
+        let abandoned = staging.appendingPathComponent("\(Int32.max).\(UUID().uuidString).publishing.partial.mov")
+        for url in [live, abandoned] { try Data("copy".utf8).write(to: url) }
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: live.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: abandoned.path))
+    }
+
     func testStartupCleanupKeepsAnExportItCantJudge() throws {
         // An entry folder that can't be opened safely says nothing about
         // whether its exports are stale. One whose entry is gone is.
