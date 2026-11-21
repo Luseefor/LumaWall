@@ -13,7 +13,12 @@ func selfTest() {
     precondition(Statistics([]) == nil, "Empty sample")
     let appleSilicon = mach_timebase_info_data_t(numer: 125, denom: 3)
     precondition(cpuNanoseconds(ticks: 24_000_000, timebase: appleSilicon) == 1_000_000_000, "Mach ticks to nanoseconds")
-    print("Statistics and CPU conversion self-tests passed")
+    let known = Environment(displayCount: 2, powerSource: "AC Power")
+    let noPower = Environment(displayCount: 2, powerSource: nil)
+    let noDisplays = Environment(displayCount: nil, powerSource: "AC Power")
+    precondition(known.matches(known) && !known.matches(noPower), "Environment match requires identical known readings")
+    precondition(!noPower.matches(noPower) && !noDisplays.matches(noDisplays), "Missing readings cannot match")
+    print("Statistics, CPU conversion, and environment self-tests passed")
 }
 
 struct Statistics: Encodable {
@@ -111,16 +116,42 @@ struct Machine: Encodable {
     let chip = sysctlString("machdep.cpu.brand_string")
     let macOS = ProcessInfo.processInfo.operatingSystemVersionString
 
-    static func displayCount() -> UInt32? {
+    var isKnown: Bool {
+        [model, chip, macOS].allSatisfy { !$0.isEmpty && $0 != "unknown" }
+    }
+}
+
+struct Environment: Equatable {
+    let displayCount: UInt32?
+    let powerSource: String?
+
+    static func read() -> Self {
+        Self(displayCount: readDisplayCount(), powerSource: readPowerSource())
+    }
+
+    var isKnown: Bool {
+        displayCount != nil && powerSource != nil
+    }
+
+    func matches(_ other: Self) -> Bool {
+        isKnown && self == other
+    }
+
+    private static func readDisplayCount() -> UInt32? {
         var count: UInt32 = 0
         return CGGetOnlineDisplayList(0, nil, &count) == .success ? count : nil
     }
 
-    static func powerSource() -> String {
+    private static func readPowerSource() -> String? {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
             let source = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue()
-        else { return "unknown" }
-        return source as String
+        else { return nil }
+        switch source as String {
+        case kIOPMACPowerKey, kIOPMBatteryPowerKey, kIOPMUPSPowerKey:
+            return source as String
+        default:
+            return nil
+        }
     }
 }
 
@@ -313,11 +344,10 @@ func benchmark(_ options: Options) throws {
     let appPrefix = options.appPath + "/"
     let sessionStart = Date()
     let sessionID = UUID()
-    let initialDisplays = Machine.displayCount()
-    let initialPower = Machine.powerSource()
+    let initialEnvironment = Environment.read()
 
     print("\(options.label) | \(machine.model) | \(machine.chip) | macOS \(machine.macOS)")
-    print("Displays \(initialDisplays.map(String.init) ?? "unknown") | \(initialPower)")
+    print("Displays \(initialEnvironment.displayCount.map(String.init) ?? "unknown") | \(initialEnvironment.powerSource ?? "unknown")")
     print("Installation \(options.appPath)")
     let runWidths = [4, 21, 12, 12, 0]
     row(["Run", "Process", "mW", "CPU %", "Status"], widths: runWidths)
@@ -325,8 +355,7 @@ func benchmark(_ options: Options) throws {
 
     var validRates: [String: [Rates]] = [:]
     for index in 1...options.runs {
-        let displayCount = Machine.displayCount()
-        let powerSource = Machine.powerSource()
+        let startEnvironment = Environment.read()
         let timestamp = Date()
         let before = try snapshots(appPrefix: appPrefix)
         let started = DispatchTime.now().uptimeNanoseconds
@@ -343,21 +372,21 @@ func benchmark(_ options: Options) throws {
         let totalStatus = complete ? (measured.isEmpty ? "absent" : "ok") : "incomplete"
         readings.append(Reading(subject: "Total", pids: readings.flatMap(\.pids).sorted(), status: totalStatus, rates: total))
 
-        let endDisplays = Machine.displayCount()
-        let endPower = Machine.powerSource()
+        let endEnvironment = Environment.read()
         let include =
-            displayCount == initialDisplays && endDisplays == initialDisplays
-            && powerSource == initialPower && endPower == initialPower
+            machine.isKnown && initialEnvironment.matches(startEnvironment)
+            && initialEnvironment.matches(endEnvironment)
         let run = Run(
             sessionID: sessionID, label: options.label, appPath: options.appPath, run: index, timestamp: timestamp,
-            durationSeconds: duration, machine: machine, displayCount: displayCount, powerSource: powerSource,
-            endDisplayCount: endDisplays, endPowerSource: endPower,
+            durationSeconds: duration, machine: machine, displayCount: startEnvironment.displayCount,
+            powerSource: startEnvironment.powerSource ?? "unknown",
+            endDisplayCount: endEnvironment.displayCount, endPowerSource: endEnvironment.powerSource ?? "unknown",
             environmentMatchesSession: include, readings: readings
         )
         try append(run, to: file, with: encoder)
 
         for reading in readings {
-            let status = include ? reading.status : "\(reading.status); environment changed"
+            let status = include ? reading.status : "\(reading.status); environment changed or unknown"
             row(
                 [
                     String(index), reading.subject, number(reading.rates?.milliwatts),
