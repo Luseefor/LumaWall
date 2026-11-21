@@ -340,7 +340,7 @@ final class NativeWallpaperEngine {
 
     /// What, besides the wallpapers, decides what a write puts in the store.
     private static var writeTag: String {
-        NativeSurfaceLayout.current.tag + "|" + (NativeWallpaperAssignmentService.lockScreenOverride?.id ?? "")
+        NativeSurfaceLayout.current.tag + "|\(NativeWallpaperAssignmentService.lockScreenOverrideChanges)"
     }
 
     /// The asset's first-frame still for each display, when it has one.

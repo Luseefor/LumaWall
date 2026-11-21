@@ -119,4 +119,26 @@ final class NativeLockScreenOnlyTests: XCTestCase {
 
         XCTAssertEqual(config(try files.storeRoot(), "LAPTOP", "Desktop"), "beach")
     }
+
+    func testARetryUsesThePictureTheFirstAttemptBackedUp() throws {
+        var store = userStore()
+        store["Displays"] = ["LAPTOP": ["Desktop": surface(NativeSurfacePlan.imageProvider, "sunset"), "Idle": surface(ours, "V1")]]
+        let files = FakeSystemWallpaperFiles(store: store)
+        files.backup = try PropertyListSerialization.data(fromPropertyList: userStore(), format: .binary, options: 0)
+        // WallpaperAgent writes an older LumaWall desktop back mid-transaction.
+        files.afterRead = { [unowned files, ours] read in
+            guard read == 1 else { return }
+            files.replaceStore { root in
+                var displays = root["Displays"] as? [String: Any] ?? [:]
+                var laptop = displays["LAPTOP"] as? [String: Any] ?? [:]
+                laptop["Desktop"] = ["Content": ["Choices": [["Provider": ours, "Configuration": Data("V0".utf8)]]]]
+                displays["LAPTOP"] = laptop
+                root["Displays"] = displays
+            }
+        }
+
+        try service(files).apply(targets: ["LAPTOP": target("V1")], layout: .init(preset: .lockScreenOnly))
+
+        XCTAssertEqual(config(try files.storeRoot(), "LAPTOP", "Desktop"), "sunset")
+    }
 }

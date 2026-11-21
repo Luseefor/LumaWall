@@ -100,15 +100,22 @@ struct NativeWallpaperAssignmentService {
             nativeHostLog.error("assignment: CoreGraphics returned no stable display UUID")
             throw AssignmentError.unknownDisplay
         }
-        let missing = try live.apply(
-            targets: targets, layout: .current, idleOverride: lockScreenOverride.map(video(for:)))
+        // A pick removed from the library isn't written back.
+        let pick = lockScreenOverride.flatMap { NativeWallpaperDeployment.removedEntries.contains($0.id) ? nil : $0 }
+        let missing = try live.apply(targets: targets, layout: .current, idleOverride: pick.map(video(for:)))
         let unresolved = Set(assignments.keys).subtracting(uuids.values)
         return unresolved.union(missing.compactMap { uuids[$0] })
     }
 
     /// The Lock Screen pick, deployed. With lock-screen-only it goes on
     /// every lock screen in place of each display's own video.
-    static var lockScreenOverride: NativeWallpaperDeployment.EntryInfo?
+    static var lockScreenOverride: NativeWallpaperDeployment.EntryInfo? {
+        didSet { lockScreenOverrideChanges += 1 }
+    }
+
+    /// Counts every set and clear of the pick, including writes the pick
+    /// made on its own, so the engine's skip check sees each change.
+    private(set) static var lockScreenOverrideChanges = 0
 
     static func video(for entry: NativeWallpaperDeployment.EntryInfo) -> NativeSurfacePlan.Video {
         .init(choiceID: entry.id, url: NativeWallpaperDeployment.videoURL(for: entry))
@@ -142,11 +149,13 @@ struct NativeWallpaperAssignmentService {
         guard nativeModeEnabled() else { throw AssignmentError.nativeModeOff }
         nativeHostLog.info(
             "assignment: begin for \(targets.count) display(s), layout \(layout.tag, privacy: .public)")
-        let backup = try? files.readBackup().flatMap {
-            try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary
-        }
         var assigned = Set<String>()
         try transact(savingBackup: true) { root in
+            // Read on every attempt: a retry sees what the previous attempt
+            // backed up.
+            let backup = try? files.readBackup().flatMap {
+                try? PropertyListSerialization.propertyList(from: $0, format: nil) as? NSDictionary
+            }
             let plan = NativeSurfacePlan.changes(
                 root: root, backup: backup ?? nil, layout: layout, targets: targets, idleOverride: idleOverride,
                 ownedFolders: ownedFolders)
