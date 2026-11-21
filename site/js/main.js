@@ -20,6 +20,7 @@ function setUpHero() {
   let inView = true;
   let onBattery = false;
   let userPaused = false;
+  const pauseButton = document.querySelector("[data-hero-pause]");
 
   const loop = createLoop((time) => wall.draw(time), {
     onStats(fps) {
@@ -35,6 +36,10 @@ function setUpHero() {
     loop.setFps(onBattery ? 30 : 60);
     if (run) loop.start();
     else loop.stop();
+    // Say it in words too: with reduced motion nothing plays, whatever the button says.
+    const still = reducedMotion.matches;
+    pauseButton.disabled = still;
+    pauseButton.textContent = still || userPaused ? "Play" : "Pause";
   }
 
   function redraw() {
@@ -48,11 +53,9 @@ function setUpHero() {
     update();
   };
 
-  const pauseButton = document.querySelector("[data-hero-pause]");
   pauseButton.addEventListener("click", () => {
     userPaused = !userPaused;
     pauseButton.setAttribute("aria-pressed", String(userPaused));
-    pauseButton.textContent = userPaused ? "Play" : "Pause";
     update();
   });
 

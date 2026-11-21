@@ -113,3 +113,29 @@ test("a covered wallpaper skips the lock ramp because nobody sees it", () => {
   const unlocked = reduce(covered, { type: "lock", on: false });
   assert.equal(readout(reduce(unlocked, { type: "coverage", fraction: 0 })).status, "Playing");
 });
+
+import { createPacer } from "../js/wallpaper.js";
+
+function drawsPerSecond(hz, cap) {
+  const pacer = createPacer(cap);
+  let drawn = 0;
+  for (let t = 1000 / hz; t <= 10000; t += 1000 / hz) if (pacer.accept(t)) drawn++;
+  return drawn / 10;
+}
+
+test("a 60 fps cap holds on 60, 90, 120 and 144 Hz displays", () => {
+  for (const hz of [60, 90, 120, 144]) {
+    assert.ok(Math.abs(drawsPerSecond(hz, 60) - 60) <= 1, `${hz} Hz`);
+  }
+});
+
+test("a 30 fps cap holds on 60 and 144 Hz displays", () => {
+  for (const hz of [60, 144]) assert.ok(Math.abs(drawsPerSecond(hz, 30) - 30) <= 1, `${hz} Hz`);
+});
+
+test("a stall does not cause a burst of frames", () => {
+  const pacer = createPacer(60);
+  pacer.accept(16);
+  assert.equal(pacer.accept(2000), true);
+  assert.equal(pacer.accept(2007), false);
+});
