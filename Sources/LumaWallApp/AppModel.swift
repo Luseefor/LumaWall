@@ -90,6 +90,11 @@ final class AppModel {
     var nativeFailureNotice: NativeFailureNotice?
     @ObservationIgnored var nativeHealth: NativeHealthMonitor?
     @ObservationIgnored let nativeFailureNotifier = NativeFailureNotifier()
+    /// What each display is doing and why; see `AppModel+PlaybackStatus`.
+    var playbackStatuses: [DisplayID: DisplayPlaybackStatus] = [:]
+    @ObservationIgnored var playbackStatusObserver: PlaybackStatusObserver?
+    @ObservationIgnored var nativePlaybackStatuses = PlaybackStatusSnapshot(statuses: [])
+    @ObservationIgnored var overlayPlaybackDecisions: [DisplayID: (tier: PlaybackTier, reason: PlaybackStatusReason?)] = [:]
 
     let store: LibraryStore
     let importer: MediaImporter
@@ -292,6 +297,7 @@ final class AppModel {
             observeLockAndSleep()
             observePowerChanges()
             observeGameMode()
+            observePlaybackStatus()
         } catch {
             fatalError("Unable to initialize LumaWall: \(error)")
         }

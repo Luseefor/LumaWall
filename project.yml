@@ -116,6 +116,9 @@ targets:
           - PrivacyInfo.xcprivacy
           - WallpaperExtension-Bridging-Header.h
           - LumaWallWallpaper.entitlements
+      # The extension doesn't link LumaWallCore; this shared wire type is
+      # compiled into both.
+      - path: Sources/LumaWallCore/DisplayPlaybackStatus.swift
       - path: WallpaperExtension/NOTICE
         buildPhase: resources
       - path: WallpaperExtension/LICENSE-Phosphene
@@ -162,6 +165,8 @@ targets:
       # The extension can't host a test bundle; compile its pure sources here.
       - path: WallpaperExtension/VariantSelection.swift
       - path: WallpaperExtension/PlaybackPolicy.swift
+      - path: WallpaperExtension/DisplayStatusBuilder.swift
+      - path: Sources/LumaWallCore/DisplayPlaybackStatus.swift
       - path: WallpaperExtension/ThermalHold.swift
       - path: WallpaperExtension/RendererLifecycle.swift
       - path: WallpaperExtension/LogFile.swift

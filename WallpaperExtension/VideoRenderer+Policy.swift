@@ -141,6 +141,24 @@ extension VideoRenderer {
         }
         isDispatching = false
         reportPlayback()
+        publishStatusInfo()
+    }
+
+    /// Record the sleep gate, surface and file for the status file; a change
+    /// asks the publisher for a write. Queue-only.
+    private func publishStatusInfo() {
+        let info = StatusInfo(
+            displayAsleep: lifecycle.displayAsleep,
+            surfaceOpen: lifecycle.surfaceOpen,
+            url: asset.url,
+            decodeFailed: lifecycle.readers == .failed
+        )
+        let changed = statusInfo.withLock { current -> Bool in
+            guard current != info else { return false }
+            current = info
+            return true
+        }
+        if changed { DisplayStatusPublisher.shared.markDirty() }
     }
 
     /// Tell `PowerMonitor` when this renderer becomes active or idle

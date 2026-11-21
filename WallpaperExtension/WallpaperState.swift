@@ -119,6 +119,20 @@ final class WallpaperState: Sendable {
     /// Install a freshly-created context for a display slot (first acquire).
     func installContext(_ context: ActiveWallpaper, for key: DisplayKey) {
         lock.withLock { $0.contexts[key] = context }
+        DisplayStatusPublisher.shared.markDirty()
+    }
+
+    /// The renderers of live, open surfaces with a display, for the status file.
+    func liveStatusSources() -> [(displayID: UInt32, videoID: String?, info: VideoRenderer.StatusInfo)] {
+        lock.withLock { state in
+            state.contexts.values.compactMap { context in
+                guard !context.isPreview, let displayID = context.displayID,
+                    let info = context.renderer?.statusInfo.withLock({ $0 }), info.surfaceOpen
+                else { return nil }
+                return (displayID, context.videoID, info)
+            }
+            .sorted { $0.displayID < $1.displayID }
+        }
     }
 
     /// Atomically claim the right to create the renderer for a slot. Returns a
@@ -371,6 +385,7 @@ final class WallpaperState: Sendable {
             context.renderer?.stop()
             invalidateRemoteContext(context.caContext)
         }
+        DisplayStatusPublisher.shared.markDirty()
         CATransaction.flush()
         return removed.map(\.0)
     }
@@ -425,6 +440,7 @@ final class WallpaperState: Sendable {
             return state.contexts.removeValue(forKey: key)
         }
         guard let removed else { return false }
+        DisplayStatusPublisher.shared.markDirty()
         removed.renderer?.stop()
         invalidateRemoteContext(removed.caContext)
         // Push the invalidation to the render server now; without a flush the

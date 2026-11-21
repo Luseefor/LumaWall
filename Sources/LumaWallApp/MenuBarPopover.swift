@@ -50,6 +50,7 @@ struct MenuBarPopover: View {
             } else {
                 heroSection
                 playbackScopePicker
+                PlaybackStatusSection(model: model)
             }
 
             quickLinksSection

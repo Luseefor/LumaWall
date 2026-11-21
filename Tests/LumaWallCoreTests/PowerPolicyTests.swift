@@ -182,3 +182,59 @@ struct PowerPolicyTests {
         #expect(latch.covered.isEmpty)
     }
 }
+
+struct PlaybackReasonTests {
+    private func reason(_ conditions: PlaybackConditions) -> PlaybackStatusReason? {
+        PlaybackPolicy.decide(conditions).reason
+    }
+
+    @Test func playingFullHasNoReason() {
+        let decision = PlaybackPolicy.decide(.init())
+        #expect(decision.tier == .full)
+        #expect(decision.reason == nil)
+    }
+
+    @Test func eachPauseNamesItsReason() {
+        #expect(reason(.init(userPaused: true)) == .userPause)
+        #expect(reason(.init(displayIsAsleep: true)) == .displayAsleep)
+        #expect(reason(.init(displayIsObscured: true)) == .covered)
+        #expect(reason(.init(gameModeActive: true)) == .gameMode)
+        #expect(reason(.init(sessionIsLocked: true)) == .locked)
+        #expect(reason(.init(thermalState: .critical)) == .thermal)
+        #expect(reason(.init(batteryPercent: 5)) == .batteryCritical)
+    }
+
+    @Test func stillTiersNameTheirReason() {
+        #expect(reason(.init(hideDesktopVideo: true)) == .desktopPaused)
+        #expect(reason(.init(profile: .staticOnBattery)) == .batteryStatic)
+        #expect(reason(.init(reduceMotion: true)) == .reduceMotion)
+    }
+
+    @Test func lighterTiersNameTheirReason() {
+        #expect(reason(.init(isOnBattery: true)) == .batteryTier)
+        #expect(reason(.init(isOnBattery: true, batteryPercent: 15)) == .batteryTier)
+        #expect(reason(.init(isOnBattery: true, lowPowerMode: true)) == .lowPowerMode)
+        #expect(reason(.init(profile: .batterySaver)) == .batteryTier)
+        #expect(reason(.init(thermalState: .serious)) == .thermal)
+        #expect(reason(.init(thermalState: .fair)) == .thermal)
+    }
+
+    @Test func lockedLiveOnLockPlaysWithoutAReason() {
+        let decision = PlaybackPolicy.decide(.init(sessionIsLocked: true, hideDesktopVideo: true, allowLiveOnLock: true))
+        #expect(decision.tier == .full)
+        #expect(decision.reason == nil)
+    }
+
+    @Test func resolveAndDecideAlwaysAgree() {
+        let thermals: [ProcessInfo.ThermalState] = [.nominal, .fair, .serious, .critical]
+        for profile in PowerProfile.allCases {
+            for thermal in thermals {
+                for battery in [true, false] {
+                    let conditions = PlaybackConditions(
+                        profile: profile, isOnBattery: battery, thermalState: thermal)
+                    #expect(PlaybackPolicy.resolve(conditions) == PlaybackPolicy.decide(conditions).tier)
+                }
+            }
+        }
+    }
+}
