@@ -13,6 +13,7 @@ function setUpHero() {
   const fpsOut = document.querySelector("[data-hud-fps]");
   const mwOut = document.querySelector("[data-hud-mw]");
   const dot = document.querySelector("[data-hud-dot]");
+  const stateOut = document.querySelector("[data-hud-state]");
 
   const wall = new Wallpaper(canvas, { scale: 0.6, maxPixelRatio: 1 });
   if (!wall.ok) hero.classList.add("no-webgl");
@@ -27,6 +28,7 @@ function setUpHero() {
       fpsOut.textContent = fps;
       const running = fps > 0;
       dot.classList.toggle("on", running);
+      if (stateOut) stateOut.textContent = running ? "Playing" : "Paused";
       mwOut.textContent = running ? (onBattery ? POWER.battery : POWER.full) : POWER.paused;
     },
   });
