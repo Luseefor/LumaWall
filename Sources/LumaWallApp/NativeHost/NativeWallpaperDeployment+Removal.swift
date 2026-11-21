@@ -8,17 +8,26 @@ import os
 /// video, thumbnail and copies stayed in the container, so System Settings
 /// kept offering it, and its queued copy encodes kept running.
 extension NativeWallpaperDeployment {
+    // A background publisher needs to see removal before it rolls a copy back.
+    private static let removalState = OSAllocatedUnfairLock(initialState: Set<String>())
+
+    static var removedEntries: Set<String> { removalState.withLock { $0 } }
+
+    static func isRemoving(entryID: String) -> Bool {
+        removalState.withLock { $0.contains(entryID) } || pendingRemovals.stages[entryID] != nil
+    }
+
     /// Marks the entry removed, so no new deploy or assignment of it starts.
     /// Call before the first suspension of a removal; see `removedEntries`.
     @MainActor
     static func markRemoved(entryID: String) {
-        removedEntries.insert(entryID)
+        _ = removalState.withLock { $0.insert(entryID) }
     }
 
     /// Undoes `markRemoved` when the library kept the wallpaper after all.
     @MainActor
     static func unmarkRemoved(entryID: String) {
-        removedEntries.remove(entryID)
+        _ = removalState.withLock { $0.remove(entryID) }
     }
 
     /// Waits for a deploy of the entry still running, stops its copy

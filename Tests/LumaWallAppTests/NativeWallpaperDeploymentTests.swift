@@ -782,6 +782,179 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)?.variants)
     }
 
+    func testPublishMergesVariantsWrittenWhileWaitingForTheEntryFileLock() throws {
+        try deploy(hash: "aaa")
+        let entryURL = videos.appendingPathComponent(id)
+        let lock = open(entryURL.appendingPathComponent(".copy-publish.lock").path, O_CREAT | O_RDWR, 0o600)
+        guard lock >= 0 else { throw POSIXError(.EIO) }
+        defer { close(lock) }
+        guard flock(lock, LOCK_EX) == 0 else { throw POSIXError(.EIO) }
+
+        let job = job(hash: "aaa")
+        let staged = try stage(job)
+        let videos = self.videos
+        let size = self.size
+        let started = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            started.signal()
+            XCTAssertEqual(
+                NativeWallpaperDeployment.publish(staged, job: job, resolution: size, videosFolderURL: videos, isNativeModeOn: { true }),
+                .published)
+            finished.signal()
+        }
+        XCTAssertEqual(started.wait(timeout: .now() + 5), .success)
+        let beforeUnlock = finished.wait(timeout: .now() + 0.5)
+        XCTAssertEqual(beforeUnlock, .timedOut)
+        let probeDeadline = ContinuousClock.now + .milliseconds(250)
+        var localLockIsFree = false
+        repeat {
+            localLockIsFree = NativeWallpaperDeployment.entryLock.try()
+            if localLockIsFree {
+                NativeWallpaperDeployment.entryLock.unlock()
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        } while ContinuousClock.now < probeDeadline
+        XCTAssertTrue(localLockIsFree)
+
+        let otherMovie = "Wallpaper.reduced.mov"
+        var entry = try XCTUnwrap(NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos))
+        entry.variants = [.init(filename: otherMovie, fps: 30, resolution: size)]
+        let folder = try TrustedDirectory(url: entryURL)
+        try folder.writeFile(named: otherMovie, contents: Data("other copy".utf8))
+        try folder.writeFile(named: "metadata.json", contents: JSONEncoder().encode(entry))
+        XCTAssertEqual(flock(lock, LOCK_UN), 0)
+        if beforeUnlock == .timedOut {
+            XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
+        }
+
+        let updated = try XCTUnwrap(NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos))
+        XCTAssertEqual(Set(updated.variants?.map(\.filename) ?? []), [otherMovie, minimal.filename])
+    }
+
+    func testPublishDefersAndKeepsTheExportWhenTheEntryLockStaysBusy() throws {
+        try deploy(hash: "aaa")
+        let lockURL = videos.appendingPathComponent(id).appendingPathComponent(".copy-publish.lock")
+        let lock = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
+        guard lock >= 0 else { throw POSIXError(.EIO) }
+        defer { close(lock) }
+        guard flock(lock, LOCK_EX) == 0 else { throw POSIXError(.EIO) }
+
+        let job = job(hash: "aaa")
+        let staged = try stage(job)
+        let videos = self.videos
+        let size = self.size
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            defer { finished.signal() }
+            XCTAssertEqual(
+                NativeWallpaperDeployment.publish(staged, job: job, resolution: size, videosFolderURL: videos, isNativeModeOn: { true }),
+                .deferred)
+        }
+        let wait = finished.wait(timeout: .now() + 5)
+        XCTAssertEqual(wait, .success)
+        XCTAssertEqual(flock(lock, LOCK_UN), 0)
+        if wait == .timedOut { _ = finished.wait(timeout: .now() + 5) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+    }
+
+    @MainActor
+    func testTurningNativeModeOffReturnsWhileMetadataWriteIsBlocked() throws {
+        let suite = "VariantPublicationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        nonisolated(unsafe) let setting = NativeModeSetting(defaults: defaults, usedNativeBefore: { false })
+        setting.enable()
+        try deploy(hash: "aaa")
+        let job = job(hash: "aaa")
+        let staged = try stage(job)
+        let videos = self.videos
+        let size = self.size
+        let writing = DispatchSemaphore(value: 0)
+        let disabled = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            defer { finished.signal() }
+            _ = NativeWallpaperDeployment.publish(
+                staged, job: job, resolution: size, videosFolderURL: videos,
+                writeMetadata: { data, folder in
+                    writing.signal()
+                    XCTAssertEqual(disabled.wait(timeout: .now() + 2), .success)
+                    XCTAssertFalse(setting.isEnabled)
+                    try folder.writeFile(named: "metadata.json", contents: data)
+                },
+                isNativeModeOn: { setting.isEnabled })
+        }
+        XCTAssertEqual(writing.wait(timeout: .now() + 5), .success)
+        setting.disable()
+        disabled.signal()
+        XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
+    }
+
+    func testFailedMetadataWriteKeepsThePreviousVariant() throws {
+        try deploy(hash: "aaa")
+        let job = job(hash: "aaa")
+        let previous = try stage(job)
+        let original = Data("previous copy".utf8)
+        try original.write(to: previous)
+        XCTAssertEqual(publish(previous, job: job, resolution: size, videosFolderURL: videos), .published)
+        let metadata = videos.appendingPathComponent(id).appendingPathComponent("metadata.json")
+        let originalMetadata = try Data(contentsOf: metadata)
+
+        let replacement = try stage(job)
+        let failed = publish(
+            replacement, job: job, resolution: CGSize(width: 640, height: 360), videosFolderURL: videos,
+            writeMetadata: { _, _ in throw POSIXError(.ENOSPC) })
+        XCTAssertEqual(failed, .failed)
+        XCTAssertEqual(try? Data(contentsOf: dest), original)
+        XCTAssertEqual(try Data(contentsOf: metadata), originalMetadata)
+    }
+
+    @MainActor
+    func testFailedWriteDiscardsThePreviousMovieOnceRemovalStarts() throws {
+        try deploy(hash: "aaa")
+        let job = job(hash: "aaa")
+        XCTAssertEqual(publish(try stage(job), job: job, resolution: size, videosFolderURL: videos), .published)
+        let staged = try stage(job)
+        let entryID = id
+        defer { NativeWallpaperDeployment.unmarkRemoved(entryID: entryID) }
+        _ = publish(
+            staged, job: job, resolution: size, videosFolderURL: videos,
+            writeMetadata: { _, _ in
+                NativeWallpaperDeployment.markRemoved(entryID: entryID)
+                throw POSIXError(.ENOSPC)
+            })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staging.path), [])
+    }
+
+    func testPublishDoesNotSucceedWhenTheEntryIsReplacedDuringCommit() throws {
+        try deploy(hash: "aaa")
+        let job = job(hash: "aaa")
+        XCTAssertEqual(publish(try stage(job), job: job, resolution: size, videosFolderURL: videos), .published)
+        let staged = try stage(job)
+        let entryURL = videos.appendingPathComponent(id)
+        let oldURL = root.appendingPathComponent("old-entry")
+        let result = publish(
+            staged, job: job, resolution: size, videosFolderURL: videos,
+            writeMetadata: { data, folder in
+                try FileManager.default.moveItem(at: entryURL, to: oldURL)
+                try FileManager.default.createDirectory(at: entryURL, withIntermediateDirectories: false)
+                try folder.writeFile(named: "metadata.json", contents: data)
+            })
+        XCTAssertEqual(result, .deferred)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldURL.appendingPathComponent(minimal.filename).path))
+    }
+
+    func testInvalidMetadataDoesNotLeaveAPublishLockFile() throws {
+        let job = job(hash: "aaa")
+        XCTAssertEqual(publish(try stage(job), job: job, resolution: size, videosFolderURL: videos), .stale)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: videos.appendingPathComponent(id).path), [])
+    }
+
     func testAFailedMetadataWriteNeverTakesTheFileBackFromTheEntry() throws {
         // The export went back to staging by name, so the extension could
         // swap it inside the entry first and have the app probe its bytes.
@@ -980,6 +1153,33 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertFalse(fm.fileExists(atPath: stale.path))
         XCTAssertTrue(fm.fileExists(atPath: current.path))
         XCTAssertTrue(fm.fileExists(atPath: videos.appendingPathComponent(id).appendingPathComponent("metadata.json").path))
+    }
+
+    func testStartupCleanupKeepsOnlyPublishingPartialsOwnedByLiveProcesses() throws {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        XCTAssertEqual(proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &info, size), size)
+        let start = info.pbi_start_tvsec
+        func partial(_ pid: pid_t, _ start: UInt64) -> URL {
+            staging.appendingPathComponent("\(pid).\(start).\(UUID().uuidString).publishing.partial.mov")
+        }
+        let live = partial(getpid(), start)
+        let reused = partial(getpid(), start - 1)
+        let abandoned = partial(Int32.max, start)
+        let fm = FileManager.default
+        for url in [live, reused, abandoned] { try Data("copy".utf8).write(to: url) }
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-25 * 3600)], ofItemAtPath: live.path)
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(
+            videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root, now: now)
+
+        XCTAssertTrue(fm.fileExists(atPath: live.path))
+        for url in [reused, abandoned] { XCTAssertFalse(fm.fileExists(atPath: url.path)) }
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(
+            videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root, now: now.addingTimeInterval(25 * 3600))
+        XCTAssertFalse(fm.fileExists(atPath: live.path))
     }
 
     func testStartupCleanupKeepsAnExportItCantJudge() throws {

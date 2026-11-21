@@ -215,6 +215,7 @@ extension NativeWallpaperDeployment {
             case .stale: return .done
             case .failed: return .failed
             case .nativeModeOff: return .notNow
+            case .deferred: return .retryLater
             }
         },
         prepare: {
@@ -250,34 +251,32 @@ extension NativeWallpaperDeployment {
     /// copy of the old source can't land in the redeployed entry.
     static let entryLock = NSLock()
 
-    /// Held by a copy publish from its native-mode check through its
-    /// writes, and by `NativeModeSetting.disable()`. Never held while
-    /// reading anything the extension controls, so turning native mode off
-    /// on the main thread waits only for a rename and a small write.
-    static let nativeWriteLock = NSLock()
-
     enum PublishResult: Equatable {
-        case published, stale, failed
+        case published, stale, failed, deferred
         /// Native mode was off once the entry lock was held; the export
         /// stays staged.
         case nativeModeOff
     }
 
+    static let copyPublishLockName = ".copy-publish.lock"
+    private static let publisherStartTime = processStartTime(getpid())
+
+    private enum PublishInterrupted: Error {
+        case entryChanged
+    }
+
     /// Moves a finished export into its entry and lists it in metadata.json,
     /// re-reading the file so copies other jobs recorded are kept. Discards
     /// the export when the entry no longer holds the source it was made from.
-    /// When metadata.json can't be written the moved copy is deleted, and a
-    /// retry encodes it again.
+    /// If metadata.json can't be written, restore the previous variant.
     ///
     /// The staging and entry folders are opened through `TrustedDirectory`
     /// and every read, move and delete goes through their descriptors, so
     /// a folder swapped for a symlink fails the publish instead of steering
     /// it elsewhere.
     ///
-    /// Native mode is checked under `nativeWriteLock`, held until the
-    /// writes are done: a publish can wait on the entry lock while native
-    /// mode is turned off, and nothing may be written into the extension's
-    /// container after that.
+    /// Check native mode after preparing the metadata, just before moving
+    /// the export. Disabling native mode can proceed while a write finishes.
     static func publish(
         _ staged: URL,
         job: VariantEncodeQueue.Job,
@@ -288,66 +287,94 @@ extension NativeWallpaperDeployment {
         },
         isNativeModeOn: () -> Bool = { NativeModeSetting.isEnabledNow }
     ) -> PublishResult {
-        entryLock.withLock {
-            let stagedName = staged.lastPathComponent
-            guard let staging = try? trustedFolder(staged.deletingLastPathComponent()) else { return .failed }
-            // Stale only when the entry is known gone or holds another
-            // source. A folder that can't be opened safely (a symlink in
-            // place of videos or the entry) keeps the export for a retry.
-            guard let videos = try? trustedFolder(videosFolderURL) else { return .failed }
-            let folder: TrustedDirectory
-            do {
-                folder = try videos.subdirectory(job.entryID)
-            } catch POSIXError.ENOENT {
+        let stagedName = staged.lastPathComponent
+        guard let staging = try? trustedFolder(staged.deletingLastPathComponent()),
+            let videos = try? trustedFolder(videosFolderURL)
+        else { return .failed }
+        let folder: TrustedDirectory
+        let identity: TrustedDirectory.Identity
+        do {
+            folder = try videos.subdirectory(job.entryID)
+            identity = try folder.identity()
+        } catch POSIXError.ENOENT {
+            try? staging.removeFile(named: stagedName)
+            return .stale
+        } catch {
+            return .failed
+        }
+        func isCurrent() -> Bool {
+            guard !isRemoving(entryID: job.entryID),
+                let current = try? entryFolder(job.entryID, videosFolderURL: videosFolderURL)
+            else { return false }
+            return (try? current.identity()) == identity
+        }
+        func publishLocked() throws -> PublishResult {
+            guard isCurrent() else { return .deferred }
+            guard var updated = try entry(id: job.entryID, readingFrom: folder), updated.contentHash == job.contentHash else {
                 try? staging.removeFile(named: stagedName)
                 return .stale
-            } catch {
-                return .failed
-            }
-            let current: EntryInfo
-            do {
-                guard let entry = try entry(id: job.entryID, readingFrom: folder), entry.contentHash == job.contentHash else {
-                    try? staging.removeFile(named: stagedName)
-                    return .stale
-                }
-                current = entry
-            } catch {
-                return .failed
             }
             let name = job.spec.filename
-            var updated = current
-            let listed = (current.variants ?? []).filter { (try? folder.kind(ofItemNamed: $0.filename)) == .file }
+            let listed = (updated.variants ?? []).filter { (try? folder.kind(ofItemNamed: $0.filename)) == .file }
             let variant = NativeVideoVariant(filename: name, fps: job.spec.recordedFPS, resolution: resolution)
             updated.variants = merging(listed, with: [variant])
-            guard let metadata = try? JSONEncoder().encode(updated) else { return .failed }
-            return nativeWriteLock.withLock {
-                guard isNativeModeOn() else { return .nativeModeOff }
-                // Moved from a name of its own: replacing an existing copy
-                // swaps the old file into staging for a moment, and under the
-                // staged name another LumaWall could take it for a finished
-                // export. A `.partial.mov` is never read, and cleanup deletes
-                // one left behind.
-                let moving = "\(UUID().uuidString).publishing.partial.mov"
-                do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
-                do {
-                    try staging.publishItem(named: moving, into: folder, as: name)
-                } catch {
-                    // Nothing moved: `moving` still holds the export.
-                    try? staging.renameItem(named: moving, to: stagedName)
-                    return .failed
-                }
-                do {
-                    try writeMetadata(metadata, folder)
-                } catch {
-                    // Not moved back to staging: in the entry the extension
-                    // can have swapped it, and staging only holds bytes the
-                    // app encoded. The retry encodes again.
-                    try? folder.removeFile(named: name)
-                    return .failed
-                }
-                return .published
+            let metadata = try JSONEncoder().encode(updated)
+            guard isNativeModeOn() else { return .nativeModeOff }
+            guard isCurrent() else { return .deferred }
+            // The swap can move the previous movie into staging.
+            // Give it a private name that retries won't reuse and
+            // that cleanup skips while this process is alive.
+            guard let start = publisherStartTime else { return .failed }
+            let moving = "\(getpid()).\(start).\(UUID().uuidString).publishing.partial.mov"
+            do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
+            var moved = false
+            do {
+                try staging.publishItem(
+                    named: moving, into: folder, as: name,
+                    shouldRestore: {
+                        entry(id: job.entryID, inEntry: folder)?.contentHash == job.contentHash && isCurrent()
+                    },
+                    commit: {
+                        moved = true
+                        guard isCurrent() else { throw PublishInterrupted.entryChanged }
+                        try writeMetadata(metadata, folder)
+                        guard isCurrent() else { throw PublishInterrupted.entryChanged }
+                    })
+            } catch PublishInterrupted.entryChanged {
+                return .deferred
+            } catch {
+                // Once the export has reached the extension's folder,
+                // its bytes can no longer be reused by the app.
+                if !moved { try? staging.renameItem(named: moving, to: stagedName) }
+                return isCurrent() ? .failed : .deferred
             }
+            return .published
         }
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        var validated = false
+        repeat {
+            do {
+                let result: PublishResult? = try entryLock.withLock {
+                    guard isNativeModeOn() else { return .nativeModeOff }
+                    if !validated {
+                        guard isCurrent() else { return .deferred }
+                        guard try entry(id: job.entryID, readingFrom: folder)?.contentHash == job.contentHash else {
+                            try? staging.removeFile(named: stagedName)
+                            return .stale
+                        }
+                        validated = true
+                    }
+                    return try folder.tryWithExclusiveFileLock(named: copyPublishLockName, publishLocked)
+                }
+                if let result { return result }
+            } catch {
+                return isCurrent() ? .failed : .deferred
+            }
+            // A peer waiting on disk must not hold up local deploy or removal.
+            Thread.sleep(forTimeInterval: 0.02)
+        } while ContinuousClock.now < deadline && !Task.isCancelled
+        return .deferred
     }
 
     /// Deletes interrupted exports, finished exports of sources that are no
@@ -361,13 +388,20 @@ extension NativeWallpaperDeployment {
     /// any folder between them and their ancestor, swapped for a symlink
     /// can't steer the delete elsewhere.
     static func cleanUpAbandonedExports(
-        videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL, stagingAncestor: URL? = nil
+        videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL, stagingAncestor: URL? = nil, now: Date = Date()
     ) {
         // Without a trustworthy videos folder, no staged export can be shown
         // stale, so everything is kept.
         guard let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) else { return }
         if let staging = try? TrustedDirectory(url: stagingFolderURL, below: stagingAncestor ?? stagingFolderURL) {
-            for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasSuffix(".mov") {
+            for file in (try? staging.entries()) ?? [] where file.name.hasSuffix(".mov") {
+                if file.name.hasSuffix(".publishing.partial.mov") {
+                    if !isLivePublishingPartial(file.name, in: staging, now: now) {
+                        try? staging.removeItem(named: file.name)
+                    }
+                    continue
+                }
+                guard file.kind == .file else { continue }
                 let parts = file.name.split(separator: ".", maxSplits: 2).map(String.init)
                 let keep =
                     !file.name.hasSuffix(".partial.mov")
@@ -394,6 +428,23 @@ extension NativeWallpaperDeployment {
                 }
             }
         }
+    }
+
+    private static func processStartTime(_ pid: pid_t) -> UInt64? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        return info.pbi_start_tvsec
+    }
+
+    private static func isLivePublishingPartial(_ name: String, in staging: TrustedDirectory, now: Date) -> Bool {
+        let parts = name.split(separator: ".", maxSplits: 2)
+        guard parts.count == 3, let owner = pid_t(parts[0]), owner > 0,
+            let start = UInt64(parts[1]), processStartTime(owner) == start,
+            // A swapped-in backup carries the old movie's modification date.
+            let changed = try? staging.statusChangeDate(ofItemNamed: name)
+        else { return false }
+        return now.timeIntervalSince(changed) <= 24 * 3600
     }
 
     /// Whether entry `id` still holds the source hashed `hash`: false when
