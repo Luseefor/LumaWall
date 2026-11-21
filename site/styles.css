@@ -189,6 +189,7 @@ a {
 
 .nav {
   --nav-bg: rgb(255 255 255 / 0.86);
+  --nav-menu: rgb(255 255 255 / 0.97);
   --nav-ink: #1d1d1f;
   --nav-ink-2: #3a3a3d;
   --nav-ink-hover: #000;
@@ -214,6 +215,7 @@ a {
 
 .nav[data-tone="dark"] {
   --nav-bg: rgb(10 10 12 / 0.78);
+  --nav-menu: rgb(10 10 12 / 0.97);
   --nav-ink: #f5f5f7;
   --nav-ink-2: #c9c9ce;
   --nav-ink-hover: #fff;
@@ -229,6 +231,7 @@ a {
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .nav[data-tone="light"] {
     --nav-bg: rgb(20 20 22 / 0.82);
+    --nav-menu: rgb(20 20 22 / 0.97);
     --nav-ink: #f5f5f7;
     --nav-ink-2: #c9c9ce;
     --nav-ink-hover: #fff;
@@ -243,6 +246,7 @@ a {
 
 :root[data-theme="dark"] .nav[data-tone="light"] {
   --nav-bg: rgb(20 20 22 / 0.82);
+  --nav-menu: rgb(20 20 22 / 0.97);
   --nav-ink: #f5f5f7;
   --nav-ink-2: #c9c9ce;
   --nav-ink-hover: #fff;
@@ -679,10 +683,8 @@ a {
     max-height: calc(100dvh - var(--nav));
     overflow-y: auto;
     padding: 8px var(--gutter) 16px;
-    background: var(--nav-bg);
+    background: var(--nav-menu);
     border-bottom: 1px solid var(--nav-line);
-    -webkit-backdrop-filter: saturate(1.8) blur(20px);
-    backdrop-filter: saturate(1.8) blur(20px);
     font-size: 1.0625rem;
   }
 
@@ -768,11 +770,7 @@ a {
   .nav,
   :root:root .nav[data-tone="light"] {
     --nav-bg: var(--nav-solid);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-
-  .nav-inner ul {
+    --nav-menu: var(--nav-solid);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

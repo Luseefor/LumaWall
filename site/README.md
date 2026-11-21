@@ -82,6 +82,20 @@ and the portrait poster has 360- and 720-pixel-wide variants. Each size comes in
 AVIF, WebP, and JPEG. Clips are muted, loop, and load only when in view.
 Reduced motion shows the posters.
 
+Playback: each clip is loaded on demand with `<source>` elements. Phones and tiles drawn small get
+`wall-N-960.mp4` (and `wall-portrait-960.mp4`) first and fall back to the original file, so a missing copy
+still plays. Chrome ignores `media` on video sources, so `js/videos.js` picks the order itself from the
+viewport width, element width and devicePixelRatio. With Data Saver on, nothing autoplays and a tap on a gallery
+card loads its clip. If the browser refuses autoplay (iOS Low Power Mode) the poster stays and the pause button
+becomes "Play wallpapers". The hero fades to the next clip only once it can play through.
+
+## Themes
+
+The site follows `prefers-color-scheme`. The nav switch (System, Light, Dark) stores a Light or Dark choice in
+localStorage (`lumawall-theme`). `js/theme.js` is a tiny classic script in `<head>` that sets `data-theme` on
+`<html>` before first paint (the CSP forbids inline scripts). All colours are custom properties in `styles.css`;
+the dark values are written twice, once for the media query and once for `[data-theme="dark"]`, so change both.
+
 ## Rules
 
 - Static files only.
