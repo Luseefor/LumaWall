@@ -89,25 +89,4 @@ final class NativeModeSettingTests: XCTestCase {
         XCTAssertFalse(NativeModeSetting.showsNativeUse(backupExists: false, store: ours))
         XCTAssertFalse(NativeModeSetting.showsNativeUse(backupExists: true, store: nil))
     }
-
-    func testTurningNativeModeOffWaitsForAPublishInProgress() {
-        // A copy publish already past its native-mode check finished writing
-        // into the extension's container after native mode was off.
-        nonisolated(unsafe) let setting = setting()
-        setting.enable()
-        let finished = expectation(description: "disabled")
-        let early = expectation(description: "disabled while a publish held the lock")
-        early.isInverted = true
-        NativeWallpaperDeployment.nativeWriteLock.lock()
-        Thread.detachNewThread {
-            setting.disable()
-            early.fulfill()
-            finished.fulfill()
-        }
-        wait(for: [early], timeout: 0.2)
-        XCTAssertTrue(setting.isEnabled)
-        NativeWallpaperDeployment.nativeWriteLock.unlock()
-        wait(for: [finished], timeout: 5)
-        XCTAssertFalse(setting.isEnabled)
-    }
 }

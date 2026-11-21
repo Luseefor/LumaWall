@@ -782,6 +782,39 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)?.variants)
     }
 
+    @MainActor
+    func testTurningNativeModeOffReturnsWhileMetadataWriteIsBlocked() throws {
+        let suite = "VariantPublicationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        nonisolated(unsafe) let setting = NativeModeSetting(defaults: defaults, usedNativeBefore: { false })
+        setting.enable()
+        try deploy(hash: "aaa")
+        let job = job(hash: "aaa")
+        let staged = try stage(job)
+        let videos = self.videos
+        let size = self.size
+        let writing = DispatchSemaphore(value: 0)
+        let disabled = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            defer { finished.signal() }
+            _ = NativeWallpaperDeployment.publish(
+                staged, job: job, resolution: size, videosFolderURL: videos,
+                writeMetadata: { data, folder in
+                    writing.signal()
+                    XCTAssertEqual(disabled.wait(timeout: .now() + 2), .success)
+                    XCTAssertFalse(setting.isEnabled)
+                    try folder.writeFile(named: "metadata.json", contents: data)
+                },
+                isNativeModeOn: { setting.isEnabled })
+        }
+        XCTAssertEqual(writing.wait(timeout: .now() + 5), .success)
+        setting.disable()
+        disabled.signal()
+        XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
+    }
+
     func testAFailedMetadataWriteNeverTakesTheFileBackFromTheEntry() throws {
         // The export went back to staging by name, so the extension could
         // swap it inside the entry first and have the app probe its bytes.
