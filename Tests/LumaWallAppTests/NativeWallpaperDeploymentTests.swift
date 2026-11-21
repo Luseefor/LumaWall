@@ -782,6 +782,46 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertNil(try NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos)?.variants)
     }
 
+    func testPublishMergesVariantsWrittenWhileWaitingForTheEntryFileLock() throws {
+        try deploy(hash: "aaa")
+        let entryURL = videos.appendingPathComponent(id)
+        let lock = open(entryURL.appendingPathComponent(".copy-publish.lock").path, O_CREAT | O_RDWR, 0o600)
+        guard lock >= 0 else { throw POSIXError(.EIO) }
+        defer { close(lock) }
+        guard flock(lock, LOCK_EX) == 0 else { throw POSIXError(.EIO) }
+
+        let job = job(hash: "aaa")
+        let staged = try stage(job)
+        let videos = self.videos
+        let size = self.size
+        let started = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            started.signal()
+            XCTAssertEqual(
+                NativeWallpaperDeployment.publish(staged, job: job, resolution: size, videosFolderURL: videos, isNativeModeOn: { true }),
+                .published)
+            finished.signal()
+        }
+        XCTAssertEqual(started.wait(timeout: .now() + 5), .success)
+        let beforeUnlock = finished.wait(timeout: .now() + 0.5)
+        XCTAssertEqual(beforeUnlock, .timedOut)
+
+        let otherMovie = "Wallpaper.reduced.mov"
+        var entry = try XCTUnwrap(NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos))
+        entry.variants = [.init(filename: otherMovie, fps: 30, resolution: size)]
+        let folder = try TrustedDirectory(url: entryURL)
+        try folder.writeFile(named: otherMovie, contents: Data("other copy".utf8))
+        try folder.writeFile(named: "metadata.json", contents: JSONEncoder().encode(entry))
+        XCTAssertEqual(flock(lock, LOCK_UN), 0)
+        if beforeUnlock == .timedOut {
+            XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
+        }
+
+        let updated = try XCTUnwrap(NativeWallpaperDeployment.entry(id: id, videosFolderURL: videos))
+        XCTAssertEqual(Set(updated.variants?.map(\.filename) ?? []), [otherMovie, minimal.filename])
+    }
+
     @MainActor
     func testTurningNativeModeOffReturnsWhileMetadataWriteIsBlocked() throws {
         let suite = "VariantPublicationTests.\(UUID().uuidString)"

@@ -122,6 +122,22 @@ public final class TrustedDirectory {
         return handle
     }
 
+    /// Runs work under a file lock shared by cooperating processes. Keep the
+    /// lock file in place so waiters and new callers always lock the same inode.
+    public func withExclusiveFileLock<Result>(named name: String, _ work: () throws -> Result) throws -> Result {
+        try Self.checkName(name)
+        let lock = openat(fd, name, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
+        guard lock >= 0 else { throw POSIXError.current }
+        defer { close(lock) }
+        var info = stat()
+        guard fstat(lock, &info) == 0 else { throw POSIXError.current }
+        guard Self.kind(of: info.st_mode) == .file else { throw POSIXError(.EFTYPE) }
+        while flock(lock, LOCK_EX) != 0 {
+            guard errno == EINTR else { throw POSIXError.current }
+        }
+        return try work()
+    }
+
     /// Writes `contents` to `name` in one step: the bytes go to a new hidden
     /// file opened `O_EXCL | O_NOFOLLOW`, which is then renamed over `name`.
     /// A symlink at `name` is replaced, never written through. Fails on a

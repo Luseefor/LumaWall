@@ -296,47 +296,47 @@ extension NativeWallpaperDeployment {
             } catch {
                 return .failed
             }
-            let current: EntryInfo
-            do {
-                guard let entry = try entry(id: job.entryID, readingFrom: folder), entry.contentHash == job.contentHash else {
-                    try? staging.removeFile(named: stagedName)
-                    return .stale
-                }
-                current = entry
-            } catch {
-                return .failed
-            }
-            let name = job.spec.filename
-            var updated = current
-            let listed = (current.variants ?? []).filter { (try? folder.kind(ofItemNamed: $0.filename)) == .file }
-            let variant = NativeVideoVariant(filename: name, fps: job.spec.recordedFPS, resolution: resolution)
-            updated.variants = merging(listed, with: [variant])
-            guard let metadata = try? JSONEncoder().encode(updated) else { return .failed }
             guard isNativeModeOn() else { return .nativeModeOff }
-            // Moved from a name of its own: replacing an existing copy
-            // swaps the old file into staging for a moment, and under the
-            // staged name another LumaWall could take it for a finished
-            // export. A `.partial.mov` is never read, and cleanup deletes
-            // one left behind.
-            let moving = "\(UUID().uuidString).publishing.partial.mov"
-            do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
             do {
-                try staging.publishItem(named: moving, into: folder, as: name)
+                return try folder.withExclusiveFileLock(named: ".copy-publish.lock") {
+                    guard var updated = try entry(id: job.entryID, readingFrom: folder), updated.contentHash == job.contentHash else {
+                        try? staging.removeFile(named: stagedName)
+                        return .stale
+                    }
+                    let name = job.spec.filename
+                    let listed = (updated.variants ?? []).filter { (try? folder.kind(ofItemNamed: $0.filename)) == .file }
+                    let variant = NativeVideoVariant(filename: name, fps: job.spec.recordedFPS, resolution: resolution)
+                    updated.variants = merging(listed, with: [variant])
+                    let metadata = try JSONEncoder().encode(updated)
+                    guard isNativeModeOn() else { return .nativeModeOff }
+                    // Moved from a name of its own: replacing an existing copy
+                    // swaps the old file into staging for a moment, and under the
+                    // staged name another LumaWall could take it for a finished
+                    // export. A `.partial.mov` is never read, and cleanup deletes
+                    // one left behind.
+                    let moving = "\(UUID().uuidString).publishing.partial.mov"
+                    do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
+                    do {
+                        try staging.publishItem(named: moving, into: folder, as: name)
+                    } catch {
+                        // Nothing moved: `moving` still holds the export.
+                        try? staging.renameItem(named: moving, to: stagedName)
+                        return .failed
+                    }
+                    do {
+                        try writeMetadata(metadata, folder)
+                    } catch {
+                        // Not moved back to staging: in the entry the extension
+                        // can have swapped it, and staging only holds bytes the
+                        // app encoded. The retry encodes again.
+                        try? folder.removeFile(named: name)
+                        return .failed
+                    }
+                    return .published
+                }
             } catch {
-                // Nothing moved: `moving` still holds the export.
-                try? staging.renameItem(named: moving, to: stagedName)
                 return .failed
             }
-            do {
-                try writeMetadata(metadata, folder)
-            } catch {
-                // Not moved back to staging: in the entry the extension
-                // can have swapped it, and staging only holds bytes the
-                // app encoded. The retry encodes again.
-                try? folder.removeFile(named: name)
-                return .failed
-            }
-            return .published
         }
     }
 
