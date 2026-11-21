@@ -140,7 +140,24 @@ final class WallpaperEngine {
         }
     }
 
+    /// Bumped by `clearAll`. An apply that was waiting when everything was
+    /// cleared (Restore original wallpaper) undoes itself instead of putting
+    /// a wallpaper back.
+    @ObservationIgnored private var clearCount = 0
+
     func apply(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition = .init()) async throws {
+        let clears = clearCount
+        try await applyNow(asset, to: displayID, composition: composition)
+        if clearCount != clears { try? await clear(displayID) }
+    }
+
+    func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
+        let clears = clearCount
+        try await applyToAllNow(asset, composition: composition)
+        if clearCount != clears { try? await clearAll() }
+    }
+
+    private func applyNow(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition) async throws {
         libraryByID[asset.id] = asset
         let generation = hostGeneration
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil,
@@ -163,7 +180,7 @@ final class WallpaperEngine {
         try await overlay.apply(asset, to: displayID, composition: composition)
     }
 
-    func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
+    private func applyToAllNow(_ asset: WallpaperAsset, composition: DisplayComposition) async throws {
         libraryByID[asset.id] = asset
         let generation = hostGeneration
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
@@ -208,6 +225,7 @@ final class WallpaperEngine {
     }
 
     func clearAll() async throws {
+        clearCount += 1
         if mode == .native, let native {
             try await native.clearAll()
         }
@@ -297,7 +315,9 @@ final class WallpaperEngine {
     private func fallBackToOverlay() async {
         hostGeneration += 1
         mode = .overlay
-        let lost = (native?.activeDisplayIDs ?? []).subtracting(nativeFallbackDisplayIDs)
+        // Every display leaves native mode, including ones whose first
+        // write was the one denied.
+        let lost = Set(displays.refresh().map(\.displayID)).subtracting(nativeFallbackDisplayIDs)
         native?.detach()
         if !lost.isEmpty {
             onNativeFallback?(NativeFallback(displayIDs: lost, error: nil))
