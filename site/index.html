@@ -8,223 +8,384 @@
       name="description"
       content="LumaWall plays your own videos as macOS wallpapers and stops drawing when nothing can see them. Open source, with nothing sent off your Mac."
     />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#08090b" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#ffffff" />
     <meta property="og:title" content="LumaWall" />
     <meta property="og:description" content="The macOS video wallpaper that knows when you can't see it." />
     <link rel="icon" href="icon.png" type="image/png" />
     <link rel="apple-touch-icon" href="icon.png" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="css/hero.css" />
+    <link rel="stylesheet" href="css/gallery.css" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/features.css" />
+    <link rel="stylesheet" href="css/efficiency.css" />
     <link rel="stylesheet" href="css/energy.css" />
     <script type="module" src="js/main.js"></script>
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
 
-    <header class="menubar">
-      <nav class="menubar-nav" aria-label="Sections">
-        <a class="brand" href="#top"><img src="icon.png" alt="" width="20" height="20" />LumaWall</a>
+    <header class="nav">
+      <nav class="nav-inner" aria-label="Sections">
+        <a class="brand" href="#top"><img src="icon.png" alt="" width="22" height="22" />LumaWall</a>
         <ul>
-          <li><a href="#demo">Demo</a></li>
-          <li><a href="#energy">Energy</a></li>
+          <li><a href="#gallery">Gallery</a></li>
+          <li><a href="#app">App</a></li>
           <li><a href="#features">Features</a></li>
+          <li><a href="#efficiency">Efficiency</a></li>
           <li><a href="#privacy">Privacy</a></li>
-          <li><a href="#get">Get it</a></li>
         </ul>
+        <a class="nav-cta" href="https://github.com/Luseefor/LumaWall/releases">Follow releases</a>
       </nav>
-      <p
-        class="hud"
-        title="Frames the wallpaper above drew in the last second, and LumaWall's measured power for the same state"
-      >
-        <span class="hud-dot" data-hud-dot aria-hidden="true"></span>
-        <span class="hud-state" data-hud-state>Paused</span>
-        <span><span class="num" data-hud-fps>0</span> fps</span>
-        <span><span class="num" data-hud-mw>1</span> mW <span class="hud-note">(simulated)</span></span>
-        <button type="button" class="hud-pause" data-hero-pause aria-pressed="false">Pause</button>
-      </p>
     </header>
 
     <main id="main">
       <section class="hero" id="top" aria-labelledby="hero-title">
-        <canvas class="wall" data-hero-canvas aria-hidden="true"></canvas>
         <div class="hero-copy">
-          <h1 id="hero-title">Your videos as<br />live Mac wallpapers.</h1>
-          <p class="lede">
-            Free and open source. Works offline with no account or analytics.
-          </p>
+          <h1 id="hero-title">Your videos as live Mac wallpapers.</h1>
+          <p class="lede">Free and open source. Works offline with no account or analytics.</p>
           <div class="actions">
-            <a class="button primary" href="#demo">See it pause</a>
+            <a class="button primary" href="https://github.com/Luseefor/LumaWall/releases">Follow releases</a>
             <a class="button" href="https://github.com/Luseefor/LumaWall">View on GitHub</a>
           </div>
         </div>
+
+        <div class="rig-wrap">
+          <div class="rig" role="img" aria-label="A MacBook and a portrait display, both playing video wallpapers">
+            <div class="mac">
+              <div class="mac-lid">
+                <div class="mac-screen" data-cycle="5200">
+                  <video class="layer on" data-layer src="media/wall-3.mp4" poster="media/wall-3.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <video class="layer" data-layer src="media/wall-2.mp4" poster="media/wall-2.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <video class="layer" data-layer src="media/wall-1.mp4" poster="media/wall-1.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <div class="osbar" aria-hidden="true">
+                    <img src="icon.png" alt="" width="64" height="64" />
+                    <b>LumaWall</b><span>File</span><span>Edit</span><span>View</span><span>Window</span>
+                    <i class="osbar-gap"></i>
+                    <span class="osbar-clock">Fri 9:41</span>
+                  </div>
+                  <div class="notch" aria-hidden="true"></div>
+                  <div class="dock" aria-hidden="true">
+                    <i></i><i></i>
+                    <i></i><img src="icon.png" alt="" width="64" height="64" />
+                    <i></i><i></i>
+                    <i></i>
+                  </div>
+                </div>
+              </div>
+              <div class="mac-base"></div>
+            </div>
+
+            <div class="display">
+              <div class="display-frame">
+                <div class="display-screen" data-cycle="5200">
+                  <video class="layer on" data-layer src="media/wall-portrait.mp4" poster="media/wall-portrait.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <video class="layer" data-layer src="media/wall-2.mp4" poster="media/wall-2.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                  <div class="osbar" aria-hidden="true">
+                    <i class="osbar-gap"></i><span class="osbar-clock">Fri 9:41</span>
+                  </div>
+                </div>
+              </div>
+              <div class="display-neck"></div>
+              <div class="display-foot"></div>
+            </div>
+          </div>
+          <button type="button" class="pill" data-hero-pause aria-pressed="false">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor" /></svg>
+            <span data-label>Pause wallpapers</span>
+          </button>
+        </div>
       </section>
 
-      <section class="section" id="demo" aria-labelledby="demo-title">
-        <header class="section-head">
-          <h2 id="demo-title">See what pausing saves</h2>
-          <p>
-            Drag the window over the wallpaper and watch the simulated power reading drop. The demo stops drawing
-            frames at 97% coverage. LumaWall uses its own coverage threshold.
-          </p>
-        </header>
+      <section class="section dark" id="gallery" aria-labelledby="gallery-title">
+        <div class="wrap">
+          <header class="head" data-reveal>
+            <h2 id="gallery-title">Any loop becomes the view.</h2>
+            <p>Import MP4 or MOV files and set them as your wallpaper. Hover or tap a loop to play it.</p>
+          </header>
+          <ul class="cards" data-reveal>
+          <li>
+            <button class="card" type="button" data-card aria-pressed="false" aria-label="Play sunset surf">
+              <video class="card-video" src="media/wall-1.mp4" poster="media/wall-1.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <span class="card-cap"><span>Sunset surf</span><span class="card-state" aria-hidden="true"></span></span>
+            </button>
+          </li>
+          <li>
+            <button class="card" type="button" data-card aria-pressed="false" aria-label="Play milky way">
+              <video class="card-video" src="media/wall-2.mp4" poster="media/wall-2.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <span class="card-cap"><span>Milky Way</span><span class="card-state" aria-hidden="true"></span></span>
+            </button>
+          </li>
+          <li>
+            <button class="card" type="button" data-card aria-pressed="false" aria-label="Play woodland waterfall">
+              <video class="card-video" src="media/wall-3.mp4" poster="media/wall-3.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <span class="card-cap"><span>Woodland waterfall</span><span class="card-state" aria-hidden="true"></span></span>
+            </button>
+          </li>
+          <li>
+            <button class="card" type="button" data-card aria-pressed="false" aria-label="Play city lights from above">
+              <video class="card-video" src="media/wall-4.mp4" poster="media/wall-4.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <span class="card-cap"><span>City lights from above</span><span class="card-state" aria-hidden="true"></span></span>
+            </button>
+          </li>
+          <li>
+            <button class="card" type="button" data-card aria-pressed="false" aria-label="Play blue ink">
+              <video class="card-video" src="media/wall-5.mp4" poster="media/wall-5.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <span class="card-cap"><span>Blue ink</span><span class="card-state" aria-hidden="true"></span></span>
+            </button>
+          </li>
+          <li>
+            <button class="card" type="button" data-card aria-pressed="false" aria-label="Play Sahara dunes">
+              <video class="card-video" src="media/wall-6.mp4" poster="media/wall-6.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+              <span class="card-cap"><span>Sahara dunes</span><span class="card-state" aria-hidden="true"></span></span>
+            </button>
+          </li>
+          </ul>
+          <p class="note">Sample loops for illustration. LumaWall plays the videos you import.</p>
+        </div>
+      </section>
 
-        <div class="demo" data-demo>
-          <div class="stage" data-stage>
-            <canvas class="wall" aria-hidden="true"></canvas>
-            <div
-              class="window"
-              data-window
-              tabindex="0"
-              role="group"
-              aria-label="todo.txt window"
-              aria-describedby="window-hint"
-            >
-              <div class="titlebar">
-                <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span class="title">todo.txt</span>
+      <section class="section" id="app" aria-labelledby="app-title">
+        <div class="wrap">
+          <header class="head center" data-reveal>
+            <h2 id="app-title">One window for every wallpaper.</h2>
+            <p>Pick a loop, choose a display and a mode, and LumaWall does the rest.</p>
+          </header>
+          <figure class="stage-app" data-reveal>
+            <div class="desk" aria-hidden="true"></div>
+            <div class="appwin" role="img" aria-label="Illustration of the LumaWall window with a sidebar, a preview of the playing wallpaper and a library of loops">
+              <div class="appwin-bar"><span class="lights"><i></i><i></i><i></i></span></div>
+              <div class="appwin-body">
+                <ul class="side">
+                  <li class="on"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9.5 10 3.5l7 6V17h-4.5v-4.5h-5V17H3z" /></svg><span>Home</span></li>
+                  <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h6v6H3zM11 4h6v6h-6zM3 12h6v4H3zM11 12h6v4h-6z" /></svg><span>Library</span></li>
+                  <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 4h15v9.5h-15zM7 16h6v1.5H7z" /></svg><span>Displays</span></li>
+                  <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM8.8 2h2.4l.4 2.1 1.6.9 2-.8 1.2 2.1-1.6 1.4v1.8l1.6 1.4-1.2 2.1-2-.8-1.6.9-.4 2.1H8.8l-.4-2.1-1.6-.9-2 .8-1.2-2.1L5.2 10V8.2L3.6 6.8l1.2-2.1 2 .8 1.6-.9z" fill-rule="evenodd" /></svg><span>Settings</span></li>
+                </ul>
+                <div class="main">
+                  <div class="preview">
+                    <video data-autoplay src="media/wall-1.mp4" poster="media/wall-1.jpg" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
+                    <div class="preview-meta">
+                      <span class="eyebrow">Now playing</span>
+                      <strong>Sunset surf</strong>
+                    </div>
+                    <span class="chip">Safe mode</span>
+                  </div>
+                  <h3 class="main-title">Library</h3>
+                  <ul class="thumbs">
+                  <li><img src="media/wall-2.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Milky Way</span></li>
+                  <li><img src="media/wall-3.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Woodland waterfall</span></li>
+                  <li><img src="media/wall-4.jpg" alt="" loading="lazy" width="1600" height="900" /><span>City lights from above</span></li>
+                  <li><img src="media/wall-5.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Blue ink</span></li>
+                  <li><img src="media/wall-6.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Sahara dunes</span></li>
+                  <li><img src="media/wall-1.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Sunset surf</span></li>
+                  </ul>
+                </div>
               </div>
-              <ul class="window-body" aria-hidden="true">
-                <li>Renew passport</li>
-                <li>Book the train to Lyon</li>
-                <li>Ask the landlord about the heater</li>
-                <li>Return library books</li>
-                <li>Back up the photo library</li>
+            </div>
+            <figcaption>An illustration of the app, not a screenshot.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section alt" id="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <header class="head" data-reveal>
+            <h2 id="features-title">Built for every Mac setup.</h2>
+          </header>
+          <ul class="bento">
+            <li class="tile t-safe" data-reveal>
+              <img class="tile-bg" src="media/wall-2.jpg" alt="" loading="lazy" width="1600" height="900" />
+              <div class="layers" aria-hidden="true">
+                <span class="layer-card l1">Muted video overlay</span>
+                <span class="layer-card l2">Still poster</span>
+                <span class="layer-card l3">System wallpaper files, untouched</span>
+              </div>
+              <div class="tile-text">
+                <h3>Safe mode by default</h3>
+                <p>
+                  On macOS 15 or later, Safe mode plays muted video in a desktop overlay above a still poster. It
+                  uses documented macOS APIs and leaves system wallpaper files alone.
+                </p>
+              </div>
+            </li>
+            <li class="tile t-native" data-reveal>
+              <div class="mini-ui" aria-hidden="true">
+                <div class="row"><span>Native mode</span><span class="toggle on"></span></div>
+                <span class="badge">Experimental · macOS 26</span>
+                <span class="mini-button">Restore original wallpaper</span>
+              </div>
+              <div class="tile-text">
+                <h3>Native mode on macOS 26 or later</h3>
+                <p>
+                  Opt in for desktop and lock screen wallpapers, at your own risk. It uses undocumented interfaces,
+                  edits system wallpaper settings and restarts WallpaperAgent. If an assignment fails, LumaWall falls
+                  back to Safe mode, and Restore original wallpaper brings back your settings from a local backup.
+                </p>
+              </div>
+            </li>
+            <li class="tile t-displays" data-reveal>
+              <div class="mini-displays" aria-hidden="true">
+                <span class="md wide"><img src="media/wall-4.jpg" alt="" loading="lazy" width="1600" height="900" /></span>
+                <span class="md tall"><img src="media/wall-portrait.jpg" alt="" loading="lazy" width="720" height="1280" /></span>
+              </div>
+              <div class="tile-text">
+                <h3>Every display</h3>
+                <p>Use the same video everywhere or set one per display, including portrait displays.</p>
+              </div>
+            </li>
+            <li class="tile t-time dark" data-reveal>
+              <div class="day-night" aria-hidden="true">
+                <span class="dn day"><img src="media/wall-1.jpg" alt="" loading="lazy" width="1600" height="900" /><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.6" /><path d="M10 2v2.4M10 15.6V18M2 10h2.4M15.6 10H18M4.3 4.3 6 6M14 14l1.7 1.7M15.7 4.3 14 6M6 14l-1.7 1.7" /></svg></span>
+                <span class="dn night"><img src="media/wall-3.jpg" alt="" loading="lazy" width="1600" height="900" /><svg viewBox="0 0 20 20"><path d="M16.5 12.2A7 7 0 0 1 7.8 3.5a7 7 0 1 0 8.7 8.7z" /></svg></span>
+              </div>
+              <div class="tile-text">
+                <h3>Playlists and schedules</h3>
+                <p>Schedule a playlist, or switch between two videos by time of day or macOS appearance.</p>
+              </div>
+            </li>
+            <li class="tile t-battery" data-reveal>
+              <div class="big-number" aria-hidden="true">
+                <span>720p</span>
+                <svg viewBox="0 0 48 22" width="48" height="22"><rect x="1" y="1" width="42" height="20" rx="6" fill="none" stroke="currentColor" stroke-width="2" /><rect x="5" y="5" width="14" height="12" rx="3" fill="currentColor" /><path d="M45.5 8v6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg>
+              </div>
+              <div class="tile-text">
+                <h3>720p playback on battery</h3>
+                <p>On battery, LumaWall can switch to a 720p copy of your video.</p>
+              </div>
+            </li>
+            <li class="tile t-rules" data-reveal>
+              <div class="tile-text">
+                <h3>Pauses when nothing can see it</h3>
+                <p>
+                  Playback pauses when displays sleep or Game Mode is active. Settings also let you pause on covered
+                  displays or when your Mac locks. Reduce Motion shows a still frame.
+                </p>
+              </div>
+              <ul class="states" aria-hidden="true">
+                <li>Covered</li><li>Locked</li><li>Display asleep</li><li>Game Mode</li>
               </ul>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section dark" id="efficiency" aria-labelledby="efficiency-title">
+        <div class="wrap">
+          <header class="head" data-reveal>
+            <h2 id="efficiency-title">Stops drawing when you can't see it.</h2>
+            <p>
+              Drag the window over the wallpaper and watch the simulated power reading drop. The demo stops drawing
+              frames at 97% coverage. LumaWall uses its own coverage threshold.
+            </p>
+          </header>
+
+          <div class="demo" data-demo data-reveal>
+            <div class="stage" data-stage>
+              <canvas class="wall" aria-hidden="true"></canvas>
+              <div
+                class="window"
+                data-window
+                tabindex="0"
+                role="group"
+                aria-label="todo.txt window"
+                aria-describedby="window-hint"
+              >
+                <div class="titlebar">
+                  <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span class="title">todo.txt</span>
+                </div>
+                <ul class="window-body" aria-hidden="true">
+                  <li>Renew passport</li>
+                  <li>Book the train to Lyon</li>
+                  <li>Ask the landlord about the heater</li>
+                  <li>Return library books</li>
+                  <li>Back up the photo library</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="panel">
+              <dl class="readouts">
+                <div>
+                  <dt>Frames per second</dt>
+                  <dd class="num" data-fps>60</dd>
+                </div>
+                <div>
+                  <dt>Simulated LumaWall power</dt>
+                  <dd><span class="num" data-mw>12</span><span class="unit"> mW</span></dd>
+                </div>
+                <div>
+                  <dt>Covered</dt>
+                  <dd><span class="num" data-cover>0</span><span class="unit">%</span></dd>
+                </div>
+              </dl>
+              <p class="status" data-status role="status" aria-live="polite">Playing</p>
+
+              <div class="controls">
+                <div class="pair">
+                  <button type="button" class="button small" data-cover-button>Cover</button>
+                  <button type="button" class="button small" data-uncover-button>Uncover</button>
+                </div>
+                <button type="button" class="switch" role="switch" aria-checked="false" data-battery>On battery</button>
+                <button type="button" class="switch" role="switch" aria-checked="false" data-lock>Lock screen</button>
+              </div>
+              <p class="hint" id="window-hint">Drag the window, or focus it and use the arrow keys.</p>
+              <p class="hint" data-still-note hidden>
+                Reduced motion is on. The wallpaper stays still while the demo simulates playback.
+              </p>
             </div>
           </div>
 
-          <div class="panel">
-            <dl class="readouts">
-              <div>
-                <dt>Frames per second</dt>
-                <dd class="num" data-fps>60</dd>
-              </div>
-              <div>
-                <dt>Simulated LumaWall power</dt>
-                <dd><span class="num" data-mw>12</span><span class="unit"> mW</span></dd>
-              </div>
-              <div>
-                <dt>Covered</dt>
-                <dd><span class="num" data-cover>0</span><span class="unit">%</span></dd>
-              </div>
-            </dl>
-            <p class="status" data-status role="status" aria-live="polite">Playing</p>
-
-            <div class="controls">
-              <div class="pair">
-                <button type="button" class="button small" data-cover-button>Cover</button>
-                <button type="button" class="button small" data-uncover-button>Uncover</button>
-              </div>
-              <button type="button" class="switch" role="switch" aria-checked="false" data-battery>
-                On battery
-              </button>
-              <button type="button" class="switch" role="switch" aria-checked="false" data-lock>Lock screen</button>
+          <div class="energy" data-reveal>
+            <div class="energy-copy">
+              <h3>About 1 mW paused</h3>
+              <p>
+                Approximate power for LumaWall's own processes on one M-series MacBook with one video wallpaper.
+                Playback used about 7 to 12 mW.
+              </p>
             </div>
-            <p class="hint" id="window-hint">Drag the window, or focus it and use the arrow keys.</p>
-            <p class="hint" data-still-note hidden>
-              Reduced motion is on. The wallpaper stays still while the demo simulates playback.
-            </p>
+            <div data-energy-chart></div>
           </div>
         </div>
       </section>
 
-      <section class="section" id="energy" aria-labelledby="energy-title">
-        <header class="section-head">
-          <h2 id="energy-title">About 1 mW paused</h2>
-          <p>Approximate power for LumaWall's own processes on one M-series MacBook with one video wallpaper.
-            Playback used about 7 to 12 mW.</p>
-        </header>
-
-        <div data-energy-chart></div>
-      </section>
-
-      <section class="section" id="features" aria-labelledby="features-title">
-        <header class="section-head">
-          <h2 id="features-title">Wallpaper features</h2>
-        </header>
-        <ul class="grid">
-          <li>
-            <h3>Safe mode by default</h3>
-            <p>
-              On macOS 15 or later, the default Safe mode plays muted video in a desktop overlay above a still poster.
-              It uses documented macOS APIs and leaves system wallpaper files alone.
-            </p>
-          </li>
-          <li>
-            <h3>Native mode on macOS 26 or later</h3>
-            <p>
-              Opt in to experimental native mode for desktop and lock screen wallpapers. It uses undocumented
-              interfaces, edits system wallpaper settings and restarts WallpaperAgent. If a native assignment
-              fails, LumaWall automatically falls back to Safe mode. Use Restore original wallpaper to recover
-              your previous settings from a local backup.
-            </p>
-          </li>
-          <li>
-            <h3>Every display</h3>
-            <p>Use the same video everywhere or set one per display, including portrait displays.</p>
-          </li>
-          <li>
-            <h3>Playlists and schedules</h3>
-            <p>Schedule a playlist or switch between two videos by time of day or macOS appearance.</p>
-          </li>
-          <li>
-            <h3>720p playback on battery</h3>
-            <p>
-              On battery, LumaWall can switch to a 720p copy of your video.
-            </p>
-          </li>
-          <li>
-            <h3>Playback rules</h3>
-            <p>
-              Playback pauses when displays sleep or Game Mode is active. Settings also let you pause on covered
-              displays or when your Mac locks. Reduce Motion shows a still frame.
-            </p>
-          </li>
-        </ul>
-      </section>
-
       <section class="section" id="privacy" aria-labelledby="privacy-title">
-        <header class="section-head">
-          <h2 id="privacy-title">Privacy</h2>
-        </header>
-        <ul class="grid">
-          <li>
-            <h3>Nothing leaves your Mac</h3>
-            <p>
-              The app and wallpaper extension send no data. Checking for updates opens GitHub Releases in your browser.
-            </p>
-          </li>
-          <li>
-            <h3>Sandboxed video inspection</h3>
-            <p>
-              A sandboxed helper inspects imported videos through read-only file handles opened by the app.
-            </p>
-          </li>
-          <li>
-            <h3>Open source</h3>
-            <p>The source is available under the Apache 2.0 license.</p>
-          </li>
-        </ul>
-        <p class="links">
-          <a href="https://github.com/Luseefor/LumaWall/blob/main/PRIVACY.md">Privacy policy</a>
-          <a href="https://github.com/Luseefor/LumaWall/blob/main/TERMS.md">Terms of use</a>
-          <a href="https://github.com/Luseefor/LumaWall/blob/main/SECURITY.md">Security policy</a>
-        </p>
+        <div class="wrap privacy">
+          <header class="head center" data-reveal>
+            <h2 id="privacy-title">Nothing leaves your Mac.</h2>
+            <p>The app and wallpaper extension send no data. Checking for updates opens GitHub Releases in your browser.</p>
+          </header>
+          <ul class="facts" data-reveal>
+            <li>
+              <h3>Sandboxed video inspection</h3>
+              <p>A sandboxed helper inspects imported videos through read-only file handles opened by the app.</p>
+            </li>
+            <li>
+              <h3>Open source</h3>
+              <p>The source is available under the Apache 2.0 license.</p>
+            </li>
+          </ul>
+          <p class="links">
+            <a href="https://github.com/Luseefor/LumaWall/blob/main/PRIVACY.md">Privacy policy</a>
+            <a href="https://github.com/Luseefor/LumaWall/blob/main/TERMS.md">Terms of use</a>
+            <a href="https://github.com/Luseefor/LumaWall/blob/main/SECURITY.md">Security policy</a>
+          </p>
+        </div>
       </section>
 
-      <section class="section" id="get" aria-labelledby="get-title">
-        <div class="get">
-          <div>
-            <h2 id="get-title">Build from source</h2>
-            <p>
-              A signed, notarized download is unavailable. The repository has build instructions.
-            </p>
+      <section class="section alt get-section" id="get" aria-labelledby="get-title">
+        <div class="wrap">
+          <div class="get" data-reveal>
+            <h2 id="get-title">Build from source.</h2>
+            <p>A signed, notarized download is unavailable. The repository has build instructions.</p>
             <div class="actions">
               <a class="button primary" href="https://github.com/Luseefor/LumaWall/releases">Follow releases</a>
               <a class="button" href="https://github.com/Luseefor/LumaWall">Source code</a>
             </div>
           </div>
-          <dl class="requirements">
+          <dl class="requirements" data-reveal>
             <div>
               <dt>Safe mode</dt>
               <dd>macOS 15 or later</dd>
@@ -243,14 +404,17 @@
     </main>
 
     <footer class="footer">
-      <p class="links">
-        <a href="https://github.com/Luseefor/LumaWall/blob/main/LICENSE">Apache 2.0</a>
-        <a href="https://github.com/Luseefor/LumaWall/blob/main/PRIVACY.md">Privacy</a>
-        <a href="https://github.com/Luseefor/LumaWall/blob/main/TERMS.md">Terms</a>
-        <a href="https://github.com/Luseefor/LumaWall/blob/main/SECURITY.md">Security</a>
-        <a href="mailto:contact@rijan.sh">Conduct reports: contact@rijan.sh</a>
-      </p>
-      <p class="fine">LumaWall is not affiliated with Apple. macOS is a trademark of Apple Inc.</p>
+      <div class="wrap">
+        <p class="links">
+          <a href="https://github.com/Luseefor/LumaWall/blob/main/LICENSE">Apache 2.0</a>
+          <a href="https://github.com/Luseefor/LumaWall/blob/main/PRIVACY.md">Privacy</a>
+          <a href="https://github.com/Luseefor/LumaWall/blob/main/TERMS.md">Terms</a>
+          <a href="https://github.com/Luseefor/LumaWall/blob/main/SECURITY.md">Security</a>
+          <a href="media/CREDITS.md">Video credits</a>
+          <a href="mailto:contact@rijan.sh">Conduct reports: contact@rijan.sh</a>
+        </p>
+        <p class="fine">LumaWall is not affiliated with Apple. macOS is a trademark of Apple Inc.</p>
+      </div>
     </footer>
   </body>
 </html>

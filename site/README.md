@@ -20,7 +20,7 @@ node --test 'site/tests/*.test.*'
 
 The site is hosted on Vercel as a static project whose root is `site/`.
 `site/vercel.json` sets the security headers (a strict Content Security
-Policy: no inline scripts or styles, no third-party requests) and caching (scripts and styles revalidate on every load, so a deploy never pairs new HTML with stale JavaScript).
+Policy: no inline scripts or styles, no third-party requests; `media-src 'self'` allows the clips) and caching (scripts and styles revalidate on every load, so a deploy never pairs new HTML with stale JavaScript).
 `site/.vercelignore` keeps the tests and this README out of the deploy.
 
 Deploy from the repo root:
@@ -28,6 +28,12 @@ Deploy from the repo root:
 ```sh
 npx vercel@latest deploy site --prod
 ```
+
+## Media
+
+`site/media/` holds the wallpaper clips: `wall-1.mp4` to `wall-6.mp4` with posters `wall-1.jpg` to
+`wall-6.jpg` (1600x900), and `wall-portrait.mp4` and `.jpg` (720x1280). Clips are muted, loop and load
+only when in view. Reduced motion shows the posters.
 
 ## Rules
 

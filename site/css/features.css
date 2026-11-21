@@ -1,0 +1,413 @@
+.bento {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(12px, 1.6vw, 20px);
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 400px;
+  padding: clamp(24px, 3vw, 36px);
+  border-radius: 28px;
+  background: #fff;
+  color: var(--ink);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.tile.dark {
+  background: #1d1d1f;
+}
+
+.tile-text {
+  margin-top: auto;
+}
+
+.tile-text p {
+  margin-top: 10px;
+  color: var(--ink-2);
+  font-size: 1rem;
+  text-wrap: pretty;
+}
+
+.t-safe {
+  grid-column: span 4;
+  min-height: 520px;
+  --ink: #fff;
+  --ink-2: rgb(255 255 255 / 0.86);
+}
+
+.t-native {
+  grid-column: span 2;
+}
+
+.t-displays,
+.t-time,
+.t-battery {
+  grid-column: span 2;
+}
+
+.t-rules {
+  grid-column: span 6;
+  min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+  background: #e3f6f3;
+}
+
+.t-rules .tile-text {
+  max-width: 34rem;
+  margin: 0;
+}
+
+.t-rules .tile-text p {
+  color: #3f4d4b;
+}
+
+/* Safe mode: the video sits above a still poster. */
+
+.tile-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.t-safe::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(rgb(0 0 0 / 0.05) 20%, rgb(0 0 0 / 0.72));
+}
+
+.layers {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 340px);
+  margin-left: auto;
+}
+
+.layer-card {
+  padding: 14px 18px;
+  border: 1px solid rgb(255 255 255 / 0.35);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.2);
+  color: #fff;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+}
+
+.layer-card.l2 {
+  margin-left: 22px;
+  background: rgb(255 255 255 / 0.14);
+}
+
+.layer-card.l3 {
+  margin-left: 44px;
+  background: rgb(255 255 255 / 0.08);
+}
+
+.t-safe .tile-text {
+  max-width: 30rem;
+}
+
+.t-safe h3,
+.t-safe .tile-text p {
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.35);
+}
+
+/* Native mode: a settings row with the safety nets beside it. */
+
+.mini-ui,
+.mini-displays,
+.day-night,
+.big-number {
+  margin-block: auto;
+}
+
+.mini-ui {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+  padding-bottom: 28px;
+}
+
+.mini-ui .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgb(0 0 0 / 0.1);
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.toggle {
+  position: relative;
+  width: 46px;
+  height: 28px;
+  border-radius: 999px;
+  background: #d1d1d6;
+}
+
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+
+.toggle.on {
+  background: #1fb5a6;
+}
+
+.toggle.on::after {
+  left: 20px;
+}
+
+.badge {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #fff1cf;
+  color: #7a4b00;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.mini-button {
+  padding: 9px 16px;
+  border: 1.5px solid rgb(0 0 0 / 0.18);
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* Every display. */
+
+.mini-displays {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 14px;
+  padding-bottom: 28px;
+}
+
+.md {
+  display: block;
+  padding: 4px;
+  border-radius: 10px;
+  background: #111;
+  box-shadow: 0 12px 24px rgb(0 0 0 / 0.16);
+}
+
+.md img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.md.wide {
+  width: 58%;
+  aspect-ratio: 16 / 10;
+}
+
+.md.tall {
+  width: 24%;
+  aspect-ratio: 9 / 16;
+}
+
+/* Day and night. */
+
+.day-night {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding-bottom: 28px;
+}
+
+.dn {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.dn img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dn.night img {
+  filter: brightness(0.55) saturate(1.1);
+}
+
+.dn svg {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.25);
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.dn.night svg {
+  fill: #fff;
+  stroke: none;
+}
+
+.dn::after {
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.5);
+}
+
+.dn.day::after {
+  content: "Light";
+}
+
+.dn.night::after {
+  content: "Dark";
+}
+
+.t-time .tile-text p {
+  color: #b4b4ba;
+}
+
+.t-time {
+  --ink: #f5f5f7;
+}
+
+/* 720p. */
+
+.big-number {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 28px;
+  color: #0e7d72;
+}
+
+.big-number span {
+  font-size: clamp(3.5rem, 7vw, 5.5rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+
+.big-number svg {
+  flex: none;
+  width: 56px;
+  height: auto;
+}
+
+/* Playback rules. */
+
+.states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.states li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: #fff;
+  color: #1d1d1f;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.states li::before {
+  content: "";
+  width: 9px;
+  height: 11px;
+  border-inline: 3px solid #0e7d72;
+}
+
+@media (max-width: 1000px) {
+  .t-safe,
+  .t-rules {
+    grid-column: span 6;
+  }
+
+  .t-native,
+  .t-displays,
+  .t-time,
+  .t-battery {
+    grid-column: span 3;
+  }
+
+  .t-battery {
+    grid-column: span 6;
+    min-height: 0;
+  }
+
+  .t-rules {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .states {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .t-native,
+  .t-displays,
+  .t-time,
+  .t-battery {
+    grid-column: span 6;
+  }
+
+  .tile {
+    min-height: 0;
+    border-radius: 24px;
+  }
+
+  .t-safe {
+    min-height: 480px;
+  }
+
+  .layers {
+    margin-bottom: 40px;
+  }
+}
