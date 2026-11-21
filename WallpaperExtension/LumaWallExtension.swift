@@ -17,6 +17,7 @@ final class LumaWallExtension: NSObject, AppExtension {
             VideoLibrary.shared.scan()
             observeLibraryChanges()
             observeCacheControls()
+            observeHealthPings()
             // Push current view models shortly after launch: the extension is only
             // ever spawned by a host connection, and the host's disk cache may
             // predate library changes made while no extension process was alive to
@@ -276,6 +277,26 @@ final class LumaWallExtension: NSObject, AppExtension {
             center, observer,
             { _, _, _, _, _ in clearWallpaperSnapshotCache() },
             "app.lumawall.personal.clearCaches" as CFString,
+            nil, .deliverImmediately,
+        )
+    }
+
+    /// The app's check that this extension still serves its displays (ADR 0003).
+    private func observeHealthPings() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let observer = Unmanaged.passUnretained(self).toOpaque()
+        CFNotificationCenterAddObserver(
+            center, observer,
+            { _, _, _, _, _ in
+                guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+                else { return }
+                // Every role counts: a surface created as a preview can be handed
+                // to the live desktop and keep its preview flag.
+                HealthReply.answer(documents: documents) {
+                    Set(WallpaperState.shared.activeDisplayContexts().map(\.displayID))
+                }
+            },
+            HealthAnswers.pingName as CFString,
             nil, .deliverImmediately,
         )
     }

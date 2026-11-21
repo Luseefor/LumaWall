@@ -53,6 +53,25 @@ final class WallpaperEngine {
 
     var hasNativeHost: Bool { native != nil }
 
+    /// Displays the system host plays right now: not the overlay's, and not
+    /// fallen back. The extension health check watches these.
+    var nativeServedDisplayIDs: Set<DisplayID> {
+        guard mode == .native, let native else { return [] }
+        return native.activeDisplayIDs.subtracting(overlay.activeDisplayIDs).subtracting(nativeFallbackDisplayIDs)
+    }
+
+    /// The extension stopped serving these displays (ADR 0003): Safe mode
+    /// takes them until native mode is turned off and on again.
+    func fallBackUnserved(_ displayIDs: Set<DisplayID>) async {
+        guard mode == .native, let native else { return }
+        let added = displayIDs.intersection(nativeServedDisplayIDs)
+        guard !added.isEmpty else { return }
+        native.release(added)
+        fallBack(added, after: NativeWallpaperEngine.HealthError.stoppedServing)
+        await overlay.restore(
+            using: Array(libraryByID.values), nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
+    }
+
     /// Turns native mode on (after the user confirmed the warning) or off,
     /// and moves playback to the new host.
     func setNativeMode(enabled: Bool, library: [WallpaperAsset]) async {
@@ -121,7 +140,24 @@ final class WallpaperEngine {
         }
     }
 
+    /// Bumped by `clearAll`. An apply that was waiting when everything was
+    /// cleared (Restore original wallpaper) undoes itself instead of putting
+    /// a wallpaper back.
+    @ObservationIgnored private var clearCount = 0
+
     func apply(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition = .init()) async throws {
+        let clears = clearCount
+        try await applyNow(asset, to: displayID, composition: composition)
+        if clearCount != clears { try? await clear(displayID) }
+    }
+
+    func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
+        let clears = clearCount
+        try await applyToAllNow(asset, composition: composition)
+        if clearCount != clears { try? await clearAll() }
+    }
+
+    private func applyNow(_ asset: WallpaperAsset, to displayID: DisplayID, composition: DisplayComposition) async throws {
         libraryByID[asset.id] = asset
         let generation = hostGeneration
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil,
@@ -129,8 +165,9 @@ final class WallpaperEngine {
         {
             do {
                 try await native.apply(asset, to: displayID, composition: composition)
-                // Native mode went off meanwhile: the overlay plays it instead.
-                guard generation == hostGeneration else {
+                // Native mode went off, or the health check gave the display
+                // to the overlay, meanwhile: the overlay plays it instead.
+                guard generation == hostGeneration, !nativeFallbackDisplayIDs.contains(displayID) else {
                     try await overlay.apply(asset, to: displayID, composition: composition)
                     return
                 }
@@ -143,7 +180,7 @@ final class WallpaperEngine {
         try await overlay.apply(asset, to: displayID, composition: composition)
     }
 
-    func applyToAll(_ asset: WallpaperAsset, composition: DisplayComposition = .init()) async throws {
+    private func applyToAllNow(_ asset: WallpaperAsset, composition: DisplayComposition) async throws {
         libraryByID[asset.id] = asset
         let generation = hostGeneration
         if mode == .native, let native, composition.usesDefaultCrop, composition.spanningCanvas == nil {
@@ -166,7 +203,8 @@ final class WallpaperEngine {
                     fallBack(missing, after: NativeWallpaperAssignmentService.AssignmentError.unknownDisplay)
                 }
                 // Overlay errors from here on leave the native displays alone.
-                let overlayIDs = fellBack.union(missing)
+                // Includes displays the health check gave the overlay meanwhile.
+                let overlayIDs = fellBack.union(missing).union(connected.intersection(nativeFallbackDisplayIDs))
                 for id in connected.subtracting(overlayIDs) { overlay.dismantleSession(id) }
                 for id in overlayIDs { try await overlay.apply(asset, to: id, composition: composition) }
                 return
@@ -187,6 +225,7 @@ final class WallpaperEngine {
     }
 
     func clearAll() async throws {
+        clearCount += 1
         if mode == .native, let native {
             try await native.clearAll()
         }
@@ -276,7 +315,13 @@ final class WallpaperEngine {
     private func fallBackToOverlay() async {
         hostGeneration += 1
         mode = .overlay
+        // Every display leaves native mode, including ones whose first
+        // write was the one denied.
+        let lost = Set(displays.refresh().map(\.displayID)).subtracting(nativeFallbackDisplayIDs)
         native?.detach()
+        if !lost.isEmpty {
+            onNativeFallback?(NativeFallback(displayIDs: lost, error: nil))
+        }
         nativeHostLog.notice("Native wallpaper storage access denied; using overlay playback")
         await overlay.restore(using: Array(libraryByID.values))
     }

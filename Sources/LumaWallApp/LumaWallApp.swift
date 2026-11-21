@@ -93,6 +93,15 @@ struct RootView: View {
             VStack(spacing: 0) {
                 AppChrome(model: model)
                 Rectangle().fill(Theme.line).frame(height: 1)
+                if let notice = model.nativeFailureNotice {
+                    NativeFailureBanner(
+                        notice: notice,
+                        restore: model.restoreOriginalWallpaper,
+                        dismiss: model.dismissNativeFailureNotice
+                    )
+                    .padding(.horizontal, 24)
+                    .padding(.top, 14)
+                }
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
