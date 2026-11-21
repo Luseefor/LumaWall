@@ -19,6 +19,7 @@ function setUpHero() {
 
   let inView = true;
   let onBattery = false;
+  let userPaused = false;
 
   const loop = createLoop((time) => wall.draw(time), {
     onStats(fps) {
@@ -30,7 +31,7 @@ function setUpHero() {
   });
 
   function update() {
-    const run = wall.ok && inView && !document.hidden && !reducedMotion.matches;
+    const run = wall.ok && inView && !userPaused && !document.hidden && !reducedMotion.matches;
     loop.setFps(onBattery ? 30 : 60);
     if (run) loop.start();
     else loop.stop();
@@ -40,6 +41,20 @@ function setUpHero() {
     // Resizing clears the canvas, so a paused wallpaper needs one still frame.
     if (wall.ok && wall.resize() && !loop.running) wall.draw(loop.time);
   }
+
+  wall.onContextChange = () => {
+    hero.classList.toggle("no-webgl", !wall.ok);
+    if (wall.ok && !loop.running) wall.draw(loop.time);
+    update();
+  };
+
+  const pauseButton = document.querySelector("[data-hero-pause]");
+  pauseButton.addEventListener("click", () => {
+    userPaused = !userPaused;
+    pauseButton.setAttribute("aria-pressed", String(userPaused));
+    pauseButton.textContent = userPaused ? "Play" : "Pause";
+    update();
+  });
 
   new ResizeObserver(redraw).observe(canvas);
   new IntersectionObserver(([entry]) => {

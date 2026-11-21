@@ -387,9 +387,13 @@ a {
   cursor: grabbing;
 }
 
+.stage:has(.window:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
 .window:focus-visible {
-  outline-offset: -4px;
-  border-radius: var(--r-m);
+  outline: none;
 }
 
 .titlebar {
@@ -711,4 +715,18 @@ a {
   .switch[aria-checked="true"]::after {
     background-color: Highlight;
   }
+}
+
+.hud-pause {
+  font: inherit;
+  color: var(--ink-2);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 var(--s2);
+  cursor: pointer;
+}
+
+.hud-pause:hover {
+  color: var(--ink);
 }

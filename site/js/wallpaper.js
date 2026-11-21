@@ -67,11 +67,11 @@ void main() {
   for (int i = 0; i < 3; i++) {
     light += curtain(w, float(i), t, f) * (0.55 - 0.1 * float(i));
   }
-  light += vec3(0.05, 0.10, 0.22) * smoothstep(1.1, 0.0, length(p - vec2(-0.5, -0.5))) * 0.5;
+  light += vec3(0.05, 0.10, 0.22) * (1.0 - smoothstep(0.0, 1.1, length(p - vec2(-0.5, -0.5)))) * 0.5;
 
   vec3 base = mix(vec3(0.008, 0.010, 0.014), vec3(0.020, 0.024, 0.040), uv.y);
   vec3 col = 1.0 - exp(-(base + light) * 1.6);
-  col *= mix(0.45, 1.0, smoothstep(1.3, 0.2, length(p * vec2(0.75, 1.0))));
+  col *= mix(0.45, 1.0, (1.0 - smoothstep(0.2, 1.3, length(p * vec2(0.75, 1.0)))));
   col += (hash(gl_FragCoord.xy + fract(uTime)) - 0.5) / 255.0;
   gl_FragColor = vec4(col, 1.0);
 }
@@ -90,12 +90,17 @@ export class Wallpaper {
     this.maxPixelRatio = maxPixelRatio;
     this.gl = null;
     this.ok = this.#setUp();
+    /** Set by the owner; called after the context is lost or restored. */
+    this.onContextChange = () => {};
     canvas.addEventListener("webglcontextlost", (e) => {
       e.preventDefault();
       this.ok = false;
+      this.onContextChange();
     });
     canvas.addEventListener("webglcontextrestored", () => {
       this.ok = this.#setUp();
+      this.resize();
+      this.onContextChange();
     });
   }
 
@@ -179,6 +184,7 @@ export function createLoop(draw, { fps = 60, startTime = 40, onStats = () => {} 
     lastDraw = now;
     sceneTime += dt * speed;
     draw(sceneTime, dt);
+    if (!raf) return; // the draw callback stopped the loop
     drawn.push(now);
     while (drawn.length && drawn[0] <= now - 1000) drawn.shift();
     if (now - lastStats > 250) {

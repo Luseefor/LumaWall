@@ -75,6 +75,8 @@ export function setUpDemo(root, reducedMotion) {
   }
 
   function render() {
+    // Without a live loop nothing advances the lock ramp, so settle it.
+    if (!live() && state.progress !== (state.locked ? 0 : 1)) return dispatch({ type: "tick", seconds: 5 });
     const r = readout(state);
     loop.setFps(r.fps || 60);
     loop.setSpeed(r.speed);
@@ -175,6 +177,12 @@ export function setUpDemo(root, reducedMotion) {
   }).observe(stage);
   document.addEventListener("visibilitychange", render);
   reducedMotion.addEventListener("change", render);
+
+  wall.onContextChange = () => {
+    stage.classList.toggle("no-webgl", !wall.ok);
+    if (wall.ok && !loop.running) wall.draw(loop.time);
+    render();
+  };
 
   wall.resize();
   wall.draw(loop.time);
