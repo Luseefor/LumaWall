@@ -1,0 +1,42 @@
+.lost {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 100svh;
+  padding: calc(var(--nav) + 32px) var(--gutter) 64px;
+  text-align: center;
+}
+
+.lost-code {
+  font-size: clamp(4rem, 2rem + 12vw, 9rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  background: linear-gradient(115deg, #33d1c2, #4f7cff 55%, #c04fd1);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lost h1 {
+  max-width: 16em;
+  margin-top: 16px;
+  font-size: clamp(2rem, 1.2rem + 3.2vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.lost .lede {
+  max-width: 34rem;
+  margin-top: 16px;
+  color: var(--ink-2);
+  font-size: var(--text-lede);
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+
+.lost .actions {
+  justify-content: center;
+}
