@@ -290,7 +290,11 @@ final class LumaWallExtension: NSObject, AppExtension {
             { _, _, _, _, _ in
                 guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
                 else { return }
-                HealthReply.answer(documents: documents) { WallpaperState.shared.liveDisplayIDs() }
+                // Every role counts: a surface created as a preview can be handed
+                // to the live desktop and keep its preview flag.
+                HealthReply.answer(documents: documents) {
+                    Set(WallpaperState.shared.activeDisplayContexts().map(\.displayID))
+                }
             },
             HealthAnswers.pingName as CFString,
             nil, .deliverImmediately,

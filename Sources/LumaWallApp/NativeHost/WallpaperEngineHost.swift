@@ -148,8 +148,9 @@ final class WallpaperEngine {
         {
             do {
                 try await native.apply(asset, to: displayID, composition: composition)
-                // Native mode went off meanwhile: the overlay plays it instead.
-                guard generation == hostGeneration else {
+                // Native mode went off, or the health check gave the display
+                // to the overlay, meanwhile: the overlay plays it instead.
+                guard generation == hostGeneration, !nativeFallbackDisplayIDs.contains(displayID) else {
                     try await overlay.apply(asset, to: displayID, composition: composition)
                     return
                 }
@@ -185,7 +186,8 @@ final class WallpaperEngine {
                     fallBack(missing, after: NativeWallpaperAssignmentService.AssignmentError.unknownDisplay)
                 }
                 // Overlay errors from here on leave the native displays alone.
-                let overlayIDs = fellBack.union(missing)
+                // Includes displays the health check gave the overlay meanwhile.
+                let overlayIDs = fellBack.union(missing).union(connected.intersection(nativeFallbackDisplayIDs))
                 for id in connected.subtracting(overlayIDs) { overlay.dismantleSession(id) }
                 for id in overlayIDs { try await overlay.apply(asset, to: id, composition: composition) }
                 return
@@ -295,7 +297,11 @@ final class WallpaperEngine {
     private func fallBackToOverlay() async {
         hostGeneration += 1
         mode = .overlay
+        let lost = (native?.activeDisplayIDs ?? []).subtracting(nativeFallbackDisplayIDs)
         native?.detach()
+        if !lost.isEmpty {
+            onNativeFallback?(NativeFallback(displayIDs: lost, error: nil))
+        }
         nativeHostLog.notice("Native wallpaper storage access denied; using overlay playback")
         await overlay.restore(using: Array(libraryByID.values))
     }
