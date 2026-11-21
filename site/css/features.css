@@ -11,14 +11,14 @@
   min-height: 400px;
   padding: clamp(24px, 3vw, 36px);
   border-radius: 28px;
-  background: #fff;
+  background: var(--tile);
   color: var(--ink);
   overflow: hidden;
   isolation: isolate;
 }
 
 .tile.dark {
-  background: #1d1d1f;
+  background: var(--tile-dark);
 }
 
 .tile-text {
@@ -56,7 +56,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 40px;
-  background: #e3f6f3;
+  background: var(--tint);
 }
 
 .t-rules .tile-text {
@@ -65,7 +65,7 @@
 }
 
 .t-rules .tile-text p {
-  color: #3f4d4b;
+  color: var(--tint-ink);
 }
 
 /* Safe mode: the video sits above a still poster. */
@@ -149,7 +149,7 @@
   gap: 16px;
   width: 100%;
   padding-bottom: 14px;
-  border-bottom: 1px solid rgb(0 0 0 / 0.1);
+  border-bottom: 1px solid var(--line);
   font-size: 1.0625rem;
   font-weight: 600;
 }
@@ -159,7 +159,7 @@
   width: 46px;
   height: 28px;
   border-radius: 999px;
-  background: #d1d1d6;
+  background: var(--toggle-off);
 }
 
 .toggle::after {
@@ -185,15 +185,15 @@
 .badge {
   padding: 5px 12px;
   border-radius: 999px;
-  background: #fff1cf;
-  color: #7a4b00;
+  background: var(--badge-bg);
+  color: var(--badge-ink);
   font-size: 0.8125rem;
   font-weight: 600;
 }
 
 .mini-button {
   padding: 9px 16px;
-  border: 1.5px solid rgb(0 0 0 / 0.18);
+  border: 1.5px solid var(--line-strong);
   border-radius: 999px;
   font-size: 0.875rem;
   font-weight: 600;
@@ -318,7 +318,7 @@
   align-items: center;
   gap: 18px;
   padding-bottom: 28px;
-  color: #0e7d72;
+  color: var(--teal);
 }
 
 .big-number span {
@@ -349,8 +349,8 @@
   gap: 10px;
   padding: 12px 18px;
   border-radius: 999px;
-  background: #fff;
-  color: #1d1d1f;
+  background: var(--chip);
+  color: var(--chip-ink);
   font-size: 1rem;
   font-weight: 600;
 }
@@ -359,7 +359,7 @@
   content: "";
   width: 9px;
   height: 11px;
-  border-inline: 3px solid #0e7d72;
+  border-inline: 3px solid var(--teal);
 }
 
 @media (max-width: 1000px) {

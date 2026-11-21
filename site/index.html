@@ -8,9 +8,9 @@
       name="description"
       content="Your videos as live Mac wallpapers. Free and open source. Works offline with no account or analytics."
     />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0a0a0c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#141416" media="(prefers-color-scheme: dark)" />
     <link rel="canonical" href="https://lumawall.rijan.sh/" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://lumawall.rijan.sh/" />
@@ -36,6 +36,7 @@
     <link rel="stylesheet" href="css/features.css" />
     <link rel="stylesheet" href="css/efficiency.css" />
     <link rel="stylesheet" href="css/energy.css" />
+    <script src="js/theme.js"></script>
     <script type="module" src="js/main.js"></script>
   </head>
   <body>
@@ -50,6 +51,19 @@
           <li><a href="#features">Features</a></li>
           <li><a href="#efficiency">Efficiency</a></li>
           <li><a href="#privacy">Privacy</a></li>
+          <li class="theme-li" hidden>
+            <div class="theme-switch" role="group" aria-label="Colour theme" data-theme-switch>
+              <button type="button" data-choice="system" aria-pressed="true" aria-label="System theme" title="System">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.5" width="12.5" height="8.5" rx="1.5" /><path d="M5.5 13.75h5M8 11v2.75" /></svg><span>System</span>
+              </button>
+              <button type="button" data-choice="light" aria-pressed="false" aria-label="Light theme" title="Light">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.75" /><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" /></svg><span>Light</span>
+              </button>
+              <button type="button" data-choice="dark" aria-pressed="false" aria-label="Dark theme" title="Dark">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z" /></svg><span>Dark</span>
+              </button>
+            </div>
+          </li>
         </ul>
         <a class="nav-cta" href="https://github.com/Luseefor/LumaWall/releases">Follow releases</a>
         <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="nav-menu" aria-label="Menu" hidden>

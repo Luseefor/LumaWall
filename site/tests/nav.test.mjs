@@ -26,3 +26,13 @@ test("the bar is dark while a dark section is under it", () => {
 test("with no dark sections the bar stays light", () => {
   assert.equal(toneAt(900, []), "light");
 });
+
+const { focusAfterBreakpoint } = await import("../js/nav.js");
+
+test("focus follows the menu across the breakpoint instead of being dropped", () => {
+  assert.equal(focusAfterBreakpoint({ mobile: true, active: "menu" }), "toggle");
+  assert.equal(focusAfterBreakpoint({ mobile: false, active: "toggle" }), "menu");
+  assert.equal(focusAfterBreakpoint({ mobile: false, active: "menu" }), null);
+  assert.equal(focusAfterBreakpoint({ mobile: true, active: "toggle" }), null);
+  assert.equal(focusAfterBreakpoint({ mobile: true, active: "other" }), null);
+});
