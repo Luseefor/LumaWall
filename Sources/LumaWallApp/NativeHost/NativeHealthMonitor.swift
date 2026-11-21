@@ -73,8 +73,13 @@ final class NativeHealthMonitor {
     /// Wake, a display change, a Space switch: macOS may drop and re-acquire
     /// surfaces on its own for a while.
     func disturb() {
+        disturbances += 1
         health.disturb(at: Self.now)
     }
+
+    /// Bumped by every disturbance. A fallback queued from a verdict checks
+    /// it is unchanged before acting.
+    private(set) var disturbances = 0
 
     private func observe() {
         let workspace = NSWorkspace.shared.notificationCenter
@@ -122,19 +127,18 @@ final class NativeHealthMonitor {
         self.timer = timer
     }
 
-    /// Current conditions, after noting any agent restart and any return
+    /// Current conditions, after noting any store write and any return
     /// from a state where probing isn't allowed.
     private func conditions(watching watched: [UInt32: DisplayID]) -> ExtensionHealth.Conditions {
-        let now = Self.now
         if LiveSystemWallpaperFiles.storeChangeCount != seenRestarts {
             seenRestarts = LiveSystemWallpaperFiles.storeChangeCount
-            health.disturb(at: now)
+            disturb()
         }
         let session = session()
         let conditions = ExtensionHealth.Conditions(
             nativeActive: !watched.isEmpty, sessionLocked: session.sessionLocked,
             displaysAsleep: session.displaysAsleep, screenSaverRunning: screenSaverRunning)
-        if conditions.allowsProbing, !wasProbing { health.disturb(at: now) }
+        if conditions.allowsProbing, !wasProbing { disturb() }
         wasProbing = conditions.allowsProbing
         return conditions
     }
@@ -157,10 +161,15 @@ final class NativeHealthMonitor {
     private func finishProbe() {
         let watched = awakeWatched()
         // A store write, lock or sleep since the ping cancels it.
-        if !conditions(watching: watched).allowsProbing { health.disturb(at: Self.now) }
+        if !conditions(watching: watched).allowsProbing { disturb() }
         let heard = health.hasHeardReply
-        let unserved = health.probeFinished(reply: readReply(), watching: Set(watched.keys), at: Self.now)
-        if health.hasHeardReply, !heard, !answeredBefore { defaults.set(Self.build, forKey: Self.answeredKey) }
+        let reply = readReply()
+        let unserved = health.probeFinished(reply: reply, watching: Set(watched.keys), at: Self.now)
+        // Remembered only when the answer came from this build's extension,
+        // not an older one still running after an update.
+        if health.hasHeardReply, !heard, !answeredBefore, reply?.build == Self.build {
+            defaults.set(Self.build, forKey: Self.answeredKey)
+        }
         report(unserved, watched: watched)
         schedule(after: health.nextProbeDelay - ExtensionHealth.replyWait)
     }

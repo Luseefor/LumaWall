@@ -167,6 +167,8 @@ struct ExtensionHealthTests {
     @Test func decodesTheExtensionsReplyFile() throws {
         let data = Data(#"{"pid":42,"sequence":7,"served":[3,1]}"#.utf8)
         #expect(ExtensionHealth.Reply.decode(data) == reply(7, serving: [1, 3], pid: 42))
+        let withBuild = Data(#"{"pid":1,"sequence":1,"served":[],"build":"13"}"#.utf8)
+        #expect(ExtensionHealth.Reply.decode(withBuild)?.build == "13")
         #expect(ExtensionHealth.Reply.decode(Data("nope".utf8)) == nil)
         // The extension can write its container: an oversized file is ignored.
         #expect(ExtensionHealth.Reply.decode(Data(count: ExtensionHealth.Reply.maxFileSize + 1)) == nil)

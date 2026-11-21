@@ -48,16 +48,19 @@ public struct ExtensionHealth: Sendable, Equatable {
     public struct Reply: Sendable, Equatable, Codable {
         public var pid: Int32
         public var sequence: UInt64
-        /// CoreGraphics display IDs with a live (non-preview) surface.
+        /// CoreGraphics display IDs the extension holds a surface for.
         public var served: Set<UInt32>
+        /// The extension's `CFBundleVersion`. Nil from builds before it was added.
+        public var build: String?
 
         public static let fileName = "lumawall-health.json"
         public static let maxFileSize = 16 * 1024
 
-        public init(pid: Int32, sequence: UInt64, served: Set<UInt32>) {
+        public init(pid: Int32, sequence: UInt64, served: Set<UInt32>, build: String? = nil) {
             self.pid = pid
             self.sequence = sequence
             self.served = served
+            self.build = build
         }
 
         /// The extension can write its container, so the file is untrusted.

@@ -14,14 +14,19 @@ struct HealthAnswers {
         var pid: Int32
         var sequence: UInt64
         var served: [UInt32]
+        var build: String
     }
 
     let pid: Int32
+    /// This extension's `CFBundleVersion`, so the app can tell its own
+    /// build's extension from an older one still running after an update.
+    let build: String
     private var sequence: UInt64 = 0
     private var lastAnswerAt: TimeInterval?
 
-    init(pid: Int32) {
+    init(pid: Int32, build: String) {
         self.pid = pid
+        self.build = build
     }
 
     /// The file contents to write, or nil when the last answer was too recent.
@@ -30,7 +35,7 @@ struct HealthAnswers {
         if let lastAnswerAt, now - lastAnswerAt < Self.minimumSpacing { return nil }
         lastAnswerAt = now
         sequence += 1
-        return try? JSONEncoder().encode(Answer(pid: pid, sequence: sequence, served: served.sorted()))
+        return try? JSONEncoder().encode(Answer(pid: pid, sequence: sequence, served: served.sorted(), build: build))
     }
 }
 
@@ -38,7 +43,9 @@ struct HealthAnswers {
 /// Darwin notification callback.
 enum HealthReply {
     private static let answers = OSAllocatedUnfairLock(
-        initialState: HealthAnswers(pid: ProcessInfo.processInfo.processIdentifier))
+        initialState: HealthAnswers(
+            pid: ProcessInfo.processInfo.processIdentifier,
+            build: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""))
 
     static func answer(documents: URL, served: () -> Set<UInt32>) {
         let displays = served()

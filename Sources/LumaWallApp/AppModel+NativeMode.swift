@@ -106,10 +106,13 @@ extension AppModel {
             onUnserved: { [weak self] ids in
                 guard let self else { return }
                 let writes = LiveSystemWallpaperFiles.storeChangeCount
+                let disturbances = self.nativeHealth?.disturbances
                 Task {
-                    // A store write since the verdict restarted the agent:
+                    // A store write or another disturbance since the verdict:
                     // the next probes decide after their grace.
-                    guard LiveSystemWallpaperFiles.storeChangeCount == writes else { return }
+                    guard LiveSystemWallpaperFiles.storeChangeCount == writes,
+                        self.nativeHealth?.disturbances == disturbances
+                    else { return }
                     await self.engine.fallBackUnserved(ids)
                     self.refreshActive()
                     self.applyPlaybackPolicy()
