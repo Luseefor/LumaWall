@@ -259,6 +259,7 @@ extension NativeWallpaperDeployment {
     }
 
     static let copyPublishLockName = ".copy-publish.lock"
+    private static let publisherStartTime = processStartTime(getpid())
 
     private enum PublishInterrupted: Error {
         case entryChanged
@@ -323,7 +324,8 @@ extension NativeWallpaperDeployment {
             // The swap can move the previous movie into staging.
             // Give it a private name that retries won't reuse and
             // that cleanup skips while this process is alive.
-            let moving = "\(getpid()).\(UUID().uuidString).publishing.partial.mov"
+            guard let start = publisherStartTime else { return .failed }
+            let moving = "\(getpid()).\(start).\(UUID().uuidString).publishing.partial.mov"
             do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
             var moved = false
             do {
@@ -386,14 +388,20 @@ extension NativeWallpaperDeployment {
     /// any folder between them and their ancestor, swapped for a symlink
     /// can't steer the delete elsewhere.
     static func cleanUpAbandonedExports(
-        videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL, stagingAncestor: URL? = nil
+        videosFolderURL: URL, stagingFolderURL: URL, trustedAncestor: URL, stagingAncestor: URL? = nil, now: Date = Date()
     ) {
         // Without a trustworthy videos folder, no staged export can be shown
         // stale, so everything is kept.
         guard let videos = try? TrustedDirectory(url: videosFolderURL, below: trustedAncestor) else { return }
         if let staging = try? TrustedDirectory(url: stagingFolderURL, below: stagingAncestor ?? stagingFolderURL) {
-            for file in (try? staging.entries()) ?? [] where file.kind == .file && file.name.hasSuffix(".mov") {
-                if isLivePublishingPartial(file.name) { continue }
+            for file in (try? staging.entries()) ?? [] where file.name.hasSuffix(".mov") {
+                if file.name.hasSuffix(".publishing.partial.mov") {
+                    if !isLivePublishingPartial(file.name, in: staging, now: now) {
+                        try? staging.removeItem(named: file.name)
+                    }
+                    continue
+                }
+                guard file.kind == .file else { continue }
                 let parts = file.name.split(separator: ".", maxSplits: 2).map(String.init)
                 let keep =
                     !file.name.hasSuffix(".partial.mov")
@@ -422,12 +430,21 @@ extension NativeWallpaperDeployment {
         }
     }
 
-    private static func isLivePublishingPartial(_ name: String) -> Bool {
-        guard name.hasSuffix(".publishing.partial.mov"),
-            let prefix = name.split(separator: ".", maxSplits: 1).first,
-            let owner = pid_t(prefix), owner > 0
+    private static func processStartTime(_ pid: pid_t) -> UInt64? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        return info.pbi_start_tvsec
+    }
+
+    private static func isLivePublishingPartial(_ name: String, in staging: TrustedDirectory, now: Date) -> Bool {
+        let parts = name.split(separator: ".", maxSplits: 2)
+        guard parts.count == 3, let owner = pid_t(parts[0]), owner > 0,
+            let start = UInt64(parts[1]), processStartTime(owner) == start,
+            // A swapped-in backup carries the old movie's modification date.
+            let changed = try? staging.statusChangeDate(ofItemNamed: name)
         else { return false }
-        return kill(owner, 0) == 0 || errno == EPERM
+        return now.timeIntervalSince(changed) <= 24 * 3600
     }
 
     /// Whether entry `id` still holds the source hashed `hash`: false when

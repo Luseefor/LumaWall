@@ -1156,14 +1156,30 @@ final class VariantPublicationTests: XCTestCase {
     }
 
     func testStartupCleanupKeepsOnlyPublishingPartialsOwnedByLiveProcesses() throws {
-        let live = staging.appendingPathComponent("\(getpid()).\(UUID().uuidString).publishing.partial.mov")
-        let abandoned = staging.appendingPathComponent("\(Int32.max).\(UUID().uuidString).publishing.partial.mov")
-        for url in [live, abandoned] { try Data("copy".utf8).write(to: url) }
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        XCTAssertEqual(proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &info, size), size)
+        let start = info.pbi_start_tvsec
+        func partial(_ pid: pid_t, _ start: UInt64) -> URL {
+            staging.appendingPathComponent("\(pid).\(start).\(UUID().uuidString).publishing.partial.mov")
+        }
+        let live = partial(getpid(), start)
+        let reused = partial(getpid(), start - 1)
+        let abandoned = partial(Int32.max, start)
+        let fm = FileManager.default
+        for url in [live, reused, abandoned] { try Data("copy".utf8).write(to: url) }
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-25 * 3600)], ofItemAtPath: live.path)
 
-        NativeWallpaperDeployment.cleanUpAbandonedExports(videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root)
+        NativeWallpaperDeployment.cleanUpAbandonedExports(
+            videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root, now: now)
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: live.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: abandoned.path))
+        XCTAssertTrue(fm.fileExists(atPath: live.path))
+        for url in [reused, abandoned] { XCTAssertFalse(fm.fileExists(atPath: url.path)) }
+
+        NativeWallpaperDeployment.cleanUpAbandonedExports(
+            videosFolderURL: videos, stagingFolderURL: staging, trustedAncestor: root, now: now.addingTimeInterval(25 * 3600))
+        XCTAssertFalse(fm.fileExists(atPath: live.path))
     }
 
     func testStartupCleanupKeepsAnExportItCantJudge() throws {

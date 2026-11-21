@@ -182,11 +182,23 @@ public final class TrustedDirectory {
 
     /// When `name` was last modified, without following a symlink.
     public func modificationDate(ofItemNamed name: String) throws -> Date {
+        Self.date(from: try itemStatus(named: name).st_mtimespec)
+    }
+
+    /// When this item's status last changed, including a rename into place.
+    public func statusChangeDate(ofItemNamed name: String) throws -> Date {
+        Self.date(from: try itemStatus(named: name).st_ctimespec)
+    }
+
+    private func itemStatus(named name: String) throws -> stat {
         try Self.checkName(name)
         var info = stat()
         guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { throw POSIXError.current }
-        let time = info.st_mtimespec
-        return Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_nsec) / 1_000_000_000)
+        return info
+    }
+
+    private static func date(from time: timespec) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_nsec) / 1_000_000_000)
     }
 
     /// Renames `name` to `newName` in this folder. Fails rather than
