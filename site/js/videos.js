@@ -1,20 +1,45 @@
-import { cardPlays, nextIndex, shouldPlay } from "./video-model.js";
+import { bufferedAhead, canCrossfade, cardPlays, clipSources, nextIndex, shouldPlay } from "./video-model.js";
 
 const CYCLE_MS = 5200;
 const FADE_MS = 1300; // a little longer than the CSS crossfade
 
-/** Clips carry data-src so nothing downloads until one is about to play. */
+/**
+ * Clips carry data-src so nothing downloads until one is about to play. Then
+ * they get <source> elements: the 960 px copy first on phones and small tiles,
+ * the original after it. A copy that is missing just fails over to the next.
+ */
 function attach(video) {
   const { src } = video.dataset;
   if (!src) return;
-  video.src = src;
   delete video.dataset.src;
+  const options = {
+    elementWidth: video.getBoundingClientRect().width,
+    viewportWidth: innerWidth,
+    dpr: devicePixelRatio || 1,
+  };
+  for (const { src: url, media } of clipSources(src, options)) {
+    const source = document.createElement("source");
+    source.src = url;
+    source.type = "video/mp4";
+    if (media) source.media = media;
+    video.append(source);
+  }
+  video.load();
 }
 
-function play(video) {
+/**
+ * Start a clip. If the browser refuses (iOS Low Power Mode blocks autoplay),
+ * `onBlocked` is told so the page can offer a tap-to-play state instead.
+ */
+function play(video, onBlocked) {
   attach(video);
-  video.play()?.catch(() => {});
+  video.play()?.catch((error) => {
+    if (error?.name === "NotAllowedError") onBlocked?.();
+  });
 }
+
+const ready = (video) =>
+  canCrossfade({ readyState: video.readyState, bufferedAhead: bufferedAhead(video), duration: video.duration });
 
 /** Pause, and under reduced motion fall back to the poster instead of a frozen frame. */
 function stop(video, reduced) {
@@ -27,31 +52,43 @@ function stop(video, reduced) {
  * looping clips, and gallery cards that play on hover or tap. Every clip
  * plays only while it is in view and the tab is visible.
  */
-export function setUpVideos(reducedMotion) {
+export function setUpVideos(reducedMotion, { saveData = false } = {}) {
   const players = [];
   const pauseButton = document.querySelector("[data-hero-pause]");
   let paused = false;
+  let blocked = false; // the browser refused to autoplay
 
-  const common = () => ({ hidden: document.hidden, reduced: reducedMotion.matches, paused });
+  const common = () => ({ hidden: document.hidden, reduced: reducedMotion.matches, paused: paused || blocked });
+  const onBlocked = () => {
+    if (blocked) return;
+    blocked = true;
+    syncButton();
+    syncAll();
+  };
 
   function watch(element, onChange) {
     new IntersectionObserver((entries) => onChange(entries.at(-1).isIntersecting)).observe(element);
   }
 
   // A screen that crossfades between its clips.
-  for (const root of document.querySelectorAll("[data-cycle]")) {
+  // With Data Saver on nothing autoplays; only a tap on a card loads a clip.
+  const autoplays = (selector) => (saveData ? [] : document.querySelectorAll(selector));
+
+  for (const root of autoplays("[data-cycle]")) {
     const layers = [...root.querySelectorAll("[data-layer]")];
     const interval = Number(root.dataset.cycle) || CYCLE_MS;
     let index = 0;
     let inView = false;
     let timer = 0;
+    let waiting = null;
 
     const show = (next) => {
       const previous = layers[index];
       index = next;
+      waiting = null;
       previous.classList.remove("on");
       layers[index].classList.add("on");
-      play(layers[index]);
+      play(layers[index], onBlocked);
       // Fetch the clip after this one now, so its crossfade starts on a frame.
       const upcoming = layers[nextIndex(index, layers.length)];
       upcoming.preload = "auto";
@@ -61,11 +98,32 @@ export function setUpVideos(reducedMotion) {
       }, FADE_MS);
     };
 
+    // Crossfade only to a clip that can play through; otherwise the current
+    // one stays up (a clip with no frame yet would uncover the poster).
+    const advance = () => {
+      const target = layers[nextIndex(index, layers.length)];
+      if (ready(target)) return show(layers.indexOf(target));
+      if (waiting === target) return;
+      waiting = target;
+      target.preload = "auto";
+      // Muted and still transparent, so playing it only starts the download (iOS ignores preload).
+      play(target, onBlocked);
+      target.addEventListener(
+        "canplaythrough",
+        () => {
+          if (waiting === target && timer) show(layers.indexOf(target));
+        },
+        { once: true },
+      );
+    };
+
     const sync = () => {
       clearInterval(timer);
+      timer = 0;
+      waiting = null;
       if (shouldPlay({ ...common(), inView })) {
-        play(layers[index]);
-        timer = setInterval(() => show(nextIndex(index, layers.length)), interval);
+        play(layers[index], onBlocked);
+        timer = setInterval(advance, interval);
         return;
       }
       for (const layer of layers) stop(layer, common().reduced);
@@ -83,9 +141,9 @@ export function setUpVideos(reducedMotion) {
   }
 
   // A single clip that loops while it is on screen.
-  for (const video of document.querySelectorAll("[data-autoplay]")) {
+  for (const video of autoplays("[data-autoplay]")) {
     let inView = false;
-    const sync = () => (shouldPlay({ ...common(), inView }) ? play(video) : stop(video, common().reduced));
+    const sync = () => (shouldPlay({ ...common(), inView }) ? play(video, onBlocked) : stop(video, common().reduced));
     watch(video, (visible) => {
       inView = visible;
       sync();
@@ -98,7 +156,12 @@ export function setUpVideos(reducedMotion) {
     const video = card.querySelector("video");
     const state = { inView: false, hovered: false, focused: false, toggled: false, muted: false };
     const sync = () => {
-      const running = cardPlays({ ...common(), ...state, hovered: (state.hovered || state.focused) && !state.muted });
+      const running = cardPlays({
+        ...common(),
+        ...state,
+        saveData,
+        hovered: (state.hovered || state.focused) && !state.muted,
+      });
       card.classList.toggle("is-playing", running);
       card.setAttribute("aria-pressed", String(state.toggled));
       if (running) play(video);
@@ -148,13 +211,16 @@ export function setUpVideos(reducedMotion) {
   function syncButton() {
     if (!pauseButton) return;
     pauseButton.hidden = reducedMotion.matches;
-    pauseButton.setAttribute("aria-pressed", String(paused));
-    pauseButton.querySelector("[data-label]").textContent = paused ? "Play wallpapers" : "Pause wallpapers";
+    const stopped = paused || blocked;
+    pauseButton.setAttribute("aria-pressed", String(stopped));
+    pauseButton.querySelector("[data-label]").textContent = stopped ? "Play wallpapers" : "Pause wallpapers";
   }
 
   if (pauseButton) pauseButton.disabled = false;
   pauseButton?.addEventListener("click", () => {
-    paused = !paused;
+    // A tap is a user gesture, so it is also the way out of a blocked autoplay.
+    paused = blocked ? false : !paused;
+    blocked = false;
     syncButton();
     syncAll();
   });

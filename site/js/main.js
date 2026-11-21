@@ -51,15 +51,12 @@ setUpNav();
 setUpThemeSwitch();
 setUpReveal();
 
-// Clips start after load. With Data Saver on, the posters stay.
-if (navigator.connection?.saveData) {
-  document.querySelector("[data-hero-pause]")?.setAttribute("hidden", "");
-} else {
-  // The pause button works once the clips are wired up.
-  const pause = document.querySelector("[data-hero-pause]");
-  if (pause) pause.disabled = true;
-  whenIdle(() => setUpVideos(reducedMotion));
-}
+// Clips start after load. With Data Saver on, the posters stay and only a tap on a gallery card loads a clip.
+const saveData = Boolean(navigator.connection?.saveData);
+const pause = document.querySelector("[data-hero-pause]");
+if (saveData) pause?.setAttribute("hidden", "");
+else if (pause) pause.disabled = true; // it works once the clips are wired up
+whenIdle(() => setUpVideos(reducedMotion, { saveData }));
 
 // The demo draws with WebGL and the chart builds an SVG; neither is needed until the reader gets near.
 whenNear(document.querySelector("[data-demo]"), async (demo) => {
