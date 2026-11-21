@@ -81,11 +81,13 @@ export function setUpVideos(reducedMotion, { saveData = false } = {}) {
     let inView = false;
     let timer = 0;
     let waiting = null;
+    let fadeUntil = 0;
 
     const show = (next) => {
       const previous = layers[index];
       index = next;
       waiting = null;
+      fadeUntil = Date.now() + FADE_MS;
       previous.classList.remove("on");
       layers[index].classList.add("on");
       play(layers[index], onBlocked);
@@ -94,20 +96,25 @@ export function setUpVideos(reducedMotion, { saveData = false } = {}) {
       upcoming.preload = "auto";
       attach(upcoming);
       setTimeout(() => {
-        if (previous !== layers[index]) previous.pause();
+        if (previous !== layers[index] && previous !== waiting) previous.pause();
       }, FADE_MS);
     };
 
     // Crossfade only to a clip that can play through; otherwise the current
     // one stays up (a clip with no frame yet would uncover the poster).
     const advance = () => {
+      if (Date.now() < fadeUntil) return; // the last crossfade is still running; the outgoing clip is about to pause
       const target = layers[nextIndex(index, layers.length)];
       if (ready(target)) return show(layers.indexOf(target));
-      if (waiting === target) return;
+      if (waiting === target) {
+        if (target.paused) play(target);
+        return;
+      }
       waiting = target;
       target.preload = "auto";
       // Muted and still transparent, so playing it only starts the download (iOS ignores preload).
-      play(target, onBlocked);
+      // If the browser refuses, the current clip keeps looping; that is not a blocked autoplay.
+      play(target);
       target.addEventListener(
         "canplaythrough",
         () => {
@@ -210,7 +217,7 @@ export function setUpVideos(reducedMotion, { saveData = false } = {}) {
 
   function syncButton() {
     if (!pauseButton) return;
-    pauseButton.hidden = reducedMotion.matches;
+    pauseButton.hidden = reducedMotion.matches || saveData;
     const stopped = paused || blocked;
     pauseButton.setAttribute("aria-pressed", String(stopped));
     pauseButton.querySelector("[data-label]").textContent = stopped ? "Play wallpapers" : "Pause wallpapers";
