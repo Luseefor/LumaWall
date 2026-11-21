@@ -54,13 +54,13 @@ PYTHON
 ## Social preview
 
 Regenerate `site/og.png` from the repo root with ImageMagick 7 and the macOS
-Helvetica Neue font. The waterfall comes from `site/media/wall-3.jpg`. Its source
-and license are in [the media credits](media/CREDITS.md). The indexed palette
+Helvetica Neue font. The waterfall comes from the wall-3 poster (`wall-3-1600.jpg`). Its
+source and license are in [the media credits](media/CREDITS.md). The indexed palette
 keeps the 1200 × 630 card under 250 KB.
 
 ```sh
 magick -size 1200x630 xc:'#f5f5f7' \
-  \( site/media/wall-3.jpg -resize '600x506^' -gravity center -extent 600x506 \
+  \( site/media/wall-3-1600.jpg -resize '600x506^' -gravity center -extent 600x506 \
      \( -size 600x506 xc:none -fill white -draw 'roundrectangle 0,0 599,505 32,32' \) \
      -alpha off -compose CopyOpacity -composite \) \
   -gravity northwest -geometry +538+62 -compose Over -composite \
@@ -76,9 +76,11 @@ magick -size 1200x630 xc:'#f5f5f7' \
 
 ## Media
 
-`site/media/` holds the wallpaper clips: `wall-1.mp4` to `wall-6.mp4` with posters `wall-1.jpg` to
-`wall-6.jpg` (1600x900), and `wall-portrait.mp4` and `.jpg` (720x1280). Clips are muted, loop and load
-only when in view. Reduced motion shows the posters.
+`site/media/` holds the wallpaper clips `wall-1.mp4` through `wall-6.mp4` and
+`wall-portrait.mp4`. Landscape posters have 800- and 1600-pixel-wide variants,
+and the portrait poster has 360- and 720-pixel-wide variants. Each size comes in
+AVIF, WebP, and JPEG. Clips are muted, loop, and load only when in view.
+Reduced motion shows the posters.
 
 ## Rules
 
