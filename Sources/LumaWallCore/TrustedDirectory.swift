@@ -198,12 +198,13 @@ public final class TrustedDirectory {
 
     /// Moves `name` into `destination` as `newName` in one rename. If
     /// an item is already there, it is swapped into this folder and kept
-    /// until `commit` succeeds. If `commit` throws, the old item is restored
-    /// and the replacement discarded. Callers must serialize publishers
+    /// until `commit` succeeds. If `commit` throws, discard the replacement
+    /// and restore the old item only if `shouldRestore` still allows it.
+    /// Callers must serialize publishers
     /// when using `commit`. Both folders must be on one volume.
     public func publishItem(
         named name: String, into destination: TrustedDirectory, as newName: String,
-        commit: () throws -> Void = {}
+        shouldRestore: () -> Bool = { true }, commit: () throws -> Void = {}
     ) throws {
         try Self.checkName(name)
         try Self.checkName(newName)
@@ -211,11 +212,12 @@ public final class TrustedDirectory {
         do {
             try commit()
         } catch {
-            if replaced {
+            if replaced, shouldRestore() {
                 let discarded = try moveForPublication(named: name, into: destination, as: newName)
                 if discarded { try? removeItem(named: name) }
             } else {
                 try? destination.removeFile(named: newName)
+                if replaced { try? removeItem(named: name) }
             }
             throw error
         }

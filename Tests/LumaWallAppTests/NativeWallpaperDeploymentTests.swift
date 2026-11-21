@@ -874,6 +874,43 @@ final class VariantPublicationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: metadata), originalMetadata)
     }
 
+    @MainActor
+    func testFailedWriteDiscardsThePreviousMovieOnceRemovalStarts() throws {
+        try deploy(hash: "aaa")
+        let job = job(hash: "aaa")
+        XCTAssertEqual(publish(try stage(job), job: job, resolution: size, videosFolderURL: videos), .published)
+        let staged = try stage(job)
+        let entryID = id
+        defer { NativeWallpaperDeployment.unmarkRemoved(entryID: entryID) }
+        _ = publish(
+            staged, job: job, resolution: size, videosFolderURL: videos,
+            writeMetadata: { _, _ in
+                NativeWallpaperDeployment.markRemoved(entryID: entryID)
+                throw POSIXError(.ENOSPC)
+            })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staging.path), [])
+    }
+
+    func testPublishDoesNotSucceedWhenTheEntryIsReplacedDuringCommit() throws {
+        try deploy(hash: "aaa")
+        let job = job(hash: "aaa")
+        XCTAssertEqual(publish(try stage(job), job: job, resolution: size, videosFolderURL: videos), .published)
+        let staged = try stage(job)
+        let entryURL = videos.appendingPathComponent(id)
+        let oldURL = root.appendingPathComponent("old-entry")
+        let result = publish(
+            staged, job: job, resolution: size, videosFolderURL: videos,
+            writeMetadata: { data, folder in
+                try FileManager.default.moveItem(at: entryURL, to: oldURL)
+                try FileManager.default.createDirectory(at: entryURL, withIntermediateDirectories: false)
+                try folder.writeFile(named: "metadata.json", contents: data)
+            })
+        XCTAssertEqual(result, .deferred)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldURL.appendingPathComponent(minimal.filename).path))
+    }
+
     func testAFailedMetadataWriteNeverTakesTheFileBackFromTheEntry() throws {
         // The export went back to staging by name, so the extension could
         // swap it inside the entry first and have the app probe its bytes.

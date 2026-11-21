@@ -261,6 +261,18 @@ final class VariantEncodeQueueTests: XCTestCase {
         }
     }
 
+    func testDeferredPublicationRetriesWithoutAnExternalWake() async {
+        let log = EncodeLog()
+        log.openAll()
+        log.results = [.retryLater]
+        let queue = queue(log)
+        let copy = job("a", "Wallpaper.minimal.mov")
+        await queue.enqueue([copy])
+        await log.waitUntilStarted(copy.name, count: 2)
+        await queue.drained()
+        XCTAssertEqual(log.order, [copy.name, copy.name])
+    }
+
     func testNotNowOutcomeParksWithoutCountingAFailure() async {
         let log = EncodeLog()
         log.openAll()

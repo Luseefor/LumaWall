@@ -45,6 +45,8 @@ extension NativeWallpaperDeployment {
             /// Stopped before finishing because conditions changed; waits for
             /// `wake()` without counting as a failure.
             case notNow
+            /// A concurrent publisher or deploy blocked publication.
+            case retryLater
         }
 
         static let maxAttempts = 4
@@ -62,6 +64,7 @@ extension NativeWallpaperDeployment {
         private var pending: [Job] = []
         /// Stopped with `.notNow`; back in `pending` on the next `wake()`.
         private var parked: [Job] = []
+        private var deferred: [String: Job] = [:]
         private var running: (job: Job, task: Task<Outcome, Never>, preempted: Bool, removed: Bool)?
         private var worker: Task<Void, Never>?
         /// Counts `wake()` calls, so a job that stops with `.notNow` after a
@@ -95,6 +98,7 @@ extension NativeWallpaperDeployment {
             prepareIfNeeded()
             for job in jobs
             where !removedEntries.contains(job.entryID) && job.key != running?.job.key
+                && deferred[job.key] == nil
                 && !(pending + parked).contains(where: { $0.key == job.key })
             {
                 pending.append(job)
@@ -123,6 +127,7 @@ extension NativeWallpaperDeployment {
             removedEntries.insert(entryID)
             pending.removeAll { $0.entryID == entryID }
             parked.removeAll { $0.entryID == entryID }
+            deferred = deferred.filter { $0.value.entryID != entryID }
             if running?.job.entryID == entryID {
                 running?.removed = true
                 running?.task.cancel()
@@ -213,6 +218,12 @@ extension NativeWallpaperDeployment {
                     pending.insert(job, at: 0)
                 case .notNow:
                     parked.append(job)
+                case .retryLater:
+                    deferred[job.key] = job
+                    Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(2))
+                        await self?.resumeDeferred(job.key)
+                    }
                 case .failed:
                     let count = (failures[job.key]?.count ?? 0) + 1
                     let delay = Self.firstRetryDelay * pow(2, Double(count - 1))
@@ -222,6 +233,12 @@ extension NativeWallpaperDeployment {
             for job in liveSources { finishedSource(job) }
             liveSources.removeAll()
             worker = nil
+        }
+
+        private func resumeDeferred(_ key: String) {
+            guard let job = deferred.removeValue(forKey: key) else { return }
+            pending.append(job)
+            wake()
         }
 
         /// Calls `finishedSource` for every live source other than `kept`

@@ -215,6 +215,7 @@ extension NativeWallpaperDeployment {
             case .stale: return .done
             case .failed: return .failed
             case .nativeModeOff: return .notNow
+            case .deferred: return .retryLater
             }
         },
         prepare: {
@@ -251,10 +252,14 @@ extension NativeWallpaperDeployment {
     static let entryLock = NSLock()
 
     enum PublishResult: Equatable {
-        case published, stale, failed
+        case published, stale, failed, deferred
         /// Native mode was off once the entry lock was held; the export
         /// stays staged.
         case nativeModeOff
+    }
+
+    private enum PublishInterrupted: Error {
+        case entryChanged
     }
 
     /// Moves a finished export into its entry and lists it in metadata.json,
@@ -297,7 +302,15 @@ extension NativeWallpaperDeployment {
             }
             guard isNativeModeOn() else { return .nativeModeOff }
             do {
+                let identity = try folder.identity()
+                func isCurrent() -> Bool {
+                    guard !isRemoving(entryID: job.entryID),
+                        let current = try? entryFolder(job.entryID, videosFolderURL: videosFolderURL)
+                    else { return false }
+                    return (try? current.identity()) == identity
+                }
                 return try folder.withExclusiveFileLock(named: ".copy-publish.lock") {
+                    guard isCurrent() else { return .deferred }
                     guard var updated = try entry(id: job.entryID, readingFrom: folder), updated.contentHash == job.contentHash else {
                         try? staging.removeFile(named: stagedName)
                         return .stale
@@ -308,6 +321,7 @@ extension NativeWallpaperDeployment {
                     updated.variants = merging(listed, with: [variant])
                     let metadata = try JSONEncoder().encode(updated)
                     guard isNativeModeOn() else { return .nativeModeOff }
+                    guard isCurrent() else { return .deferred }
                     // The swap can move the previous movie into staging.
                     // Give it a private name that retries won't reuse and
                     // that cleanup skips while this process is alive.
@@ -315,15 +329,24 @@ extension NativeWallpaperDeployment {
                     do { try staging.renameItem(named: stagedName, to: moving) } catch { return .failed }
                     var moved = false
                     do {
-                        try staging.publishItem(named: moving, into: folder, as: name) {
-                            moved = true
-                            try writeMetadata(metadata, folder)
-                        }
+                        try staging.publishItem(
+                            named: moving, into: folder, as: name,
+                            shouldRestore: {
+                                entry(id: job.entryID, inEntry: folder)?.contentHash == job.contentHash && isCurrent()
+                            },
+                            commit: {
+                                moved = true
+                                guard isCurrent() else { throw PublishInterrupted.entryChanged }
+                                try writeMetadata(metadata, folder)
+                                guard isCurrent() else { throw PublishInterrupted.entryChanged }
+                            })
+                    } catch PublishInterrupted.entryChanged {
+                        return .deferred
                     } catch {
                         // Once the export has reached the extension's folder,
                         // its bytes can no longer be reused by the app.
                         if !moved { try? staging.renameItem(named: moving, to: stagedName) }
-                        return .failed
+                        return isCurrent() ? .failed : .deferred
                     }
                     return .published
                 }

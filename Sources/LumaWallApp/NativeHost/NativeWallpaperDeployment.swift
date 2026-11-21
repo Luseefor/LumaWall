@@ -204,13 +204,6 @@ enum NativeWallpaperDeployment {
         return try await checkedNotRemoved(task, entryID: entryID)
     }
 
-    /// Wallpapers removed this session. Removal marks the ID before its
-    /// first suspension, so a restore or apply that read the library earlier
-    /// can't deploy it again, and one already deploying can't go on to
-    /// assign it. Entry IDs are UUIDs and never come back.
-    @MainActor
-    static var removedEntries: Set<String> = []
-
     /// The deploy's entry, unless its wallpaper was removed while it ran.
     /// Callers assign the entry right after this returns, without
     /// suspending. A deploy that failed because the removal deleted its
