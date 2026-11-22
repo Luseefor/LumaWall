@@ -79,23 +79,31 @@ public struct LocalMediaProbe: MediaProbing {
     }
 }
 
-/// An `AVURLAsset` whose bytes come from an open file handle. Keep this
-/// value alive as long as the asset: the resource loader holds its delegate
-/// weakly.
+/// An `AVURLAsset` whose bytes come from an open file handle. The asset
+/// holds its resource loader: AVFoundation holds the delegate only weakly,
+/// so whoever keeps the asset (a generator, a pending load) keeps it served.
 final class HandleBackedAsset: Sendable {
     let asset: AVURLAsset
-    private let loader: HandleResourceLoader
 
     init(file: FileHandle, typeIdentifier: String) throws {
         var info = stat()
         guard fstat(file.fileDescriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else {
             throw MediaProbeError.unsupportedMedia
         }
-        loader = HandleResourceLoader(file: file, length: Int64(info.st_size), typeIdentifier: typeIdentifier)
+        let loader = HandleResourceLoader(file: file, length: Int64(info.st_size), typeIdentifier: typeIdentifier)
         // The scheme only has to be one AVFoundation doesn't load itself, so
         // every read goes to the delegate.
-        asset = AVURLAsset(url: URL(string: "lumawall-media://source/media")!)
+        asset = LoaderOwningAsset(url: URL(string: "lumawall-media://source/media")!, loader: loader)
         asset.resourceLoader.setDelegate(loader, queue: loader.queue)
+    }
+}
+
+private final class LoaderOwningAsset: AVURLAsset, @unchecked Sendable {
+    private let loader: HandleResourceLoader
+
+    init(url: URL, loader: HandleResourceLoader) {
+        self.loader = loader
+        super.init(url: url, options: nil)
     }
 }
 

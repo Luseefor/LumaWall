@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import Synchronization
 import Testing
 
 @testable import LumaWallCore
@@ -41,6 +42,22 @@ struct MediaProbeTests {
             nearStart: true)
         #expect(small.width <= 640 && small.height <= 360)
         #expect(small.pixels.count == small.bytesPerRow * small.height)
+    }
+
+    @Test func anAssetKeepsReadingAfterItsSourceIsReleased() async throws {
+        // The resource loader holds its delegate weakly, and Swift may
+        // release `HandleBackedAsset` right after its last use, before
+        // AVFoundation asks for bytes. A load must not depend on it.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let video = try await TestVideos.makeVideo(withAudio: false, in: dir)
+        let asset = try HandleBackedAsset(file: open(video), typeIdentifier: "com.apple.quicktime-movie").asset
+        let tracks = Mutex<Int?>(nil)
+        await awaitWithDeadline(.seconds(10)) {
+            let count = try? await asset.loadTracks(withMediaType: .video).count
+            tracks.withLock { $0 = count }
+        }
+        #expect(tracks.withLock { $0 } == 1)
     }
 
     @Test func refusesAFileWithoutVideo() async throws {
