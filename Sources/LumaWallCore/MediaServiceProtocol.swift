@@ -22,11 +22,15 @@ public enum MediaServiceContract {
         NSXPCInterface(with: MediaServiceXPC.self)
     }
 
-    /// `(reply, error)` for an XPC reply block.
+    /// `(reply, error)` for an XPC reply block. Slashes stay unescaped:
+    /// base64 of bright pixels is mostly `/`, and escaping each one would
+    /// push a poster past `maxPosterReplyBytes`.
     public static func encode<T: Encodable>(_ result: Result<T, MediaProbeError>) -> (Data?, Data?) {
-        switch result {
-        case .success(let value): ((try? JSONEncoder().encode(value)), nil)
-        case .failure(let error): (nil, try? JSONEncoder().encode(error))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .withoutEscapingSlashes
+        return switch result {
+        case .success(let value): ((try? encoder.encode(value)), nil)
+        case .failure(let error): (nil, try? encoder.encode(error))
         }
     }
 

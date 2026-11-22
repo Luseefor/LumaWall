@@ -122,6 +122,15 @@ struct MediaProbeTests {
         #expect(wider.fits(nil))
     }
 
+    @Test func aWhiteFrameFitsItsReplyLimit() throws {
+        // Base64 of 0xFF bytes is all slashes, which JSON may escape.
+        let box = CGSize(width: 320, height: 200)
+        let white = PosterFrame(width: 320, height: 180, bytesPerRow: 1_280, pixels: Data(repeating: 0xFF, count: 1_280 * 180))
+        let (reply, _) = MediaServiceContract.encode(Result<PosterFrame, MediaProbeError>.success(white))
+        let limit = MediaServiceContract.maxPosterReplyBytes(fitting: box)
+        #expect(try MediaServiceContract.decode(PosterFrame.self, reply: reply, error: nil, maxReplyBytes: limit).pixels == white.pixels)
+    }
+
     @Test func infoOutsideSaneBoundsIsRejected() {
         var info = MediaInfo(
             videoTrackCount: 1, audioTrackCount: 0, pixelSize: CGSize(width: 1920, height: 1080), duration: 10,
