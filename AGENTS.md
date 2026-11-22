@@ -88,6 +88,10 @@ and `AVPlayer` playback. Testing builds gain Xcode's read-only `/`
 sandbox exception, so check real entitlements on the Release build:
 `codesign -d --entitlements - <Release app>/Contents/XPCServices/LumaWallMediaService.xpc`.
 
+A request that gets no reply within the client's timeout ends the service
+process, so later requests get a fresh one (ADR 0005). launchd delays
+that relaunch by about 10 seconds.
+
 ## Extension log
 
 `~/Library/Containers/app.lumawall.personal.wallpaper/Data/Documents/extension.log`
