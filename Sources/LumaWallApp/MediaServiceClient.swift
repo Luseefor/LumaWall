@@ -47,11 +47,13 @@ final class MediaServiceClient: MediaProbing {
 
     /// Processes of this user whose executable is this app's embedded media
     /// service. Another copy of LumaWall runs its own service from its own
-    /// bundle, so its path differs.
+    /// bundle. Files are compared by device and inode, not path: the kernel
+    /// reports `/private/var/...` where Foundation says `/var/...`.
     static func embeddedServicePIDs() -> [pid_t] {
         let executable = Bundle.main.bundleURL
             .appendingPathComponent("Contents/XPCServices/LumaWallMediaService.xpc/Contents/MacOS/LumaWallMediaService")
-            .resolvingSymlinksInPath().path
+        var expected = stat()
+        guard stat(executable.path, &expected) == 0 else { return [] }
         let count = proc_listallpids(nil, 0)
         guard count > 0 else { return [] }
         // Room for processes started since the count.
@@ -63,13 +65,11 @@ final class MediaServiceClient: MediaProbing {
             guard pid > 0 else { return false }
             var info = proc_bsdinfo()
             let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_uid == getuid() else {
-                return false
-            }
-            let length = proc_pidpath(pid, &path, UInt32(path.count))
-            guard length > 0 else { return false }
-            let bytes = path.prefix(Int(length)).map { UInt8(bitPattern: $0) }
-            return String(decoding: bytes, as: UTF8.self) == executable
+            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_uid == getuid(),
+                proc_pidpath(pid, &path, UInt32(path.count)) > 0
+            else { return false }
+            var found = stat()
+            return stat(path, &found) == 0 && found.st_dev == expected.st_dev && found.st_ino == expected.st_ino
         }
     }
 

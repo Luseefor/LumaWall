@@ -36,6 +36,8 @@ never starts a request is never ended by it.
 - A request that is slow but healthy, past 120 seconds, is killed too.
   Inspection and stills take well under a second on the clips we've
   tried, so 120 seconds leaves a wide margin.
+- Without a pid, a second instance of the same app bundle (`open -n`)
+  loses its service too. LumaWall runs as one instance.
 - Another app request using the same process when it's killed fails with
   `serviceUnavailable` through its connection's error handler, as with
   any service crash.
