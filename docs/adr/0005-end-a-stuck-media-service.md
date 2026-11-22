@@ -16,10 +16,14 @@ never starts a request is never ended by it.
 ## Decision
 
 - When a request times out, `MediaServiceClient` sends `SIGKILL` to the
-  process on the other end of that connection (`processIdentifier`,
-  read before the connection is invalidated). launchd starts a fresh
-  process for the next request, after its relaunch throttle of about
-  10 seconds.
+  service. launchd starts a fresh process for the next request, after
+  its relaunch throttle of about 10 seconds.
+- A connection's `processIdentifier` stays 0 until the peer replies, and
+  a stuck service never does. So the client uses it when it's set, and
+  otherwise kills this user's processes running the service executable
+  embedded in this app bundle (`proc_listallpids`, `proc_pidpath`).
+  Another LumaWall copy, such as a dev build, runs its service from its
+  own bundle path and isn't touched.
 - The timeout is a dispatch timer, not a `Task.sleep`, so it fires even
   when Swift's cooperative pool is busy.
 - The client never signals its own pid. A connection to an in-process

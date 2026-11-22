@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import LumaWallCore
 
@@ -33,12 +34,43 @@ final class MediaServiceClient: MediaProbing {
         self.onTimeout = onTimeout
     }
 
-    /// Kills the service on the other end of `connection`. Never this
-    /// process: a connection to an in-process listener reports our own pid.
+    /// Kills the service on the other end of `connection`. A connection
+    /// learns its peer's pid only from a reply, and a stuck service never
+    /// sends one, so without a pid this kills every process of this user
+    /// running the service embedded in this app copy. Never this process: a
+    /// connection to an in-process listener reports our own pid.
     static func endService(_ connection: NSXPCConnection) {
-        let pid = connection.processIdentifier
-        guard pid > 0, pid != getpid() else { return }
-        kill(pid, SIGKILL)
+        let known = connection.processIdentifier
+        let pids = known > 0 ? [known] : embeddedServicePIDs()
+        for pid in pids where pid != getpid() { kill(pid, SIGKILL) }
+    }
+
+    /// Processes of this user whose executable is this app's embedded media
+    /// service. Another copy of LumaWall runs its own service from its own
+    /// bundle, so its path differs.
+    static func embeddedServicePIDs() -> [pid_t] {
+        let executable = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/XPCServices/LumaWallMediaService.xpc/Contents/MacOS/LumaWallMediaService")
+            .resolvingSymlinksInPath().path
+        let count = proc_listallpids(nil, 0)
+        guard count > 0 else { return [] }
+        // Room for processes started since the count.
+        var pids = [pid_t](repeating: 0, count: Int(count) + 64)
+        let filled = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+        guard filled > 0 else { return [] }
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        return pids.prefix(Int(filled)).filter { pid in
+            guard pid > 0 else { return false }
+            var info = proc_bsdinfo()
+            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_uid == getuid() else {
+                return false
+            }
+            let length = proc_pidpath(pid, &path, UInt32(path.count))
+            guard length > 0 else { return false }
+            let bytes = path.prefix(Int(length)).map { UInt8(bitPattern: $0) }
+            return String(decoding: bytes, as: UTF8.self) == executable
+        }
     }
 
     func inspect(_ file: FileHandle, typeIdentifier: String) async throws -> MediaInfo {
@@ -115,8 +147,12 @@ final class MediaServiceClient: MediaProbing {
         /// The continuation, if nothing has resumed it yet. The caller must
         /// resume it.
         func take() -> CheckedContinuation<T, any Error>? {
+            // Clearing the timer also breaks the cycle between it and this.
             let (taken, timer) = lock.withLock {
-                defer { continuation = nil }
+                defer {
+                    continuation = nil
+                    storedTimer = nil
+                }
                 return (continuation, storedTimer)
             }
             if taken != nil { timer?.cancel() }

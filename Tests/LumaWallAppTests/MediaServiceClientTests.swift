@@ -78,11 +78,27 @@ final class MediaServiceClientTests: XCTestCase {
         await fulfillment(of: [ended], timeout: 5)
     }
 
-    /// launchd throttles the relaunch of a killed service by about 10
-    /// seconds, so the next test that uses the real service waits that long.
-    func testEndingTheServiceStopsItsProcess() async throws {
+    /// A connection learns its peer's pid only from a reply, so a service
+    /// that never answers has to be found another way. Named to run last:
+    /// launchd throttles the relaunch of a killed service by about 10 seconds.
+    func testTheServiceWithNoReplyYetCanStillBeEnded() async throws {
         let video = dir.appendingPathComponent("clip.mov")
         try await writeVideo(to: video)
+        let pid = try await servicePID(after: video)
+        let silent = NSXPCConnection(serviceName: MediaServiceContract.serviceName)
+        silent.remoteObjectInterface = MediaServiceContract.interface()
+        silent.resume()
+        defer { silent.invalidate() }
+        XCTAssertEqual(silent.processIdentifier, 0)
+
+        MediaServiceClient.endService(silent)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while kill(pid, 0) == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(kill(pid, 0), -1)
+    }
+
+    /// The running service's pid, read from a connection after a reply.
+    private func servicePID(after video: URL) async throws -> pid_t {
         let connection = NSXPCConnection(serviceName: MediaServiceContract.serviceName)
         connection.remoteObjectInterface = MediaServiceContract.interface()
         connection.resume()
@@ -95,11 +111,7 @@ final class MediaServiceClientTests: XCTestCase {
         let pid = connection.processIdentifier
         XCTAssertGreaterThan(pid, 0)
         XCTAssertNotEqual(pid, getpid())
-
-        MediaServiceClient.endService(connection)
-        let deadline = ContinuousClock.now + .seconds(5)
-        while kill(pid, 0) == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(kill(pid, 0), -1)
+        return pid
     }
 
     private func writeVideo(to url: URL) async throws {
