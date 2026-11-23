@@ -1,48 +1,37 @@
-# 0005: A media request that times out ends the service process
+# 0005: The media service exits when an accepted request overruns
 
 ## Context
 
-Issue #125: importing could stall for minutes. The sandboxed
-`LumaWallMediaService` had stopped answering: one idle thread, no CPU,
-no sandbox denials. The app's client gives up after 120 seconds, but
-each request opens a new connection to the same process, so every later
-inspect and poster request in the import queued behind the stuck one and
-waited out its own 120 seconds.
-
-The service's own 110-second deadline (`MediaServiceWork`) ends the
-process only when a request it started is still running. A process that
-never starts a request is never ended by it.
+An import stalled after the sandboxed media service stopped answering.
+Later requests opened new connections to the same process and stalled
+too. The service's watchdog depended on Swift's cooperative pool, where
+media work also runs. See #125.
 
 ## Decision
 
-- When a request times out, `MediaServiceClient` sends `SIGKILL` to the
-  service. launchd starts a fresh process for the next request, after
-  its relaunch throttle of about 10 seconds.
-- A connection's `processIdentifier` stays 0 until the peer replies, and
-  a stuck service never does. So the client uses it when it's set, and
-  otherwise kills this user's processes running the service executable
-  embedded in this app bundle (`proc_listallpids`, `proc_pidpath`).
-  Another LumaWall copy, such as a dev build, runs its service from its
-  own bundle path and isn't touched.
-- The timeout is a dispatch timer, not a `Task.sleep`, so it fires even
-  when Swift's cooperative pool is busy.
-- The client never signals its own pid. A connection to an in-process
-  listener, as in the tests, reports it.
+- The service records a 110-second deadline for each request it accepts
+  before scheduling its work. Requests over the concurrency cap get an
+  immediate error. Work remains tracked until it returns, even after its
+  connection drops and cancellation is requested.
+- A Dispatch timer checks those deadlines once a second on a dedicated
+  serial queue. If any accepted request is overdue, the service calls
+  `exit(EXIT_FAILURE)`. Launchd can start a fresh process for a later
+  request, subject to its restart throttle.
+- The client gives up after a 120-second wall-clock deadline and
+  invalidates only the request's connection. A reply or proxy error
+  claims the continuation and cancels the timer as soon as it arrives.
+  Process lookup and signals would risk acting on a reused PID or
+  terminating a healthy replacement.
 
 ## Consequences
 
-- One stuck file costs one timeout plus about 10 seconds, not a timeout
-  for every request after it.
-- A request that is slow but healthy, past 120 seconds, is killed too.
-  Inspection and stills take well under a second on the clips we've
-  tried, so 120 seconds leaves a wide margin.
-- Without a pid, a second instance of the same app bundle (`open -n`)
-  loses its service too. LumaWall runs as one instance.
-- Another app request using the same process when it's killed fails with
-  `serviceUnavailable` through its connection's error handler, as with
-  any service crash.
-- The app has to stay unsandboxed or keep the right to signal its own
-  XPC service.
-- Why the service stopped answering is not explained yet. It didn't
-  reproduce on this Mac in about 400 requests, including 30 fresh service
-  processes. See #125.
+A service exit fails other requests sharing the process. A request that
+never reaches the service can only be timed out by the client. The service
+watchdog covers work waiting to run as well as work in progress.
+
+## Tests
+
+The deadline unit test advances a supplied time to check pending and
+finished requests. An in-process XPC listener that never replies
+exercises the client timeout. The inspect and poster test exercises the
+embedded sandboxed service.

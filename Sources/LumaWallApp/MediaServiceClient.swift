@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import LumaWallCore
 
@@ -7,11 +6,6 @@ import LumaWallCore
 /// that crashes on one file can't fail the next request, and a request that
 /// takes longer than `timeout` fails instead of hanging the import.
 ///
-/// A service that hasn't answered by then is stuck, and later requests
-/// would queue behind it, each waiting out its own timeout. So a timeout
-/// also ends the service process (`onTimeout`); launchd starts a fresh one
-/// for the next request.
-///
 /// Replies are checked before use: `MediaInfo.isPlausible`, and a poster's
 /// pixel buffer must match its stated size.
 final class MediaServiceClient: MediaProbing {
@@ -19,58 +13,14 @@ final class MediaServiceClient: MediaProbing {
 
     private let timeout: Duration
     private let connect: @Sendable () -> NSXPCConnection
-    private let onTimeout: @Sendable (NSXPCConnection) -> Void
 
     convenience init(serviceName: String = MediaServiceContract.serviceName, timeout: Duration = .seconds(120)) {
-        self.init(timeout: timeout, connect: { NSXPCConnection(serviceName: serviceName) }, onTimeout: Self.endService)
+        self.init(timeout: timeout, connect: { NSXPCConnection(serviceName: serviceName) })
     }
 
-    init(
-        timeout: Duration, connect: @escaping @Sendable () -> NSXPCConnection,
-        onTimeout: @escaping @Sendable (NSXPCConnection) -> Void
-    ) {
+    init(timeout: Duration, connect: @escaping @Sendable () -> NSXPCConnection) {
         self.timeout = timeout
         self.connect = connect
-        self.onTimeout = onTimeout
-    }
-
-    /// Kills the service on the other end of `connection`. A connection
-    /// learns its peer's pid only from a reply, and a stuck service never
-    /// sends one, so without a pid this kills every process of this user
-    /// running the service embedded in this app copy. Never this process: a
-    /// connection to an in-process listener reports our own pid.
-    static func endService(_ connection: NSXPCConnection) {
-        let known = connection.processIdentifier
-        let pids = known > 0 ? [known] : embeddedServicePIDs()
-        for pid in pids where pid != getpid() { kill(pid, SIGKILL) }
-    }
-
-    /// Processes of this user whose executable is this app's embedded media
-    /// service. Another copy of LumaWall runs its own service from its own
-    /// bundle. Files are compared by device and inode, not path: the kernel
-    /// reports `/private/var/...` where Foundation says `/var/...`.
-    static func embeddedServicePIDs() -> [pid_t] {
-        let executable = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/XPCServices/LumaWallMediaService.xpc/Contents/MacOS/LumaWallMediaService")
-        var expected = stat()
-        guard stat(executable.path, &expected) == 0 else { return [] }
-        let count = proc_listallpids(nil, 0)
-        guard count > 0 else { return [] }
-        // Room for processes started since the count.
-        var pids = [pid_t](repeating: 0, count: Int(count) + 64)
-        let filled = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
-        guard filled > 0 else { return [] }
-        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        return pids.prefix(Int(filled)).filter { pid in
-            guard pid > 0 else { return false }
-            var info = proc_bsdinfo()
-            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_uid == getuid(),
-                proc_pidpath(pid, &path, UInt32(path.count)) > 0
-            else { return false }
-            var found = stat()
-            return stat(path, &found) == 0 && found.st_dev == expected.st_dev && found.st_ino == expected.st_ino
-        }
     }
 
     func inspect(_ file: FileHandle, typeIdentifier: String) async throws -> MediaInfo {
@@ -103,20 +53,17 @@ final class MediaServiceClient: MediaProbing {
         defer { connection.invalidate() }
         let (seconds, attoseconds) = timeout.components
         let delay = Double(seconds) + Double(attoseconds) / 1e18
-        let onTimeout = onTimeout
+        let deadline = DispatchWallTime.now() + delay
         return try await withCheckedThrowingContinuation { continuation in
-            let pending = Pending(continuation)
-            // A dispatch timer, not a Task: it fires even when the Swift
-            // cooperative pool is busy.
-            let timer = DispatchWorkItem {
-                // Taken first, so a reply racing the timer can't also
-                // resume; ended before `invalidate`, while the pid is valid.
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+            let pending = Pending(continuation, timer: timer)
+            timer.schedule(wallDeadline: deadline)
+            timer.setEventHandler { [weak connection] in
                 guard let continuation = pending.take() else { return }
-                onTimeout(connection)
+                connection?.invalidate()
                 continuation.resume(throwing: MediaProbeError.serviceUnavailable)
             }
-            pending.timer = timer
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: timer)
+            timer.activate()
             let proxy = connection.remoteObjectProxyWithErrorHandler { _ in
                 pending.finish(.failure(MediaProbeError.serviceUnavailable))
             }
@@ -125,8 +72,9 @@ final class MediaServiceClient: MediaProbing {
                 return
             }
             send(service) { reply, error in
-                pending.finish(
-                    Result { try MediaServiceContract.decode(T.self, reply: reply, error: error, maxReplyBytes: maxReplyBytes) })
+                guard let continuation = pending.take() else { return }
+                continuation.resume(
+                    with: Result { try MediaServiceContract.decode(T.self, reply: reply, error: error, maxReplyBytes: maxReplyBytes) })
             }
         }
     }
@@ -136,13 +84,12 @@ final class MediaServiceClient: MediaProbing {
     private final class Pending<T: Sendable>: @unchecked Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<T, any Error>?
-        private var storedTimer: DispatchWorkItem?
-        var timer: DispatchWorkItem? {
-            get { lock.withLock { storedTimer } }
-            set { lock.withLock { storedTimer = newValue } }
-        }
+        private var timer: DispatchSourceTimer?
 
-        init(_ continuation: CheckedContinuation<T, any Error>) { self.continuation = continuation }
+        init(_ continuation: CheckedContinuation<T, any Error>, timer: DispatchSourceTimer) {
+            self.continuation = continuation
+            self.timer = timer
+        }
 
         /// The continuation, if nothing has resumed it yet. The caller must
         /// resume it.
@@ -151,9 +98,9 @@ final class MediaServiceClient: MediaProbing {
             let (taken, timer) = lock.withLock {
                 defer {
                     continuation = nil
-                    storedTimer = nil
+                    self.timer = nil
                 }
-                return (continuation, storedTimer)
+                return (continuation, self.timer)
             }
             if taken != nil { timer?.cancel() }
             return taken

@@ -21,100 +21,83 @@ final class MediaServiceClientTests: XCTestCase {
 
     func testTheServiceInspectsAndExtractsAPoster() async throws {
         let video = dir.appendingPathComponent("clip.mov")
-        try await writeVideo(to: video)
-        let client = MediaServiceClient()
-
-        let info = try await client.inspect(fileAt: video)
-        XCTAssertEqual(info.pixelSize, CGSize(width: 64, height: 64))
-        XCTAssertEqual(info.videoTrackCount, 1)
-        XCTAssertFalse(info.hasAudio)
-        let poster = try await client.posterFrame(fileAt: video, maxPixelSize: CGSize(width: 32, height: 32))
-        XCTAssertLessThanOrEqual(poster.width, 32)
-        XCTAssertNotNil(poster.makeImage())
+        try await withinTestDeadline {
+            try await Self.writeVideo(to: video)
+            let client = MediaServiceClient()
+            let info = try await client.inspect(fileAt: video)
+            XCTAssertEqual(info.pixelSize, CGSize(width: 64, height: 64))
+            XCTAssertEqual(info.videoTrackCount, 1)
+            XCTAssertFalse(info.hasAudio)
+            let poster = try await client.posterFrame(fileAt: video, maxPixelSize: CGSize(width: 32, height: 32))
+            XCTAssertLessThanOrEqual(poster.width, 32)
+            XCTAssertNotNil(poster.makeImage())
+        }
     }
 
     func testTheServiceReportsMediaItCannotRead() async throws {
         let text = dir.appendingPathComponent("notes.mov")
         try Data("not a movie".utf8).write(to: text)
-        do {
-            _ = try await MediaServiceClient().inspect(fileAt: text)
-            XCTFail("expected the service to refuse a text file")
-        } catch MediaProbeError.unsupportedMedia {}
+        try await withinTestDeadline {
+            do {
+                _ = try await MediaServiceClient().inspect(fileAt: text)
+                XCTFail("expected the service to refuse a text file")
+            } catch MediaProbeError.unsupportedMedia {}
+        }
     }
 
     func testAMissingServiceFailsInsteadOfHanging() async throws {
         let video = dir.appendingPathComponent("clip.mov")
-        try await writeVideo(to: video)
-        let client = MediaServiceClient(serviceName: "app.lumawall.personal.no-such-service", timeout: .seconds(10))
-        do {
-            _ = try await client.inspect(fileAt: video)
-            XCTFail("expected an unreachable service to fail")
-        } catch MediaProbeError.serviceUnavailable {}
+        try Data().write(to: video)
+        try await withinTestDeadline {
+            let client = MediaServiceClient(serviceName: "app.lumawall.personal.no-such-service")
+            do {
+                _ = try await client.inspect(fileAt: video)
+                XCTFail("expected an unreachable service to fail")
+            } catch MediaProbeError.serviceUnavailable {}
+        }
     }
 
-    func testAServiceThatNeverRepliesTimesOutAndIsEnded() async throws {
+    func testAServiceThatNeverRepliesTimesOut() async throws {
         let video = dir.appendingPathComponent("clip.mov")
-        try await writeVideo(to: video)
+        try Data().write(to: video)
         let service = SilentService()
         let listener = NSXPCListener.anonymous()
         listener.delegate = service
         listener.resume()
-        defer { listener.invalidate() }
-        let endpoint = listener.endpoint
-        let ended = expectation(description: "the stuck service is ended")
-        let client = MediaServiceClient(
-            timeout: .seconds(1), connect: { NSXPCConnection(listenerEndpoint: endpoint) },
-            onTimeout: { _ in ended.fulfill() })
-
-        let start = ContinuousClock.now
-        do {
-            _ = try await client.inspect(fileAt: video)
-            XCTFail("expected a silent service to time out")
-        } catch MediaProbeError.serviceUnavailable {}
-        XCTAssertLessThan(ContinuousClock.now - start, .seconds(10))
-        // The request reached the service and the connection stayed up:
-        // only the timeout could have ended the call.
-        XCTAssertEqual(service.requestCount, 1)
-        await fulfillment(of: [ended], timeout: 5)
-    }
-
-    /// A connection learns its peer's pid only from a reply, so a service
-    /// that never answers has to be found another way. Named to run last:
-    /// launchd throttles the relaunch of a killed service by about 10 seconds.
-    func testTheServiceWithNoReplyYetCanStillBeEnded() async throws {
-        let video = dir.appendingPathComponent("clip.mov")
-        try await writeVideo(to: video)
-        let pid = try await servicePID(after: video)
-        let silent = NSXPCConnection(serviceName: MediaServiceContract.serviceName)
-        silent.remoteObjectInterface = MediaServiceContract.interface()
-        silent.resume()
-        defer { silent.invalidate() }
-        XCTAssertEqual(silent.processIdentifier, 0)
-
-        MediaServiceClient.endService(silent)
-        let deadline = ContinuousClock.now + .seconds(5)
-        while kill(pid, 0) == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(kill(pid, 0), -1)
-    }
-
-    /// The running service's pid, read from a connection after a reply.
-    private func servicePID(after video: URL) async throws -> pid_t {
-        let connection = NSXPCConnection(serviceName: MediaServiceContract.serviceName)
-        connection.remoteObjectInterface = MediaServiceContract.interface()
-        connection.resume()
-        defer { connection.invalidate() }
-        let service = try XCTUnwrap(connection.remoteObjectProxyWithErrorHandler { _ in } as? MediaServiceXPC)
-        let handle = try MediaFile.open(video)
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            service.inspect(handle, typeIdentifier: MediaFile.typeIdentifier(for: video)) { _, _ in done.resume() }
+        defer {
+            listener.invalidate()
+            service.invalidateConnections()
         }
-        let pid = connection.processIdentifier
-        XCTAssertGreaterThan(pid, 0)
-        XCTAssertNotEqual(pid, getpid())
-        return pid
+        let endpoint = listener.endpoint
+        try await withinTestDeadline {
+            let client = MediaServiceClient(timeout: .seconds(1), connect: { NSXPCConnection(listenerEndpoint: endpoint) })
+            let start = ContinuousClock.now
+            do {
+                _ = try await client.inspect(fileAt: video)
+                XCTFail("expected a silent service to time out")
+            } catch MediaProbeError.serviceUnavailable {}
+            let elapsed = ContinuousClock.now - start
+            XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(950))
+            XCTAssertLessThan(elapsed, .seconds(5))
+            XCTAssertEqual(service.requestCount, 1)
+        }
     }
 
-    private func writeVideo(to url: URL) async throws {
+    private func withinTestDeadline(_ operation: @escaping @Sendable () async throws -> Void) async throws {
+        let done = XCTestExpectation(description: "media request completed")
+        let task = Task.detached {
+            defer { done.fulfill() }
+            try await operation()
+        }
+        defer { task.cancel() }
+        guard await XCTWaiter.fulfillment(of: [done], timeout: 15) == .completed else {
+            XCTFail("media request exceeded the test deadline")
+            return
+        }
+        try await task.value
+    }
+
+    private static func writeVideo(to url: URL) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         let input = AVAssetWriterInput(
             mediaType: .video,
@@ -148,6 +131,17 @@ private final class SilentService: NSObject, NSXPCListenerDelegate, MediaService
     private var connections: [NSXPCConnection] = []
 
     var requestCount: Int { lock.withLock { held.count } }
+
+    func invalidateConnections() {
+        let accepted = lock.withLock {
+            defer {
+                connections.removeAll()
+                held.removeAll()
+            }
+            return connections
+        }
+        for connection in accepted { connection.invalidate() }
+    }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         connection.exportedInterface = MediaServiceContract.interface()
