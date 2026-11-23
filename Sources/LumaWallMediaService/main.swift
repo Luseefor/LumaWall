@@ -5,8 +5,8 @@ import Foundation
 /// read-only handle to one file; a decoder exploit here can read the files
 /// it is handed and nothing else the user owns.
 
-/// Every request in the process. A decode still running past its deadline
-/// ends the process (see `MediaServiceWork`); the app's client gives up at
+/// Every accepted request in the process. A request still pending past
+/// its deadline ends the process (see `MediaServiceWork`); the app's client gives up at
 /// 120 seconds, after this 110-second deadline.
 let work = MediaServiceWork(onOverrun: { exit(EXIT_FAILURE) })
 

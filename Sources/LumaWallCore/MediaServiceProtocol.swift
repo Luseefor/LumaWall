@@ -64,9 +64,27 @@ public enum MediaServiceContract {
     }
 }
 
-/// The media service's running requests. At most `limit` run at once;
+/// Deadlines for requests accepted by the service, including work that
+/// has yet to run. The caller supplies the clock reading for each check.
+struct MediaRequestDeadlines {
+    private var entries: [UUID: ContinuousClock.Instant] = [:]
+
+    mutating func receive(_ id: UUID, deadline: ContinuousClock.Instant) {
+        entries[id] = deadline
+    }
+
+    mutating func finish(_ id: UUID) {
+        entries.removeValue(forKey: id)
+    }
+
+    func check(at now: ContinuousClock.Instant, onOverrun: () -> Void) {
+        if entries.values.contains(where: { $0 <= now }) { onOverrun() }
+    }
+}
+
+/// The media service's accepted requests. At most `limit` run at once;
 /// more are refused. A connection that goes away cancels its requests.
-/// A request still running after `deadline`, cancelled or not, calls
+/// A request still pending after `deadline`, cancelled or not, calls
 /// `onOverrun`, which in the service ends the process: launchd starts a
 /// fresh one on the next request, and a decode stuck past cancellation
 /// stops holding its file and a CPU.
@@ -74,38 +92,40 @@ public final class MediaServiceWork: @unchecked Sendable {
     private let lock = NSLock()
     private let limit: Int
     private let deadline: Duration
+    private let timer: DispatchSourceTimer
     private let onOverrun: @Sendable () -> Void
     /// Removed only when the work returns, so cancelled work that ignores
     /// cancellation still counts and still trips the deadline.
+    private var deadlines = MediaRequestDeadlines()
     private var running: [UUID: Task<Void, Never>] = [:]
 
     public init(limit: Int = 4, deadline: Duration = .seconds(110), onOverrun: @escaping @Sendable () -> Void) {
         self.limit = limit
         self.deadline = deadline
         self.onOverrun = onOverrun
+        timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "app.lumawall.media-watchdog"))
+        timer.schedule(wallDeadline: .now() + .seconds(1), repeating: .seconds(1))
+        timer.setEventHandler { [weak self] in self?.checkDeadlines() }
+        timer.activate()
     }
+
+    deinit { timer.cancel() }
 
     public var activeCount: Int { lock.withLock { running.count } }
 
-    /// Starts `work`, or returns nil when `limit` requests are running.
+    /// Records receipt before scheduling work, or refuses at the cap.
     public func start(_ work: @escaping @Sendable () async -> Void) -> UUID? {
+        let receivedAt = ContinuousClock.now
         let id = UUID()
-        let accepted = lock.withLock { () -> Bool in
-            guard running.count < limit else { return false }
+        return lock.withLock {
+            guard running.count < limit else { return nil }
+            deadlines.receive(id, deadline: receivedAt + deadline)
             running[id] = Task {
                 await work()
                 self.finish(id)
             }
-            return true
+            return id
         }
-        guard accepted else { return nil }
-        let deadline = deadline
-        Task.detached { [weak self] in
-            try? await Task.sleep(for: deadline)
-            guard let self, self.isRunning(id) else { return }
-            self.onOverrun()
-        }
-        return id
     }
 
     public func cancel(_ ids: some Sequence<UUID>) {
@@ -114,10 +134,14 @@ public final class MediaServiceWork: @unchecked Sendable {
     }
 
     private func finish(_ id: UUID) {
-        _ = lock.withLock { running.removeValue(forKey: id) }
+        lock.withLock {
+            running.removeValue(forKey: id)
+            deadlines.finish(id)
+        }
     }
 
-    private func isRunning(_ id: UUID) -> Bool {
-        lock.withLock { running[id] != nil }
+    private func checkDeadlines() {
+        let (snapshot, now) = lock.withLock { (deadlines, ContinuousClock.now) }
+        snapshot.check(at: now, onOverrun: onOverrun)
     }
 }
