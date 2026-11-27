@@ -1,5 +1,6 @@
 import Foundation
 import LumaWallCore
+import UserNotifications
 import XCTest
 
 @testable import LumaWall
@@ -104,5 +105,15 @@ final class NativeModeGateTests: XCTestCase {
         XCTAssertEqual(
             NativeFailureNotice.title(for: ["A", "B", "C"]), "Native mode stopped working on A, B and C")
         XCTAssertTrue(NativeFailureNotice.message(for: ["A", "B"]).hasPrefix("They moved to Safe mode"))
+    }
+
+    /// The failure notice needs permission, and macOS refused the prompt
+    /// when it was first asked at the failure, during an unlock. Ask while
+    /// native mode is on and nobody has answered yet, not after an answer.
+    func testNotificationPermissionIsAskedOnlyWhileNativeModeIsOnAndUnanswered() {
+        XCTAssertTrue(NativeFailureNotifier.asksForPermission(nativeModeOn: true, status: .notDetermined))
+        XCTAssertFalse(NativeFailureNotifier.asksForPermission(nativeModeOn: false, status: .notDetermined))
+        XCTAssertFalse(NativeFailureNotifier.asksForPermission(nativeModeOn: true, status: .denied))
+        XCTAssertFalse(NativeFailureNotifier.asksForPermission(nativeModeOn: true, status: .authorized))
     }
 }

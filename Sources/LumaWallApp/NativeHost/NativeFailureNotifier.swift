@@ -2,8 +2,9 @@ import AppKit
 import UserNotifications
 
 /// Posts the macOS notification when native mode fails on a display, with
-/// a Restore Original Wallpaper action. Permission is asked the first time
-/// there is something to say, not at launch.
+/// a Restore Original Wallpaper action. Permission is asked while native
+/// mode is on and the app is in use: a failure often comes right after an
+/// unlock or wake, when macOS refused the prompt and the notice was lost.
 @MainActor
 final class NativeFailureNotifier: NSObject {
     nonisolated static let categoryID = "app.lumawall.native-failure"
@@ -22,6 +23,27 @@ final class NativeFailureNotifier: NSObject {
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Self.categoryID, actions: [restore], intentIdentifiers: [])
         ])
+    }
+
+    /// Whether to ask for notification permission now.
+    nonisolated static func asksForPermission(nativeModeOn: Bool, status: UNAuthorizationStatus) -> Bool {
+        nativeModeOn && status == .notDetermined
+    }
+
+    /// Asks for permission if native mode is on and nobody has answered.
+    func askForPermissionIfNeeded(nativeModeOn: Bool) {
+        guard nativeModeOn else { return }
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let status = await center.notificationSettings().authorizationStatus
+            guard Self.asksForPermission(nativeModeOn: nativeModeOn, status: status) else { return }
+            do {
+                let granted = try await center.requestAuthorization(options: [.alert])
+                nativeHostLog.info("notification permission \(granted ? "granted" : "declined", privacy: .public)")
+            } catch {
+                nativeHostLog.notice("notification permission not asked: \(LogRedaction.code(of: error), privacy: .public)")
+            }
+        }
     }
 
     func post(title: String, body: String) {

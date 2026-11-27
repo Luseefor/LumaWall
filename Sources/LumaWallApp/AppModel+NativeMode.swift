@@ -35,6 +35,7 @@ extension AppModel {
         applyPlaybackPolicy()
         isApplying = false
         syncNativeHealth()
+        nativeFailureNotifier.askForPermissionIfNeeded(nativeModeOn: engine.mode == .native)
         // A Lock Screen pick saved while native mode was off goes on now.
         if engine.mode == .native, let lockID = automations.lockScreenWallpaperID,
             let asset = assets.first(where: { $0.id == lockID })
@@ -102,6 +103,7 @@ extension AppModel {
         nativeFailureNotifier.onRestore = { [weak self] in self?.restoreOriginalWallpaper() }
         nativeFailureNotifier.onOpen = { [weak self] in self?.section = .settings }
         nativeFailureNotifier.start()
+        nativeFailureNotifier.askForPermissionIfNeeded(nativeModeOn: engine.mode == .native)
         nativeHealth = NativeHealthMonitor(
             watchedDisplays: { [weak self] in
                 guard let self else { return [:] }
