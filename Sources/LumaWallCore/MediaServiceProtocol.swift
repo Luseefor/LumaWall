@@ -89,8 +89,7 @@ struct MediaRequestDeadlines {
 /// The media service's accepted requests. At most `limit` run at once;
 /// more are refused. A connection that goes away cancels its requests.
 /// A request still pending after `deadline`, cancelled or not, calls
-/// `onOverrun` once (with the lock held, so it must not call back into
-/// this object), which in the service ends the process: launchd starts a
+/// `onOverrun` once, which in the service ends the process: launchd starts a
 /// fresh one on the next request, and a decode stuck past cancellation
 /// stops holding its file and a CPU.
 public final class MediaServiceWork: @unchecked Sendable {
@@ -148,14 +147,16 @@ public final class MediaServiceWork: @unchecked Sendable {
         }
     }
 
-    /// Decides and calls `onOverrun` under the lock, so a request that
-    /// finishes in the meantime can't be counted as overdue, and nothing
-    /// new is accepted once the service has decided to end.
+    /// Decides under the lock, so a request that finishes in the meantime
+    /// can't be counted as overdue and nothing new is accepted once the
+    /// service has decided to end. `onOverrun` runs after the lock is
+    /// released, so exit handlers can't block on a finishing request.
     private func checkDeadlines() {
-        lock.withLock {
-            guard !exiting, deadlines.isOverdue(at: ContinuousClock.now) else { return }
+        let overran = lock.withLock {
+            guard !exiting, deadlines.isOverdue(at: ContinuousClock.now) else { return false }
             exiting = true
-            onOverrun()
+            return true
         }
+        if overran { onOverrun() }
     }
 }
