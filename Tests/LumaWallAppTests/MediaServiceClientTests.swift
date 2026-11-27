@@ -21,38 +21,83 @@ final class MediaServiceClientTests: XCTestCase {
 
     func testTheServiceInspectsAndExtractsAPoster() async throws {
         let video = dir.appendingPathComponent("clip.mov")
-        try await writeVideo(to: video)
-        let client = MediaServiceClient()
-
-        let info = try await client.inspect(fileAt: video)
-        XCTAssertEqual(info.pixelSize, CGSize(width: 64, height: 64))
-        XCTAssertEqual(info.videoTrackCount, 1)
-        XCTAssertFalse(info.hasAudio)
-        let poster = try await client.posterFrame(fileAt: video, maxPixelSize: CGSize(width: 32, height: 32))
-        XCTAssertLessThanOrEqual(poster.width, 32)
-        XCTAssertNotNil(poster.makeImage())
+        try await withinTestDeadline {
+            try await Self.writeVideo(to: video)
+            let client = MediaServiceClient()
+            let info = try await client.inspect(fileAt: video)
+            XCTAssertEqual(info.pixelSize, CGSize(width: 64, height: 64))
+            XCTAssertEqual(info.videoTrackCount, 1)
+            XCTAssertFalse(info.hasAudio)
+            let poster = try await client.posterFrame(fileAt: video, maxPixelSize: CGSize(width: 32, height: 32))
+            XCTAssertLessThanOrEqual(poster.width, 32)
+            XCTAssertNotNil(poster.makeImage())
+        }
     }
 
     func testTheServiceReportsMediaItCannotRead() async throws {
         let text = dir.appendingPathComponent("notes.mov")
         try Data("not a movie".utf8).write(to: text)
-        do {
-            _ = try await MediaServiceClient().inspect(fileAt: text)
-            XCTFail("expected the service to refuse a text file")
-        } catch MediaProbeError.unsupportedMedia {}
+        try await withinTestDeadline {
+            do {
+                _ = try await MediaServiceClient().inspect(fileAt: text)
+                XCTFail("expected the service to refuse a text file")
+            } catch MediaProbeError.unsupportedMedia {}
+        }
     }
 
     func testAMissingServiceFailsInsteadOfHanging() async throws {
         let video = dir.appendingPathComponent("clip.mov")
-        try await writeVideo(to: video)
-        let client = MediaServiceClient(serviceName: "app.lumawall.personal.no-such-service", timeout: .seconds(10))
-        do {
-            _ = try await client.inspect(fileAt: video)
-            XCTFail("expected an unreachable service to fail")
-        } catch MediaProbeError.serviceUnavailable {}
+        try Data().write(to: video)
+        try await withinTestDeadline {
+            let client = MediaServiceClient(serviceName: "app.lumawall.personal.no-such-service")
+            do {
+                _ = try await client.inspect(fileAt: video)
+                XCTFail("expected an unreachable service to fail")
+            } catch MediaProbeError.serviceUnavailable {}
+        }
     }
 
-    private func writeVideo(to url: URL) async throws {
+    func testAServiceThatNeverRepliesTimesOut() async throws {
+        let video = dir.appendingPathComponent("clip.mov")
+        try Data().write(to: video)
+        let service = SilentService()
+        let listener = NSXPCListener.anonymous()
+        listener.delegate = service
+        listener.resume()
+        defer {
+            listener.invalidate()
+            service.invalidateConnections()
+        }
+        let endpoint = listener.endpoint
+        try await withinTestDeadline {
+            let client = MediaServiceClient(timeout: .seconds(1), connect: { NSXPCConnection(listenerEndpoint: endpoint) })
+            let start = ContinuousClock.now
+            do {
+                _ = try await client.inspect(fileAt: video)
+                XCTFail("expected a silent service to time out")
+            } catch MediaProbeError.serviceUnavailable {}
+            let elapsed = ContinuousClock.now - start
+            XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(950))
+            XCTAssertLessThan(elapsed, .seconds(5))
+            XCTAssertEqual(service.requestCount, 1)
+        }
+    }
+
+    private func withinTestDeadline(_ operation: @escaping @Sendable () async throws -> Void) async throws {
+        let done = XCTestExpectation(description: "media request completed")
+        let task = Task.detached {
+            defer { done.fulfill() }
+            try await operation()
+        }
+        defer { task.cancel() }
+        guard await XCTWaiter.fulfillment(of: [done], timeout: 15) == .completed else {
+            XCTFail("media request exceeded the test deadline")
+            return
+        }
+        try await task.value
+    }
+
+    private static func writeVideo(to url: URL) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         let input = AVAssetWriterInput(
             mediaType: .video,
@@ -75,5 +120,45 @@ final class MediaServiceClientTests: XCTestCase {
         input.markAsFinished()
         await writer.finishWriting()
         XCTAssertEqual(writer.status, .completed)
+    }
+}
+
+/// Accepts every request and never answers it, holding the reply blocks so
+/// the connection stays up.
+private final class SilentService: NSObject, NSXPCListenerDelegate, MediaServiceXPC, @unchecked Sendable {
+    private let lock = NSLock()
+    private var held: [Any] = []
+    private var connections: [NSXPCConnection] = []
+
+    var requestCount: Int { lock.withLock { held.count } }
+
+    func invalidateConnections() {
+        let accepted = lock.withLock {
+            defer {
+                connections.removeAll()
+                held.removeAll()
+            }
+            return connections
+        }
+        for connection in accepted { connection.invalidate() }
+    }
+
+    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        connection.exportedInterface = MediaServiceContract.interface()
+        connection.exportedObject = self
+        lock.withLock { connections.append(connection) }
+        connection.resume()
+        return true
+    }
+
+    func inspect(_ file: FileHandle, typeIdentifier: String, reply: @escaping @Sendable (Data?, Data?) -> Void) {
+        lock.withLock { held.append(reply) }
+    }
+
+    func posterFrame(
+        _ file: FileHandle, typeIdentifier: String, maxWidth: Double, maxHeight: Double, nearStart: Bool,
+        reply: @escaping @Sendable (Data?, Data?) -> Void
+    ) {
+        lock.withLock { held.append(reply) }
     }
 }

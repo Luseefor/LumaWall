@@ -11,12 +11,16 @@ import LumaWallCore
 final class MediaServiceClient: MediaProbing {
     static let shared = MediaServiceClient()
 
-    private let serviceName: String
     private let timeout: Duration
+    private let connect: @Sendable () -> NSXPCConnection
 
-    init(serviceName: String = MediaServiceContract.serviceName, timeout: Duration = .seconds(120)) {
-        self.serviceName = serviceName
+    convenience init(serviceName: String = MediaServiceContract.serviceName, timeout: Duration = .seconds(120)) {
+        self.init(timeout: timeout, connect: { NSXPCConnection(serviceName: serviceName) })
+    }
+
+    init(timeout: Duration, connect: @escaping @Sendable () -> NSXPCConnection) {
         self.timeout = timeout
+        self.connect = connect
     }
 
     func inspect(_ file: FileHandle, typeIdentifier: String) async throws -> MediaInfo {
@@ -43,17 +47,24 @@ final class MediaServiceClient: MediaProbing {
     private func call<T: Decodable & Sendable>(
         _ type: T.Type, maxReplyBytes: Int, _ send: (MediaServiceXPC, @escaping @Sendable (Data?, Data?) -> Void) -> Void
     ) async throws -> T {
-        let connection = NSXPCConnection(serviceName: serviceName)
+        let connection = connect()
         connection.remoteObjectInterface = MediaServiceContract.interface()
         connection.resume()
         defer { connection.invalidate() }
-        let timeout = timeout
+        let (seconds, attoseconds) = timeout.components
+        let delay = Double(seconds) + Double(attoseconds) / 1e18
+        // Uptime-based, so changing the system clock can't delay the timeout.
+        let deadline = DispatchTime.now() + delay
         return try await withCheckedThrowingContinuation { continuation in
-            let pending = Pending(continuation)
-            pending.timer = Task {
-                try? await Task.sleep(for: timeout)
-                if !Task.isCancelled { pending.finish(.failure(MediaProbeError.serviceUnavailable)) }
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+            let pending = Pending(continuation, timer: timer)
+            timer.schedule(deadline: deadline)
+            timer.setEventHandler { [weak connection] in
+                guard let continuation = pending.take() else { return }
+                connection?.invalidate()
+                continuation.resume(throwing: MediaProbeError.serviceUnavailable)
             }
+            timer.activate()
             let proxy = connection.remoteObjectProxyWithErrorHandler { _ in
                 pending.finish(.failure(MediaProbeError.serviceUnavailable))
             }
@@ -62,8 +73,9 @@ final class MediaServiceClient: MediaProbing {
                 return
             }
             send(service) { reply, error in
-                pending.finish(
-                    Result { try MediaServiceContract.decode(T.self, reply: reply, error: error, maxReplyBytes: maxReplyBytes) })
+                guard let continuation = pending.take() else { return }
+                continuation.resume(
+                    with: Result { try MediaServiceContract.decode(T.self, reply: reply, error: error, maxReplyBytes: maxReplyBytes) })
             }
         }
     }
@@ -73,21 +85,30 @@ final class MediaServiceClient: MediaProbing {
     private final class Pending<T: Sendable>: @unchecked Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<T, any Error>?
-        var timer: Task<Void, Never>? {
-            get { lock.withLock { storedTimer } }
-            set { lock.withLock { storedTimer = newValue } }
-        }
-        private var storedTimer: Task<Void, Never>?
+        private var timer: DispatchSourceTimer?
 
-        init(_ continuation: CheckedContinuation<T, any Error>) { self.continuation = continuation }
+        init(_ continuation: CheckedContinuation<T, any Error>, timer: DispatchSourceTimer) {
+            self.continuation = continuation
+            self.timer = timer
+        }
+
+        /// The continuation, if nothing has resumed it yet. The caller must
+        /// resume it.
+        func take() -> CheckedContinuation<T, any Error>? {
+            // Clearing the timer also breaks the cycle between it and this.
+            let (taken, timer) = lock.withLock {
+                defer {
+                    continuation = nil
+                    self.timer = nil
+                }
+                return (continuation, self.timer)
+            }
+            if taken != nil { timer?.cancel() }
+            return taken
+        }
 
         func finish(_ result: Result<T, any Error>) {
-            let (resume, timer) = lock.withLock {
-                defer { continuation = nil }
-                return (continuation, storedTimer)
-            }
-            timer?.cancel()
-            resume?.resume(with: result)
+            take()?.resume(with: result)
         }
     }
 }

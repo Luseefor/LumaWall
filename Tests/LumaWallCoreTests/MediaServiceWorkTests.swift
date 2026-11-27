@@ -50,14 +50,26 @@ struct MediaServiceWorkTests {
         _ = work.start { while !release.isSet { try? await Task.sleep(for: .milliseconds(1)) } }
         await waitUntil { overrun.isSet }
         #expect(overrun.isSet)
+        // The service is ending: new requests are refused, not dropped.
+        #expect(work.start {} == nil)
         release.set()
     }
 
-    @Test func finishedWorkNeverTripsTheDeadline() async {
+    @Test func receivedWorkKeepsItsOwnDeadlineUntilItFinishes() {
         let overrun = Flag()
-        let work = MediaServiceWork(limit: 4, deadline: .milliseconds(50), onOverrun: { overrun.set() })
-        _ = work.start {}
-        try? await Task.sleep(for: .milliseconds(150))
+        let now = ContinuousClock.now
+        var deadlines = MediaRequestDeadlines()
+        let finished = UUID()
+        let stalled = UUID()
+        let later = UUID()
+        deadlines.receive(finished, deadline: now + .seconds(110))
+        deadlines.receive(stalled, deadline: now + .seconds(111))
+        deadlines.receive(later, deadline: now + .seconds(210))
+        deadlines.finish(finished)
+
+        deadlines.check(at: now + .seconds(110), onOverrun: { overrun.set() })
         #expect(!overrun.isSet)
+        deadlines.check(at: now + .seconds(111), onOverrun: { overrun.set() })
+        #expect(overrun.isSet)
     }
 }

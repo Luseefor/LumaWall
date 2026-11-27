@@ -69,12 +69,12 @@ enum TestVideos {
         writer.startSession(atSourceTime: .zero)
         let frames = 30
         for frame in 0..<frames {
-            while !videoInput.isReadyForMoreMediaData { await Task.yield() }
+            try await waitUntilReady(videoInput, writer)
             let buffer = try makeBlackPixelBuffer()
             adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
         }
         if let audioInput {
-            while !audioInput.isReadyForMoreMediaData { await Task.yield() }
+            try await waitUntilReady(audioInput, writer)
             // Feed silence decoded from a WAV via AVAssetReader, so every
             // appended buffer is well-formed by construction (hand-rolled
             // CMSampleBuffers segfaulted the runner).
@@ -88,7 +88,7 @@ enum TestVideos {
             reader.add(output)
             reader.startReading()
             while let sample = output.copyNextSampleBuffer() {
-                while !audioInput.isReadyForMoreMediaData { await Task.yield() }
+                try await waitUntilReady(audioInput, writer)
                 audioInput.append(sample)
             }
         }
@@ -99,6 +99,19 @@ enum TestVideos {
             throw MediaImporter.ImportError.unsupportedMedia
         }
         return url
+    }
+
+    /// Waits for `input` to take more data. Throws if the writer fails or
+    /// the input isn't ready within 10 seconds, so a broken writer fails
+    /// the test instead of spinning forever.
+    private static func waitUntilReady(_ input: AVAssetWriterInput, _ writer: AVAssetWriter) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !input.isReadyForMoreMediaData {
+            guard writer.status == .writing, ContinuousClock.now < deadline else {
+                throw MediaImporter.ImportError.unsupportedMedia
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
     }
 
     /// Finish an `AVAssetWriter` via its completion-handler API. The async
