@@ -57,7 +57,10 @@ final class NativeFailureNotifier: NSObject {
         Task {
             let center = UNUserNotificationCenter.current()
             do {
-                guard try await center.requestAuthorization(options: [.alert]) else { return }
+                // Asking is left to `askForPermissionIfNeeded`, which waits
+                // for the native-mode warning to be answered.
+                let status = await center.notificationSettings().authorizationStatus
+                guard status == .authorized || status == .provisional else { return }
                 try await center.add(request)
             } catch {
                 nativeHostLog.notice("notification not posted: \(LogRedaction.code(of: error), privacy: .public)")

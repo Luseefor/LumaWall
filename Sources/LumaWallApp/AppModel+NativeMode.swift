@@ -110,6 +110,10 @@ extension AppModel {
         engine.onNativeFallback = { [weak self] fallback in
             self?.presentNativeFallback(fallback)
         }
+        engine.onNativeRestoreSettled = { [weak self] in
+            self?.refreshActive()
+            self?.applyPlaybackPolicy()
+        }
         nativeFailureNotifier.onRestore = { [weak self] in self?.restoreOriginalWallpaper() }
         nativeFailureNotifier.onOpen = { [weak self] in self?.section = .settings }
         nativeFailureNotifier.start()

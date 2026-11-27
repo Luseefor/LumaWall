@@ -425,9 +425,4 @@ final class NativeWallpaperEngine {
         NativeWallpaperDeployment.copyConditionsChanged()
     }
 
-    func reapplyAssignments() {
-        let library = Array(libraryByID.values)
-        guard !library.isEmpty else { return }
-        Task { try? await restore(using: library) }
-    }
 }

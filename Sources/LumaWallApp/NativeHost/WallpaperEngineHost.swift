@@ -11,6 +11,12 @@ import Observation
 final class WallpaperEngine {
     /// Displays native mode just gave up on, and the error that caused it
     /// (nil when a restore failed without one).
+    /// The pending restore after a busy store, if any.
+    @ObservationIgnored private var busyRetry: Task<Void, Never>?
+    /// Called when a restore retried after a busy store has finished, so
+    /// the app can refresh what it shows.
+    @ObservationIgnored var onNativeRestoreSettled: (() -> Void)?
+
     struct NativeFallback {
         var displayIDs: Set<DisplayID>
         var error: (any Error)?
@@ -281,7 +287,11 @@ final class WallpaperEngine {
     /// to the overlay. Waiting inside one restore instead let a clear, an
     /// apply or a handoff land mid-wait and be undone by its stale write.
     func restoreNative(using library: [WallpaperAsset], busyAttempt: Int = 0) async {
+        // A newer restore supersedes a pending retry; it reads fresh state.
+        busyRetry?.cancel()
+        busyRetry = nil
         guard mode == .native, let native else { return }
+        defer { if busyAttempt > 0, busyRetry == nil { onNativeRestoreSettled?() } }
         libraryByID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         let generation = hostGeneration
         do {
@@ -302,9 +312,10 @@ final class WallpaperEngine {
             }
             guard let delay else { return }
             nativeHostLog.notice("restore: the wallpaper store is busy; trying again in \(delay, privacy: .public)")
-            Task { [weak self] in
-                try? await Task.sleep(for: delay)
+            busyRetry = Task { [weak self] in
+                do { try await Task.sleep(for: delay) } catch { return }
                 guard let self, generation == self.hostGeneration else { return }
+                self.busyRetry = nil
                 await self.restoreNative(using: Array(self.libraryByID.values), busyAttempt: busyAttempt + 1)
             }
         } catch {
