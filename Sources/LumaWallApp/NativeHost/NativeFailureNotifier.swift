@@ -2,8 +2,9 @@ import AppKit
 import UserNotifications
 
 /// Posts the macOS notification when native mode fails on a display, with
-/// a Restore Original Wallpaper action. Permission is asked the first time
-/// there is something to say, not at launch.
+/// a Restore Original Wallpaper action. Permission is asked while native
+/// mode is on and the app is in use: a failure often comes right after an
+/// unlock or wake, when macOS refused the prompt and the notice was lost.
 @MainActor
 final class NativeFailureNotifier: NSObject {
     nonisolated static let categoryID = "app.lumawall.native-failure"
@@ -24,6 +25,29 @@ final class NativeFailureNotifier: NSObject {
         ])
     }
 
+    /// Whether to ask for notification permission now.
+    nonisolated static func asksForPermission(nativeModeOn: Bool, status: UNAuthorizationStatus) -> Bool {
+        nativeModeOn && status == .notDetermined
+    }
+
+    /// Asks for permission if `nativeModeOn` still holds and nobody has
+    /// answered. It's checked again after reading the settings, so turning
+    /// native mode off meanwhile cancels the prompt.
+    func askForPermissionIfNeeded(nativeModeOn: @escaping @MainActor () -> Bool) {
+        guard nativeModeOn() else { return }
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let status = await center.notificationSettings().authorizationStatus
+            guard Self.asksForPermission(nativeModeOn: nativeModeOn(), status: status) else { return }
+            do {
+                let granted = try await center.requestAuthorization(options: [.alert])
+                nativeHostLog.info("notification permission \(granted ? "granted" : "declined", privacy: .public)")
+            } catch {
+                nativeHostLog.notice("notification permission not asked: \(LogRedaction.code(of: error), privacy: .public)")
+            }
+        }
+    }
+
     func post(title: String, body: String) {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -33,7 +57,10 @@ final class NativeFailureNotifier: NSObject {
         Task {
             let center = UNUserNotificationCenter.current()
             do {
-                guard try await center.requestAuthorization(options: [.alert]) else { return }
+                // Asking is left to `askForPermissionIfNeeded`, which waits
+                // for the native-mode warning to be answered.
+                let status = await center.notificationSettings().authorizationStatus
+                guard status == .authorized || status == .provisional else { return }
                 try await center.add(request)
             } catch {
                 nativeHostLog.notice("notification not posted: \(LogRedaction.code(of: error), privacy: .public)")

@@ -35,6 +35,7 @@ extension AppModel {
         applyPlaybackPolicy()
         isApplying = false
         syncNativeHealth()
+        askForNotificationPermissionIfNeeded()
         // A Lock Screen pick saved while native mode was off goes on now.
         if engine.mode == .native, let lockID = automations.lockScreenWallpaperID,
             let asset = assets.first(where: { $0.id == lockID })
@@ -56,7 +57,17 @@ extension AppModel {
     /// The one-time warning for someone who already used native mode.
     func answerNativeModeDisclosure(keepNativeMode: Bool) {
         engine.acknowledgeNativeModeDisclosure()
-        if !keepNativeMode { setNativeMode(enabled: false) }
+        if keepNativeMode { askForNotificationPermissionIfNeeded() } else { setNativeMode(enabled: false) }
+    }
+
+    /// The failure notice needs permission. Asked while native mode is the
+    /// host and its warning is answered, never during a failure: those
+    /// come after an unlock or wake, when macOS refused the prompt.
+    private func askForNotificationPermissionIfNeeded() {
+        nativeFailureNotifier.askForPermissionIfNeeded { [weak self] in
+            guard let self else { return false }
+            return self.engine.mode == .native && !self.needsNativeModeDisclosure
+        }
     }
 
     /// Turns native mode off if it is on, stops LumaWall's wallpapers so
@@ -99,9 +110,14 @@ extension AppModel {
         engine.onNativeFallback = { [weak self] fallback in
             self?.presentNativeFallback(fallback)
         }
+        engine.onNativeRestoreSettled = { [weak self] in
+            self?.refreshActive()
+            self?.applyPlaybackPolicy()
+        }
         nativeFailureNotifier.onRestore = { [weak self] in self?.restoreOriginalWallpaper() }
         nativeFailureNotifier.onOpen = { [weak self] in self?.section = .settings }
         nativeFailureNotifier.start()
+        askForNotificationPermissionIfNeeded()
         nativeHealth = NativeHealthMonitor(
             watchedDisplays: { [weak self] in
                 guard let self else { return [:] }

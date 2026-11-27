@@ -95,7 +95,7 @@ struct AssignmentStoreTests {
     }
 
     @Test
-    func clearDropsSingleDisplayAndAll() async throws {
+    func clearEmptiesSingleDisplayAndDropsAll() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try AssignmentStore(rootURL: root)
@@ -104,10 +104,34 @@ struct AssignmentStoreTests {
             DisplayAssignment(displayID: DisplayID(rawValue: "drop")),
         ])
         try await store.clear(displayID: DisplayID(rawValue: "drop"))
-        #expect(await store.assignment(for: DisplayID(rawValue: "drop")) == nil)
+        let dropped = await store.assignment(for: DisplayID(rawValue: "drop"))
+        #expect(dropped?.wallpaperID == nil && dropped?.isEnabled == false)
         #expect(await store.assignment(for: DisplayID(rawValue: "keep")) != nil)
 
         try await store.clearAll()
         #expect(await store.current().assignments.isEmpty)
+    }
+
+    /// A display the user cleared stays empty: a later restore (after a
+    /// wake, an unlock or a reconnect) used to treat it as new and give it
+    /// the main display's wallpaper.
+    @Test
+    func aClearedDisplayIsNotRefilledByTheNextRestore() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try AssignmentStore(rootURL: root)
+        let main = DisplayID(rawValue: "main")
+        let side = DisplayID(rawValue: "side")
+        try await store.upsert([
+            DisplayAssignment(displayID: main, wallpaperID: WallpaperID()),
+            DisplayAssignment(displayID: side, wallpaperID: WallpaperID()),
+        ])
+
+        try await store.clear(displayID: side)
+
+        let stored = await store.current().assignments
+        #expect(stored.first { $0.displayID == side }?.wallpaperID == nil)
+        #expect(
+            DisplayTopology.inheritedAssignments(stored: stored, connectedIDs: [main, side], mainDisplayID: main).isEmpty)
     }
 }

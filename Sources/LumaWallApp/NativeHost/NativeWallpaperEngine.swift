@@ -187,7 +187,9 @@ final class NativeWallpaperEngine {
     /// the `skipping` displays, where native mode already failed.
     ///
     /// Returns the displays whose copy or assignment failed, for the caller to
-    /// hand to the overlay. Permission errors are thrown instead.
+    /// hand to the overlay. Permission errors are thrown instead, and so is
+    /// `StoreBusy` when WallpaperAgent kept changing the store, for the
+    /// caller to restore again.
     @discardableResult
     func restore(
         using library: [WallpaperAsset], onlyDefaultCrop: Bool = false, skipping: Set<DisplayID> = []
@@ -326,6 +328,14 @@ final class NativeWallpaperEngine {
             for displayID in missing { active.removeValue(forKey: displayID) }
             failed.formUnion(missing)
             nativeHostLog.info("restore: assigned \(map.count - unassigned.count) display(s)")
+        } catch NativeWallpaperAssignmentService.AssignmentError.verificationFailed {
+            // WallpaperAgent kept rewriting the store, as it does for a
+            // second or so after a display wakes or joins. Not native mode
+            // failing: the caller restores again shortly, from fresh state.
+            let assigned = Set(map.keys)
+            let busy = Set(connected.filter { assigned.contains($0.cgDisplayID) }.map(\.displayID))
+            for displayID in busy { active.removeValue(forKey: displayID) }
+            throw StoreBusy(displays: busy, failed: failed)
         } catch {
             if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             nativeHostLog.error(
@@ -336,6 +346,13 @@ final class NativeWallpaperEngine {
             for displayID in failed { active.removeValue(forKey: displayID) }
         }
         return failed
+    }
+
+    /// The store kept changing under a restore's write. `displays` were
+    /// about to be written; `failed` failed before the write, for real.
+    struct StoreBusy: Error {
+        var displays: Set<DisplayID>
+        var failed: Set<DisplayID>
     }
 
     /// What, besides the wallpapers, decides what a write puts in the store.
@@ -408,9 +425,4 @@ final class NativeWallpaperEngine {
         NativeWallpaperDeployment.copyConditionsChanged()
     }
 
-    func reapplyAssignments() {
-        let library = Array(libraryByID.values)
-        guard !library.isEmpty else { return }
-        Task { try? await restore(using: library) }
-    }
 }

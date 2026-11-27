@@ -51,8 +51,13 @@ public actor AssignmentStore {
         try persist()
     }
 
+    /// Keeps a disabled entry with no wallpaper, so a later restore sees the
+    /// display as deliberately empty instead of new (new displays inherit
+    /// the main display's wallpaper).
     public func clear(displayID: DisplayID) throws {
         snapshot.assignments.removeAll { $0.displayID == displayID }
+        snapshot.assignments.append(DisplayAssignment(displayID: displayID, wallpaperID: nil, isEnabled: false))
+        snapshot.assignments.sort { $0.displayID.rawValue < $1.displayID.rawValue }
         snapshot.updatedAt = .now
         try persist()
     }

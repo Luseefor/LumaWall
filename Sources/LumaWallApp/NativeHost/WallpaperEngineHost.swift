@@ -11,6 +11,14 @@ import Observation
 final class WallpaperEngine {
     /// Displays native mode just gave up on, and the error that caused it
     /// (nil when a restore failed without one).
+    /// The pending restore after a busy store, if any.
+    @ObservationIgnored private var busyRetry: Task<Void, Never>?
+    /// Counts native restores, so only the newest schedules a busy retry.
+    @ObservationIgnored private var nativeRestoreTicket = 0
+    /// Called when a restore retried after a busy store has finished, so
+    /// the app can refresh what it shows.
+    @ObservationIgnored var onNativeRestoreSettled: (() -> Void)?
+
     struct NativeFallback {
         var displayIDs: Set<DisplayID>
         var error: (any Error)?
@@ -274,8 +282,22 @@ final class WallpaperEngine {
     /// Split ownership with the overlay (which takes non-default displays and
     /// leaves default-crop ones alone): either side touching the other's
     /// displays clobbers assignments (overlay posters) or leaks windows.
-    func restoreNative(using library: [WallpaperAsset]) async {
+    ///
+    /// When WallpaperAgent is still rewriting its store (after a display
+    /// wakes or joins), the restore runs again after 1, 2 and 4
+    /// seconds, from fresh state, before those displays go
+    /// to the overlay. Waiting inside one restore instead let a clear, an
+    /// apply or a handoff land mid-wait and be undone by its stale write.
+    func restoreNative(using library: [WallpaperAsset], busyAttempt: Int = 0) async {
+        // A newer restore supersedes a pending retry; it reads fresh state.
+        busyRetry?.cancel()
+        busyRetry = nil
+        nativeRestoreTicket += 1
+        let ticket = nativeRestoreTicket
         guard mode == .native, let native else { return }
+        defer {
+            if busyAttempt > 0, ticket == nativeRestoreTicket, busyRetry == nil { onNativeRestoreSettled?() }
+        }
         libraryByID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         let generation = hostGeneration
         do {
@@ -286,10 +308,37 @@ final class WallpaperEngine {
             guard generation == hostGeneration, !failed.isEmpty else { return }
             fallBack(failed, after: nil)
             await overlay.restore(using: library, nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
+        } catch let busy as NativeWallpaperEngine.StoreBusy {
+            guard generation == hostGeneration else { return }
+            let delay = Self.busyStoreRetryDelay(afterAttempt: busyAttempt)
+            // A superseded restore leaves the busy displays to the newer one.
+            let superseded = ticket != nativeRestoreTicket
+            let failed = delay == nil && !superseded ? busy.failed.union(busy.displays) : busy.failed
+            if !failed.isEmpty {
+                fallBack(failed, after: nil)
+                await overlay.restore(using: library, nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
+            }
+            // Only the newest restore schedules a retry; an older one that
+            // finished later must not replace or outlive it.
+            guard let delay, ticket == nativeRestoreTicket else { return }
+            nativeHostLog.notice("restore: the wallpaper store is busy; trying again in \(delay, privacy: .public)")
+            busyRetry = Task { [weak self] in
+                do { try await Task.sleep(for: delay) } catch { return }
+                guard let self, generation == self.hostGeneration else { return }
+                self.busyRetry = nil
+                await self.restoreNative(using: Array(self.libraryByID.values), busyAttempt: busyAttempt + 1)
+            }
         } catch {
             guard generation == hostGeneration else { return }
             await fallBackToOverlay()
         }
+    }
+
+    /// How long to wait before restoring again after a busy store, or nil
+    /// once the retries are used up.
+    nonisolated static func busyStoreRetryDelay(afterAttempt attempt: Int) -> Duration? {
+        let delays: [Duration] = [.seconds(1), .seconds(2), .seconds(4)]
+        return delays.indices.contains(attempt) ? delays[attempt] : nil
     }
 
     /// A missing display or a removed wallpaper isn't native mode's fault,
