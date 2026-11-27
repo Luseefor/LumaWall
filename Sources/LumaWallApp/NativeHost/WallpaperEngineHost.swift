@@ -13,6 +13,8 @@ final class WallpaperEngine {
     /// (nil when a restore failed without one).
     /// The pending restore after a busy store, if any.
     @ObservationIgnored private var busyRetry: Task<Void, Never>?
+    /// Counts native restores, so only the newest schedules a busy retry.
+    @ObservationIgnored private var nativeRestoreTicket = 0
     /// Called when a restore retried after a busy store has finished, so
     /// the app can refresh what it shows.
     @ObservationIgnored var onNativeRestoreSettled: (() -> Void)?
@@ -290,8 +292,12 @@ final class WallpaperEngine {
         // A newer restore supersedes a pending retry; it reads fresh state.
         busyRetry?.cancel()
         busyRetry = nil
+        nativeRestoreTicket += 1
+        let ticket = nativeRestoreTicket
         guard mode == .native, let native else { return }
-        defer { if busyAttempt > 0, busyRetry == nil { onNativeRestoreSettled?() } }
+        defer {
+            if busyAttempt > 0, ticket == nativeRestoreTicket, busyRetry == nil { onNativeRestoreSettled?() }
+        }
         libraryByID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         let generation = hostGeneration
         do {
@@ -305,12 +311,16 @@ final class WallpaperEngine {
         } catch let busy as NativeWallpaperEngine.StoreBusy {
             guard generation == hostGeneration else { return }
             let delay = Self.busyStoreRetryDelay(afterAttempt: busyAttempt)
-            let failed = delay == nil ? busy.failed.union(busy.displays) : busy.failed
+            // A superseded restore leaves the busy displays to the newer one.
+            let superseded = ticket != nativeRestoreTicket
+            let failed = delay == nil && !superseded ? busy.failed.union(busy.displays) : busy.failed
             if !failed.isEmpty {
                 fallBack(failed, after: nil)
                 await overlay.restore(using: library, nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
             }
-            guard let delay else { return }
+            // Only the newest restore schedules a retry; an older one that
+            // finished later must not replace or outlive it.
+            guard let delay, ticket == nativeRestoreTicket else { return }
             nativeHostLog.notice("restore: the wallpaper store is busy; trying again in \(delay, privacy: .public)")
             busyRetry = Task { [weak self] in
                 do { try await Task.sleep(for: delay) } catch { return }
