@@ -88,9 +88,11 @@ and `AVPlayer` playback. Testing builds gain Xcode's read-only `/`
 sandbox exception, so check real entitlements on the Release build:
 `codesign -d --entitlements - <Release app>/Contents/XPCServices/LumaWallMediaService.xpc`.
 
-A request that gets no reply within the client's timeout ends the service
-process, so later requests get a fresh one (ADR 0005). launchd delays
-that relaunch by about 10 seconds.
+The service ends itself when an accepted request runs past its 110-second
+deadline, and launchd starts a fresh one for a later request, about 10
+seconds later (ADR 0005). The client gives up after 120 seconds but
+doesn't end the service. A request sent while the service is ending or
+restarting fails or times out; the client doesn't retry it.
 
 ## Extension log
 

@@ -78,14 +78,19 @@ struct MediaRequestDeadlines {
     }
 
     func check(at now: ContinuousClock.Instant, onOverrun: () -> Void) {
-        if entries.values.contains(where: { $0 <= now }) { onOverrun() }
+        if isOverdue(at: now) { onOverrun() }
+    }
+
+    func isOverdue(at now: ContinuousClock.Instant) -> Bool {
+        entries.values.contains(where: { $0 <= now })
     }
 }
 
 /// The media service's accepted requests. At most `limit` run at once;
 /// more are refused. A connection that goes away cancels its requests.
 /// A request still pending after `deadline`, cancelled or not, calls
-/// `onOverrun`, which in the service ends the process: launchd starts a
+/// `onOverrun` once (with the lock held, so it must not call back into
+/// this object), which in the service ends the process: launchd starts a
 /// fresh one on the next request, and a decode stuck past cancellation
 /// stops holding its file and a CPU.
 public final class MediaServiceWork: @unchecked Sendable {
@@ -98,13 +103,16 @@ public final class MediaServiceWork: @unchecked Sendable {
     /// cancellation still counts and still trips the deadline.
     private var deadlines = MediaRequestDeadlines()
     private var running: [UUID: Task<Void, Never>] = [:]
+    /// Set once the deadline has tripped; no new work starts after that.
+    private var exiting = false
 
     public init(limit: Int = 4, deadline: Duration = .seconds(110), onOverrun: @escaping @Sendable () -> Void) {
         self.limit = limit
         self.deadline = deadline
         self.onOverrun = onOverrun
         timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "app.lumawall.media-watchdog"))
-        timer.schedule(wallDeadline: .now() + .seconds(1), repeating: .seconds(1))
+        // Uptime-based, so changing the system clock can't delay a check.
+        timer.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1))
         timer.setEventHandler { [weak self] in self?.checkDeadlines() }
         timer.activate()
     }
@@ -118,7 +126,7 @@ public final class MediaServiceWork: @unchecked Sendable {
         let receivedAt = ContinuousClock.now
         let id = UUID()
         return lock.withLock {
-            guard running.count < limit else { return nil }
+            guard !exiting, running.count < limit else { return nil }
             deadlines.receive(id, deadline: receivedAt + deadline)
             running[id] = Task {
                 await work()
@@ -140,8 +148,14 @@ public final class MediaServiceWork: @unchecked Sendable {
         }
     }
 
+    /// Decides and calls `onOverrun` under the lock, so a request that
+    /// finishes in the meantime can't be counted as overdue, and nothing
+    /// new is accepted once the service has decided to end.
     private func checkDeadlines() {
-        let (snapshot, now) = lock.withLock { (deadlines, ContinuousClock.now) }
-        snapshot.check(at: now, onOverrun: onOverrun)
+        lock.withLock {
+            guard !exiting, deadlines.isOverdue(at: ContinuousClock.now) else { return }
+            exiting = true
+            onOverrun()
+        }
     }
 }

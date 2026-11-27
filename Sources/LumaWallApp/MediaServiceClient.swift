@@ -53,11 +53,12 @@ final class MediaServiceClient: MediaProbing {
         defer { connection.invalidate() }
         let (seconds, attoseconds) = timeout.components
         let delay = Double(seconds) + Double(attoseconds) / 1e18
-        let deadline = DispatchWallTime.now() + delay
+        // Uptime-based, so changing the system clock can't delay the timeout.
+        let deadline = DispatchTime.now() + delay
         return try await withCheckedThrowingContinuation { continuation in
             let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
             let pending = Pending(continuation, timer: timer)
-            timer.schedule(wallDeadline: deadline)
+            timer.schedule(deadline: deadline)
             timer.setEventHandler { [weak connection] in
                 guard let continuation = pending.take() else { return }
                 connection?.invalidate()
