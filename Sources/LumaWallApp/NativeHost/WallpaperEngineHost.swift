@@ -274,7 +274,13 @@ final class WallpaperEngine {
     /// Split ownership with the overlay (which takes non-default displays and
     /// leaves default-crop ones alone): either side touching the other's
     /// displays clobbers assignments (overlay posters) or leaks windows.
-    func restoreNative(using library: [WallpaperAsset]) async {
+    ///
+    /// When WallpaperAgent is still rewriting its store (after a display
+    /// wakes or joins), the restore runs again after 1, 2 and 4
+    /// seconds, from fresh state, before those displays go
+    /// to the overlay. Waiting inside one restore instead let a clear, an
+    /// apply or a handoff land mid-wait and be undone by its stale write.
+    func restoreNative(using library: [WallpaperAsset], busyAttempt: Int = 0) async {
         guard mode == .native, let native else { return }
         libraryByID = Dictionary(uniqueKeysWithValues: library.map { ($0.id, $0) })
         let generation = hostGeneration
@@ -286,10 +292,32 @@ final class WallpaperEngine {
             guard generation == hostGeneration, !failed.isEmpty else { return }
             fallBack(failed, after: nil)
             await overlay.restore(using: library, nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
+        } catch let busy as NativeWallpaperEngine.StoreBusy {
+            guard generation == hostGeneration else { return }
+            let delay = Self.busyStoreRetryDelay(afterAttempt: busyAttempt)
+            let failed = delay == nil ? busy.failed.union(busy.displays) : busy.failed
+            if !failed.isEmpty {
+                fallBack(failed, after: nil)
+                await overlay.restore(using: library, nativeHostActive: true, claiming: nativeFallbackDisplayIDs)
+            }
+            guard let delay else { return }
+            nativeHostLog.notice("restore: the wallpaper store is busy; trying again in \(delay, privacy: .public)")
+            Task { [weak self] in
+                try? await Task.sleep(for: delay)
+                guard let self, generation == self.hostGeneration else { return }
+                await self.restoreNative(using: Array(self.libraryByID.values), busyAttempt: busyAttempt + 1)
+            }
         } catch {
             guard generation == hostGeneration else { return }
             await fallBackToOverlay()
         }
+    }
+
+    /// How long to wait before restoring again after a busy store, or nil
+    /// once the retries are used up.
+    nonisolated static func busyStoreRetryDelay(afterAttempt attempt: Int) -> Duration? {
+        let delays: [Duration] = [.seconds(1), .seconds(2), .seconds(4)]
+        return delays.indices.contains(attempt) ? delays[attempt] : nil
     }
 
     /// A missing display or a removed wallpaper isn't native mode's fault,

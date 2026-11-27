@@ -40,9 +40,6 @@ final class NativeWallpaperEngine {
     /// Displays handed to the overlay by `release`. Work that started before
     /// must not write them back to the store.
     private var released: Set<DisplayID> = []
-    /// Counts store writes, so a restore that waited out a busy store can
-    /// tell a newer restore has written since and step aside.
-    private var storeWrites = 0
 
     private func stableUUID(for cgDisplayID: CGDirectDisplayID) -> String? {
         NativeWallpaperAssignmentService.stableUUID(for: cgDisplayID)
@@ -80,7 +77,6 @@ final class NativeWallpaperEngine {
             guard !released.contains(displayID) else { throw HealthError.stoppedServing }
             try NativeWallpaperAssignmentService.apply(
                 assignments: [connected.cgDisplayID: entry], stills: Self.stills(of: asset, on: [connected.cgDisplayID]))
-            storeWrites += 1
         } catch {
             let cocoa = error as NSError
             nativeHostLog.error(
@@ -119,7 +115,6 @@ final class NativeWallpaperEngine {
         let ids = Set(all.map(\.cgDisplayID))
         let unassigned = try NativeWallpaperAssignmentService.apply(
             assignments: Dictionary(uniqueKeysWithValues: ids.map { ($0, entry) }), stills: Self.stills(of: asset, on: ids))
-        storeWrites += 1
         let connected = all.filter { !unassigned.contains($0.cgDisplayID) }
         let previous = Set(active.values.map(\.0))
         defer { reportSurfaces(ofAll: previous) }
@@ -192,7 +187,9 @@ final class NativeWallpaperEngine {
     /// the `skipping` displays, where native mode already failed.
     ///
     /// Returns the displays whose copy or assignment failed, for the caller to
-    /// hand to the overlay. Permission errors are thrown instead.
+    /// hand to the overlay. Permission errors are thrown instead, and so is
+    /// `StoreBusy` when WallpaperAgent kept changing the store, for the
+    /// caller to restore again.
     @discardableResult
     func restore(
         using library: [WallpaperAsset], onlyDefaultCrop: Bool = false, skipping: Set<DisplayID> = []
@@ -280,8 +277,8 @@ final class NativeWallpaperEngine {
             }
         }
         // A wallpaper removed while the loop above waited on another deploy
-        // must not be written back. Waiting out a busy store suspends, so
-        // the write checks again before each attempt.
+        // must not be written back. Nothing from here to the write suspends,
+        // so a removal can't land in between.
         let batch = Self.withoutRemoved(map, removed: NativeWallpaperDeployment.removedEntries)
         for display in connected where batch.dropped.contains(display.cgDisplayID) {
             // Unless something applied meanwhile put another wallpaper there.
@@ -321,29 +318,8 @@ final class NativeWallpaperEngine {
         }
         guard !isDetached else { return failed }
         do {
-            let writesBefore = storeWrites
-            let unassigned = try await Self.retryingContention(
-                shouldStop: { self.isDetached || self.storeWrites != writesBefore }
-            ) {
-                // A wait can let a removal or a release land: removed
-                // wallpapers must not be written back, and released
-                // displays belong to the overlay now.
-                let current = Self.withoutRemoved(map, removed: NativeWallpaperDeployment.removedEntries)
-                for display in connected where current.dropped.contains(display.cgDisplayID) {
-                    if active[display.displayID]?.0.rawValue.uuidString == map[display.cgDisplayID]?.id {
-                        active.removeValue(forKey: display.displayID)
-                    }
-                }
-                map = current.map
-                for display in connected where released.contains(display.displayID) {
-                    map.removeValue(forKey: display.cgDisplayID)
-                    active.removeValue(forKey: display.displayID)
-                }
-                guard !map.isEmpty else { return Set<UInt32>() }
-                return try NativeWallpaperAssignmentService.apply(
-                    assignments: map, stills: stills.filter { map[$0.key] != nil })
-            }
-            storeWrites += 1
+            let unassigned = try NativeWallpaperAssignmentService.apply(
+                assignments: map, stills: stills.filter { map[$0.key] != nil })
             lastWrittenTag = tag
             lastWrittenMap = fingerprint.filter { uuid, _ in
                 !unassigned.contains { stableUUID(for: $0) == uuid }
@@ -352,8 +328,14 @@ final class NativeWallpaperEngine {
             for displayID in missing { active.removeValue(forKey: displayID) }
             failed.formUnion(missing)
             nativeHostLog.info("restore: assigned \(map.count - unassigned.count) display(s)")
-        } catch is CancellationError {
-            return failed
+        } catch NativeWallpaperAssignmentService.AssignmentError.verificationFailed {
+            // WallpaperAgent kept rewriting the store, as it does for a
+            // second or so after a display wakes or joins. Not native mode
+            // failing: the caller restores again shortly, from fresh state.
+            let assigned = Set(map.keys)
+            let busy = Set(connected.filter { assigned.contains($0.cgDisplayID) }.map(\.displayID))
+            for displayID in busy { active.removeValue(forKey: displayID) }
+            throw StoreBusy(displays: busy, failed: failed)
         } catch {
             if WallpaperHostCapabilities.isPermissionError(error) { throw error }
             nativeHostLog.error(
@@ -366,29 +348,11 @@ final class NativeWallpaperEngine {
         return failed
     }
 
-    /// Runs `attempt`, waiting each of `delays` and trying again while
-    /// macOS keeps changing the store under the write. WallpaperAgent
-    /// rewrites it for a second or so after a display wakes or joins, which
-    /// beats the store's own quick retries; handing every display to the
-    /// overlay for that moved them all to Safe mode after an unlock. Other
-    /// errors aren't retried. Throws `CancellationError` when `shouldStop`
-    /// turns true during a wait.
-    static func retryingContention<T>(
-        delays: [Duration] = [.seconds(1), .seconds(2), .seconds(4)],
-        sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        shouldStop: () -> Bool,
-        _ attempt: () throws -> T
-    ) async throws -> T {
-        for delay in delays {
-            do {
-                return try attempt()
-            } catch NativeWallpaperAssignmentService.AssignmentError.verificationFailed {
-                nativeHostLog.notice("restore: the wallpaper store is busy; trying again in \(delay, privacy: .public)")
-                try await sleep(delay)
-                if shouldStop() { throw CancellationError() }
-            }
-        }
-        return try attempt()
+    /// The store kept changing under a restore's write. `displays` were
+    /// about to be written; `failed` failed before the write, for real.
+    struct StoreBusy: Error {
+        var displays: Set<DisplayID>
+        var failed: Set<DisplayID>
     }
 
     /// What, besides the wallpapers, decides what a write puts in the store.

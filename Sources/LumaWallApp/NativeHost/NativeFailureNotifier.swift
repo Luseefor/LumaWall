@@ -30,13 +30,15 @@ final class NativeFailureNotifier: NSObject {
         nativeModeOn && status == .notDetermined
     }
 
-    /// Asks for permission if native mode is on and nobody has answered.
-    func askForPermissionIfNeeded(nativeModeOn: Bool) {
-        guard nativeModeOn else { return }
+    /// Asks for permission if `nativeModeOn` still holds and nobody has
+    /// answered. It's checked again after reading the settings, so turning
+    /// native mode off meanwhile cancels the prompt.
+    func askForPermissionIfNeeded(nativeModeOn: @escaping @MainActor () -> Bool) {
+        guard nativeModeOn() else { return }
         Task {
             let center = UNUserNotificationCenter.current()
             let status = await center.notificationSettings().authorizationStatus
-            guard Self.asksForPermission(nativeModeOn: nativeModeOn, status: status) else { return }
+            guard Self.asksForPermission(nativeModeOn: nativeModeOn(), status: status) else { return }
             do {
                 let granted = try await center.requestAuthorization(options: [.alert])
                 nativeHostLog.info("notification permission \(granted ? "granted" : "declined", privacy: .public)")
