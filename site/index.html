@@ -84,47 +84,15 @@
         </div>
 
         <div class="rig-wrap">
-          <div class="rig" role="img" aria-label="A MacBook and a portrait display, both playing video wallpapers">
-            <div class="mac">
-              <div class="mac-lid">
-                <div class="mac-screen" data-cycle="5200">
-                  <picture class="poster"><source type="image/avif" srcset="media/wall-3-800.avif 800w, media/wall-3-1600.avif 1600w" sizes="(min-width: 1200px) 760px, 68vw" /><source type="image/webp" srcset="media/wall-3-800.webp 800w, media/wall-3-1600.webp 1600w" sizes="(min-width: 1200px) 760px, 68vw" /><img src="media/wall-3-800.jpg" srcset="media/wall-3-800.jpg 800w, media/wall-3-1600.jpg 1600w" sizes="(min-width: 1200px) 760px, 68vw" width="1600" height="900" alt="" decoding="async" fetchpriority="high" /></picture>
+          <figure class="shot" role="img" aria-label="The LumaWall window over a Mac desktop that is playing a video wallpaper">
+            <div class="shot-desktop" data-cycle="5200">
+                  <picture class="poster"><source type="image/avif" srcset="media/wall-3-800.avif 800w, media/wall-3-1600.avif 1600w" sizes="(min-width: 1200px) 1080px, 96vw" /><source type="image/webp" srcset="media/wall-3-800.webp 800w, media/wall-3-1600.webp 1600w" sizes="(min-width: 1200px) 1080px, 96vw" /><img src="media/wall-3-800.jpg" srcset="media/wall-3-800.jpg 800w, media/wall-3-1600.jpg 1600w" sizes="(min-width: 1200px) 1080px, 96vw" width="1600" height="900" alt="" decoding="async" fetchpriority="high" /></picture>
                   <video class="layer on" data-layer data-src="media/wall-3.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
                   <video class="layer" data-layer data-src="media/wall-2.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
                   <video class="layer" data-layer data-src="media/wall-1.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
-                  <div class="osbar" aria-hidden="true">
-                    <img src="icon.png" alt="" width="64" height="64" />
-                    <b>LumaWall</b><span>File</span><span>Edit</span><span>View</span><span>Window</span>
-                    <i class="osbar-gap"></i>
-                    <span class="osbar-clock">Fri 9:41</span>
-                  </div>
-                  <div class="notch" aria-hidden="true"></div>
-                  <div class="dock" aria-hidden="true">
-                    <i></i><i></i>
-                    <i></i><img src="icon.png" alt="" width="64" height="64" />
-                    <i></i><i></i>
-                    <i></i>
-                  </div>
-                </div>
-              </div>
-              <div class="mac-base"></div>
             </div>
-
-            <div class="display">
-              <div class="display-frame">
-                <div class="display-screen" data-cycle="5200">
-                  <picture class="poster"><source type="image/avif" srcset="media/wall-portrait-360.avif 360w, media/wall-portrait-720.avif 720w" sizes="(min-width: 1200px) 210px, 20vw" /><source type="image/webp" srcset="media/wall-portrait-360.webp 360w, media/wall-portrait-720.webp 720w" sizes="(min-width: 1200px) 210px, 20vw" /><img src="media/wall-portrait-360.jpg" srcset="media/wall-portrait-360.jpg 360w, media/wall-portrait-720.jpg 720w" sizes="(min-width: 1200px) 210px, 20vw" width="720" height="1280" alt="" decoding="async" /></picture>
-                  <video class="layer on" data-layer data-src="media/wall-portrait.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
-                  <video class="layer" data-layer data-src="media/wall-2.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
-                  <div class="osbar" aria-hidden="true">
-                    <i class="osbar-gap"></i><span class="osbar-clock">Fri 9:41</span>
-                  </div>
-                </div>
-              </div>
-              <div class="display-neck"></div>
-              <div class="display-foot"></div>
-            </div>
-          </div>
+            <picture class="shot-window"><source type="image/avif" srcset="media/app-home-800.avif 800w, media/app-home-1324.avif 1324w" sizes="(min-width: 1200px) 720px, 66vw" /><source type="image/webp" srcset="media/app-home-800.webp 800w, media/app-home-1324.webp 1324w" sizes="(min-width: 1200px) 720px, 66vw" /><img src="media/app-home-800.jpg" srcset="media/app-home-800.jpg 800w, media/app-home-1324.jpg 1324w" sizes="(min-width: 1200px) 720px, 66vw" width="1324" height="869" alt="" decoding="async" /></picture>
+          </figure>
           <button type="button" class="pill" data-hero-pause aria-pressed="false">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor" /></svg>
             <span data-label>Pause wallpapers</span>
@@ -192,41 +160,17 @@
             <h2 id="app-title">One window for every wallpaper.</h2>
             <p>Pick a loop, choose a display and a mode, and LumaWall does the rest.</p>
           </header>
-          <figure class="stage-app" data-reveal>
-            <div class="desk" aria-hidden="true"></div>
-            <div class="appwin" role="img" aria-label="Illustration of the LumaWall window with a sidebar, a preview of the playing wallpaper and a library of loops">
-              <div class="appwin-bar"><span class="lights"><i></i><i></i><i></i></span></div>
-              <div class="appwin-body">
-                <ul class="side">
-                  <li class="on"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9.5 10 3.5l7 6V17h-4.5v-4.5h-5V17H3z" /></svg><span>Home</span></li>
-                  <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h6v6H3zM11 4h6v6h-6zM3 12h6v4H3zM11 12h6v4h-6z" /></svg><span>Library</span></li>
-                  <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 4h15v9.5h-15zM7 16h6v1.5H7z" /></svg><span>Displays</span></li>
-                  <li><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM8.8 2h2.4l.4 2.1 1.6.9 2-.8 1.2 2.1-1.6 1.4v1.8l1.6 1.4-1.2 2.1-2-.8-1.6.9-.4 2.1H8.8l-.4-2.1-1.6-.9-2 .8-1.2-2.1L5.2 10V8.2L3.6 6.8l1.2-2.1 2 .8 1.6-.9z" fill-rule="evenodd" /></svg><span>Settings</span></li>
-                </ul>
-                <div class="main">
-                  <div class="preview">
-                    <picture class="poster"><source type="image/avif" srcset="media/wall-1-800.avif 800w, media/wall-1-1600.avif 1600w" sizes="(min-width: 900px) 520px, 90vw" /><source type="image/webp" srcset="media/wall-1-800.webp 800w, media/wall-1-1600.webp 1600w" sizes="(min-width: 900px) 520px, 90vw" /><img src="media/wall-1-800.jpg" srcset="media/wall-1-800.jpg 800w, media/wall-1-1600.jpg 1600w" sizes="(min-width: 900px) 520px, 90vw" width="1600" height="900" alt="" decoding="async" loading="lazy" /></picture>
-                    <video data-autoplay data-src="media/wall-1.mp4" muted loop playsinline preload="none" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1" ></video>
-                    <div class="preview-meta">
-                      <span class="eyebrow">Now playing</span>
-                      <strong>Sunset surf</strong>
-                    </div>
-                    <span class="chip">Safe mode</span>
-                  </div>
-                  <h3 class="main-title">Library</h3>
-                  <ul class="thumbs">
-                  <li><img src="media/wall-2-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Milky Way</span></li>
-                  <li><img src="media/wall-3-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Woodland waterfall</span></li>
-                  <li><img src="media/wall-4-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>City lights from above</span></li>
-                  <li><img src="media/wall-5-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Blue ink</span></li>
-                  <li><img src="media/wall-6-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Sahara dunes</span></li>
-                  <li><img src="media/wall-1-800.jpg" alt="" loading="lazy" width="1600" height="900" /><span>Sunset surf</span></li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-            <figcaption>An illustration of the app, not a screenshot.</figcaption>
-          </figure>
+          <div class="shots" data-reveal>
+            <figure>
+              <picture><source type="image/avif" srcset="media/app-displays-800.avif 800w, media/app-displays-1324.avif 1324w" sizes="(min-width: 1100px) 520px, (min-width: 761px) 46vw, 92vw" /><source type="image/webp" srcset="media/app-displays-800.webp 800w, media/app-displays-1324.webp 1324w" sizes="(min-width: 1100px) 520px, (min-width: 761px) 46vw, 92vw" /><img src="media/app-displays-800.jpg" srcset="media/app-displays-800.jpg 800w, media/app-displays-1324.jpg 1324w" sizes="(min-width: 1100px) 520px, (min-width: 761px) 46vw, 92vw" width="1324" height="869" alt="The Displays page: three connected displays, each playing the Sunset surf loop, with Choose, Pause and Clear buttons" decoding="async" loading="lazy" /></picture>
+              <figcaption>Displays: one loop everywhere, or a different one per screen.</figcaption>
+            </figure>
+            <figure>
+              <picture><source type="image/avif" srcset="media/app-settings-800.avif 800w, media/app-settings-1324.avif 1324w" sizes="(min-width: 1100px) 520px, (min-width: 761px) 46vw, 92vw" /><source type="image/webp" srcset="media/app-settings-800.webp 800w, media/app-settings-1324.webp 1324w" sizes="(min-width: 1100px) 520px, (min-width: 761px) 46vw, 92vw" /><img src="media/app-settings-800.jpg" srcset="media/app-settings-800.jpg 800w, media/app-settings-1324.jpg 1324w" sizes="(min-width: 1100px) 520px, (min-width: 761px) 46vw, 92vw" width="1324" height="869" alt="The Settings page: Native wallpaper mode, energy modes and pause rules" decoding="async" loading="lazy" /></picture>
+              <figcaption>Settings: energy modes and when to pause.</figcaption>
+            </figure>
+          </div>
+          <p class="note center">Screenshots from LumaWall on macOS 27, with the sample loops imported.</p>
         </div>
       </section>
 

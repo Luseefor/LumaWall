@@ -76,14 +76,19 @@ magick -size 1200x630 xc:'#f5f5f7' \
 
 ## Media
 
-`site/media/` holds the wallpaper clips `wall-1.mp4` through `wall-6.mp4` and
-`wall-portrait.mp4`. Landscape posters have 800- and 1600-pixel-wide variants,
-and the portrait poster has 360- and 720-pixel-wide variants. Each size comes in
-AVIF, WebP, and JPEG. Clips are muted, loop, and load only when in view.
-Reduced motion shows the posters.
+`site/media/` holds the wallpaper clips `wall-1.mp4` through `wall-6.mp4`.
+Their posters have 800- and 1600-pixel-wide variants in AVIF, WebP, and JPEG;
+a 360-pixel portrait poster (`wall-portrait-360.jpg`) fills the displays tile.
+Clips are muted, loop, and load only when in view. Reduced motion shows the
+posters.
+
+`app-home`, `app-displays` and `app-settings` are real screenshots of the
+LumaWall window with the sample loops imported, at 800 and 1324 pixels wide in
+AVIF and WebP (transparent rounded corners) and JPEG. The hero puts the Home
+screenshot over the cycling clips; the app section shows the other two.
 
 Playback: each clip is loaded on demand with `<source>` elements. Phones and tiles drawn small get
-`wall-N-960.mp4` (and `wall-portrait-960.mp4`) first and fall back to the original file, so a missing copy
+`wall-N-960.mp4` first and fall back to the original file, so a missing copy
 still plays. Chrome ignores `media` on video sources, so `js/videos.js` picks the order itself from the
 viewport width, element width and devicePixelRatio. With Data Saver on, nothing autoplays and a tap on a gallery
 card loads its clip. If the browser refuses autoplay (iOS Low Power Mode) the poster stays and the pause button

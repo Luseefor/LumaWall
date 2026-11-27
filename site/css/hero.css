@@ -33,28 +33,42 @@
   justify-content: center;
 }
 
-/* The desk: a MacBook and a portrait display, drawn with CSS and sized in container units. */
+/* The hero: a real LumaWall window over a desktop playing the sample loops. */
 
 .rig-wrap {
   width: min(1120px, 100% - 2 * var(--gutter) + 40px);
   margin: clamp(32px, 4vw, 52px) auto 0;
 }
 
-.rig {
+.shot {
   position: relative;
-  aspect-ratio: 2 / 1;
-  container-type: inline-size;
-  isolation: isolate;
+  margin: 0;
+  padding-bottom: 7%;
 }
 
-.rig::before {
-  content: "";
+.shot-desktop {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: clamp(14px, 2vw, 24px);
+  background: #16171b;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.22);
+}
+
+.shot-window {
   position: absolute;
-  inset: auto 0 0 1cqw;
-  z-index: -1;
-  height: 3.4cqw;
-  background: radial-gradient(closest-side, rgb(0 0 0 / 0.3), transparent);
-  filter: blur(6px);
+  bottom: 0;
+  left: 50%;
+  display: block;
+  width: 66%;
+  transform: translateX(-50%);
+  filter: drop-shadow(0 2px 6px rgb(0 0 0 / 0.25)) drop-shadow(0 30px 50px rgb(0 0 0 / 0.4));
+}
+
+.shot-window img {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 /* The poster is a real image so it can load first; the clip fades in over it. */
@@ -84,228 +98,6 @@
 
 .layer.on {
   opacity: 1;
-}
-
-.mac {
-  position: absolute;
-  bottom: 2cqw;
-  left: 3cqw;
-  width: 68cqw;
-}
-
-.mac-lid {
-  padding: 0.9cqw 0.9cqw 0.5cqw;
-  border-radius: 2cqw 2cqw 0.3cqw 0.3cqw;
-  background: #0a0a0c;
-  box-shadow:
-    inset 0 0 0 0.14cqw #55565c,
-    0 1cqw 3cqw rgb(0 0 0 / 0.18);
-}
-
-.mac-screen,
-.display-screen {
-  position: relative;
-  overflow: hidden;
-  background: #16171b;
-  container-type: inline-size;
-}
-
-.mac-screen {
-  aspect-ratio: 16 / 10;
-  border-radius: 1.2cqw 1.2cqw 0 0;
-}
-
-.mac-screen::after,
-.display-screen::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(115deg, rgb(255 255 255 / 0.14), transparent 34%);
-  pointer-events: none;
-}
-
-.mac-base {
-  position: relative;
-  width: calc(100% + 6cqw);
-  height: 1.5cqw;
-  margin-left: -3cqw;
-  border-radius: 0 0 2.4cqw 2.4cqw / 0 0 1.4cqw 1.4cqw;
-  background: linear-gradient(#e6e7ea, #b9bac0);
-  box-shadow: 0 0.4cqw 1.4cqw rgb(0 0 0 / 0.22);
-}
-
-.mac-base::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: 11cqw;
-  height: 0.55cqw;
-  border-radius: 0 0 1cqw 1cqw;
-  background: #a2a3a9;
-  transform: translateX(-50%);
-}
-
-/* The menu bar and Dock are sized from their own screen. */
-
-.osbar {
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 2.2cqw;
-  height: var(--bar, 3cqw);
-  padding: 0 1.6cqw;
-  background: rgb(255 255 255 / 0.2);
-  color: #fff;
-  font-size: calc(var(--bar, 3cqw) * 0.46);
-  line-height: 1;
-  white-space: nowrap;
-  -webkit-backdrop-filter: blur(12px) saturate(1.5);
-  backdrop-filter: blur(12px) saturate(1.5);
-  text-shadow: 0 0 3px rgb(0 0 0 / 0.35);
-}
-
-.osbar img {
-  width: calc(var(--bar, 3cqw) * 0.62);
-  height: calc(var(--bar, 3cqw) * 0.62);
-  margin-right: -1cqw;
-  border-radius: 22%;
-}
-
-.osbar b {
-  font-weight: 700;
-}
-
-.osbar-gap {
-  flex: 1;
-}
-
-.notch {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  z-index: 2;
-  width: 10cqw;
-  height: 3cqw;
-  border-radius: 0 0 1.3cqw 1.3cqw;
-  background: #000;
-  transform: translateX(-50%);
-}
-
-.dock {
-  position: absolute;
-  bottom: 1.3cqw;
-  left: 50%;
-  z-index: 1;
-  display: flex;
-  gap: 0.7cqw;
-  padding: 0.7cqw;
-  border: 0.1cqw solid rgb(255 255 255 / 0.32);
-  border-radius: 2cqw;
-  background: rgb(255 255 255 / 0.24);
-  transform: translateX(-50%);
-  -webkit-backdrop-filter: blur(16px) saturate(1.6);
-  backdrop-filter: blur(16px) saturate(1.6);
-}
-
-.dock i,
-.dock img {
-  display: block;
-  width: 4.6cqw;
-  height: 4.6cqw;
-  border-radius: 1.2cqw;
-  background: linear-gradient(var(--a), var(--b));
-  box-shadow: inset 0 0 0 0.08cqw rgb(255 255 255 / 0.28);
-}
-
-.dock :nth-child(1) {
-  --a: #6fd3ff;
-  --b: #2f7dff;
-}
-
-.dock :nth-child(2) {
-  --a: #8af0a8;
-  --b: #1ea34f;
-}
-
-.dock :nth-child(3) {
-  --a: #ffd36f;
-  --b: #ff8a1f;
-}
-
-.dock :nth-child(5) {
-  --a: #ff9ab8;
-  --b: #e23b6c;
-}
-
-.dock :nth-child(6) {
-  --a: #c9b6ff;
-  --b: #7a4dff;
-}
-
-.dock :nth-child(7) {
-  --a: #e4e6ea;
-  --b: #9aa0aa;
-}
-
-.dock img {
-  background: none;
-  box-shadow: none;
-}
-
-/* The portrait display. */
-
-.display {
-  position: absolute;
-  right: 0;
-  bottom: 2cqw;
-  width: 22cqw;
-}
-
-.display-frame {
-  padding: 0.7cqw;
-  border-radius: 1.5cqw;
-  background: #0a0a0c;
-  box-shadow:
-    inset 0 0 0 0.14cqw #55565c,
-    0 1cqw 3cqw rgb(0 0 0 / 0.18);
-}
-
-.display-screen {
-  --bar: 7cqw;
-  aspect-ratio: 9 / 16;
-  border-radius: 0.9cqw;
-}
-
-.display-screen .osbar {
-  padding: 0 3cqw;
-}
-
-.display-neck {
-  width: 4cqw;
-  height: 5cqw;
-  margin: -0.2cqw auto 0;
-  background: linear-gradient(90deg, #b3b4ba, #e9eaed 45%, #a9aab0);
-  clip-path: polygon(8% 0, 92% 0, 100% 100%, 0 100%);
-}
-
-.display-foot {
-  width: 11cqw;
-  height: 0.9cqw;
-  margin: 0 auto;
-  border-radius: 1cqw 1cqw 0.4cqw 0.4cqw;
-  background: linear-gradient(#e6e7ea, #adaeb4);
-  box-shadow: 0 0.4cqw 1cqw rgb(0 0 0 / 0.2);
-}
-
-@container (max-width: 380px) {
-  .osbar span,
-  .osbar b,
-  .osbar img {
-    display: none;
-  }
 }
 
 .pill {
